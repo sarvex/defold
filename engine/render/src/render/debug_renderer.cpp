@@ -57,16 +57,16 @@ namespace dmRender
 
         for (uint32_t i = 0; i < MAX_DEBUG_RENDER_TYPE_COUNT; ++i)
         {
-            RenderObject ro;
+            DebugRenderTypeData& type_data = debug_renderer.m_TypeData[i];
+            type_data.m_ClientBuffer = new char[buffer_size];
+            RenderObject& ro = *type_data.m_RenderObject;
+            ro.Init();
             ro.m_Material = materials[i];
             ro.m_PrimitiveType = primitive_types[i];
             ro.m_VertexBuffer = debug_renderer.m_VertexBuffer;
             ro.m_VertexDeclaration = debug_renderer.m_VertexDeclaration;
             ro.m_VertexCount = 0;
             ro.m_RenderKey.m_Depth = i;
-            DebugRenderTypeData& type_data = debug_renderer.m_TypeData[i];
-            type_data.m_RenderObject = ro;
-            type_data.m_ClientBuffer = new char[buffer_size];
         }
 
         debug_renderer.m_3dPredicate.m_Tags[0] = dmHashString32(DEBUG_3D_NAME);
@@ -78,7 +78,7 @@ namespace dmRender
     void FinalizeDebugRenderer(HRenderContext context)
     {
         DebugRenderer& debug_renderer = context->m_DebugRenderer;
-        HMaterial material = debug_renderer.m_TypeData[DEBUG_RENDER_TYPE_FACE_3D].m_RenderObject.m_Material;
+        HMaterial material = debug_renderer.m_TypeData[DEBUG_RENDER_TYPE_FACE_3D].m_RenderObject->m_Material;
 
         dmGraphics::HVertexProgram vp = GetMaterialVertexProgram(material);
         if (vp != dmGraphics::INVALID_VERTEX_PROGRAM_HANDLE)
@@ -88,7 +88,7 @@ namespace dmRender
             dmGraphics::DeleteFragmentProgram(fp);
 
         DeleteMaterial(context, material);
-        material = debug_renderer.m_TypeData[DEBUG_RENDER_TYPE_FACE_2D].m_RenderObject.m_Material;
+        material = debug_renderer.m_TypeData[DEBUG_RENDER_TYPE_FACE_2D].m_RenderObject->m_Material;
         DeleteMaterial(context, material);
 
         for (uint32_t i = 0; i < MAX_DEBUG_RENDER_TYPE_COUNT; ++i)
@@ -103,7 +103,7 @@ namespace dmRender
     {
         for (uint32_t i = 0; i < MAX_DEBUG_RENDER_TYPE_COUNT; ++i)
         {
-            context->m_DebugRenderer.m_TypeData[i].m_RenderObject.m_VertexCount = 0;
+            context->m_DebugRenderer.m_TypeData[i].m_RenderObject->m_VertexCount = 0;
         }
     }
 
@@ -127,7 +127,7 @@ namespace dmRender
     void Square2d(HRenderContext context, float x0, float y0, float x1, float y1, Vector4 color)
     {
         DebugRenderTypeData& type_data = context->m_DebugRenderer.m_TypeData[DEBUG_RENDER_TYPE_FACE_2D];
-        RenderObject& ro = type_data.m_RenderObject;
+        RenderObject& ro = *type_data.m_RenderObject;
         const uint32_t vertex_count = 6;
         if (ro.m_VertexCount + vertex_count < context->m_DebugRenderer.m_MaxVertexCount)
         {
@@ -154,7 +154,7 @@ namespace dmRender
     void Triangle3d(HRenderContext context, Point3 vertices[3], Vector4 color)
     {
         DebugRenderTypeData& type_data = context->m_DebugRenderer.m_TypeData[DEBUG_RENDER_TYPE_FACE_3D];
-        RenderObject& ro = type_data.m_RenderObject;
+        RenderObject& ro = *type_data.m_RenderObject;
         const uint32_t vertex_count = 3;
         if (ro.m_VertexCount + vertex_count < context->m_DebugRenderer.m_MaxVertexCount)
         {
@@ -178,7 +178,7 @@ namespace dmRender
     void Line2D(HRenderContext context, float x0, float y0, float x1, float y1, Vector4 color0, Vector4 color1)
     {
         DebugRenderTypeData& type_data = context->m_DebugRenderer.m_TypeData[DEBUG_RENDER_TYPE_LINE_2D];
-        RenderObject& ro = type_data.m_RenderObject;
+        RenderObject& ro = *type_data.m_RenderObject;
         const uint32_t vertex_count = 2;
         if (ro.m_VertexCount + vertex_count < context->m_DebugRenderer.m_MaxVertexCount)
         {
@@ -201,7 +201,7 @@ namespace dmRender
     void Line3D(HRenderContext context, Point3 start, Point3 end, Vector4 start_color, Vector4 end_color)
     {
         DebugRenderTypeData& type_data = context->m_DebugRenderer.m_TypeData[DEBUG_RENDER_TYPE_LINE_3D];
-        RenderObject& ro = type_data.m_RenderObject;
+        RenderObject& ro = *type_data.m_RenderObject;
         const uint32_t vertex_count = 2;
         if (ro.m_VertexCount + vertex_count < context->m_DebugRenderer.m_MaxVertexCount)
         {
@@ -231,7 +231,7 @@ namespace dmRender
         for (uint32_t i = 0; i < MAX_DEBUG_RENDER_TYPE_COUNT; ++i)
         {
             DebugRenderTypeData& type_data = debug_renderer.m_TypeData[i];
-            RenderObject& ro = type_data.m_RenderObject;
+            RenderObject& ro = *type_data.m_RenderObject;
             uint32_t vertex_count = ro.m_VertexCount;
             if (vertex_count > 0)
             {
@@ -243,7 +243,7 @@ namespace dmRender
         for (uint32_t i = 0; i < MAX_DEBUG_RENDER_TYPE_COUNT; ++i)
         {
             DebugRenderTypeData& type_data = debug_renderer.m_TypeData[i];
-            RenderObject& ro = type_data.m_RenderObject;
+            RenderObject& ro = *type_data.m_RenderObject;
             uint32_t vertex_count = ro.m_VertexCount;
             if (vertex_count > 0)
             {

@@ -177,9 +177,7 @@ namespace dmGameSystem
             region->m_Dirty = 1;
 
             dmRender::RenderObject* ro = &region->m_RenderObject;
-            // NOTE: Run constructor explicitly with placement new
-            new(ro) dmRender::RenderObject;
-
+            ro->Init();
             ro->m_SourceBlendFactor = source_blend_factor;
             ro->m_DestinationBlendFactor = destination_blend_factor;
             ro->m_SetBlendFactors = 1;

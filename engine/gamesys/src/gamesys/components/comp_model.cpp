@@ -25,15 +25,18 @@ namespace dmGameSystem
         ModelComponent()
         : m_Model(0x0)
         , m_Instance(0)
-        , m_RenderObject()
+        , m_RenderObject((dmRender::RenderObject *) &m_RenderObjectData)
         , m_ModelWorld(0x0)
-        {}
+        {
+            m_RenderObject->Init();
+        }
 
         Model* m_Model;
         dmGameObject::HInstance m_Instance;
         Point3 m_Position;
         Quat   m_Rotation;
-        dmRender::RenderObject m_RenderObject;
+        uint8_t m_RenderObjectData[sizeof(dmRender::RenderObject)];
+        dmRender::RenderObject* m_RenderObject;
         ModelWorld* m_ModelWorld;
     };
 
@@ -50,6 +53,16 @@ namespace dmGameSystem
         const uint32_t max_component_count = 128;
         model_world->m_Components.SetCapacity(max_component_count);
         memset(model_world->m_Components.m_Objects.Begin(), 0, sizeof(ModelComponent) * max_component_count);
+
+        model_world->m_Components.m_Objects.SetSize(max_component_count);
+        for (uint32_t i = 0; i < max_component_count; ++i)
+        {
+            ModelComponent& model_component = model_world->m_Components.m_Objects[i];
+            model_component.m_RenderObject = (dmRender::RenderObject *) &model_component.m_RenderObjectData;
+            model_component.m_RenderObject->Init();
+        }
+        model_world->m_Components.m_Objects.SetSize(0);
+
         *params.m_World = model_world;
         return dmGameObject::CREATE_RESULT_OK;
     }
@@ -77,8 +90,8 @@ namespace dmGameSystem
         component->m_Rotation = params.m_Rotation;
         component->m_Model = model;
         component->m_ModelWorld = model_world;
-        component->m_RenderObject = dmRender::RenderObject();
-        component->m_RenderObject.m_Material = model->m_Material;
+        component->m_RenderObject->Init();
+        component->m_RenderObject->m_Material = model->m_Material;
         *params.m_UserData = (uintptr_t)index;
 
         return dmGameObject::CREATE_RESULT_OK;
@@ -107,7 +120,7 @@ namespace dmGameSystem
                 continue;
             model = component.m_Model;
             mesh = model->m_Mesh;
-            dmRender::RenderObject& ro = component.m_RenderObject;
+            dmRender::RenderObject& ro = *component.m_RenderObject;
 
             dmTransform::Transform world = dmGameObject::GetWorldTransform(component.m_Instance);
             dmTransform::Transform local(Vector3(component.m_Position), component.m_Rotation, 1.0f);
@@ -131,7 +144,7 @@ namespace dmGameSystem
             ro.m_TextureTransform = Matrix4::identity();
             ro.m_WorldTransform = dmTransform::ToMatrix4(world);
             ro.m_CalculateDepthKey = 1;
-            dmRender::AddToRender(render_context, &component.m_RenderObject);
+            dmRender::AddToRender(render_context, component.m_RenderObject);
         }
         return dmGameObject::UPDATE_RESULT_OK;
     }
@@ -141,7 +154,7 @@ namespace dmGameSystem
         ModelWorld* world = (ModelWorld*) params.m_World;
         ModelComponent* component = &world->m_Components.Get(*params.m_UserData);
 
-        dmRender::RenderObject* ro = &component->m_RenderObject;
+        dmRender::RenderObject* ro = component->m_RenderObject;
 
         if (params.m_Message->m_Id == dmModelDDF::SetConstant::m_DDFDescriptor->m_NameHash)
         {
@@ -175,7 +188,7 @@ namespace dmGameSystem
     static bool CompModelGetConstantCallback(void* user_data, dmhash_t name_hash, dmRender::Constant** out_constant)
     {
         ModelComponent* component = (ModelComponent*)user_data;
-        dmRender::RenderObject* ro = &component->m_RenderObject;
+        dmRender::RenderObject* ro = component->m_RenderObject;
         for (uint32_t i = 0; i < dmRender::RenderObject::MAX_CONSTANT_COUNT; ++i)
         {
             dmRender::Constant& constant = ro->m_Constants[i];
@@ -191,7 +204,7 @@ namespace dmGameSystem
     static void CompModelSetConstantCallback(void* user_data, dmhash_t name_hash, uint32_t* element_index, const dmGameObject::PropertyVar& var)
     {
         ModelComponent* component = (ModelComponent*)user_data;
-        dmRender::RenderObject* ro = &component->m_RenderObject;
+        dmRender::RenderObject* ro = component->m_RenderObject;
         Vector4 val;
         if (element_index == 0x0)
         {

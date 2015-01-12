@@ -73,7 +73,9 @@ namespace dmRender
 
     struct DebugRenderTypeData
     {
-        dmRender::RenderObject  m_RenderObject;
+        DebugRenderTypeData() : m_RenderObject((dmRender::RenderObject *)&m_RenderObjectData)  { }
+        uint8_t m_RenderObjectData[sizeof(dmRender::RenderObject)];
+        dmRender::RenderObject* m_RenderObject;
         void*                   m_ClientBuffer;
     };
 

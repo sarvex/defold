@@ -209,17 +209,17 @@ namespace dmRender
         // NOTE: 8 is "arbitrary" heuristic
         text_context.m_TextEntries.SetCapacity(max_characters / 8);
 
-        for (uint32_t i = 0; i < text_context.m_RenderObjects.Capacity(); ++i)
-        {
-            RenderObject ro;
-            ro.m_SourceBlendFactor = dmGraphics::BLEND_FACTOR_SRC_ALPHA;
-            ro.m_DestinationBlendFactor = dmGraphics::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-            ro.m_SetBlendFactors = 1;
-            ro.m_VertexBuffer = text_context.m_VertexBuffer;
-            ro.m_VertexDeclaration = text_context.m_VertexDecl;
-            ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
-            text_context.m_RenderObjects.Push(ro);
-        }
+        text_context.m_RenderObjects.SetSize(text_context.m_RenderObjects.Capacity());
+        RenderObject &ro = text_context.m_RenderObjects[0];
+        ro.Init();
+        ro.m_SourceBlendFactor = dmGraphics::BLEND_FACTOR_SRC_ALPHA;
+        ro.m_DestinationBlendFactor = dmGraphics::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        ro.m_SetBlendFactors = 1;
+        ro.m_VertexBuffer = text_context.m_VertexBuffer;
+        ro.m_VertexDeclaration = text_context.m_VertexDecl;
+        ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
+        for (uint32_t i = 1; i < text_context.m_RenderObjects.Size(); ++i)
+            text_context.m_RenderObjects[i] = ro;
     }
 
     void FinalizeTextContext(HRenderContext render_context)

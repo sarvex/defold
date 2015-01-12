@@ -134,8 +134,6 @@ namespace dmGameSystem
 
         sprite_world->m_Components.SetCapacity(sprite_context->m_MaxSpriteCount);
         memset(sprite_world->m_Components.m_Objects.Begin(), 0, sizeof(SpriteComponent) * sprite_context->m_MaxSpriteCount);
-        sprite_world->m_RenderObjects.SetCapacity(sprite_context->m_MaxSpriteCount);
-
         sprite_world->m_RenderSortBuffer.SetCapacity(sprite_context->m_MaxSpriteCount);
         sprite_world->m_RenderSortBuffer.SetSize(sprite_context->m_MaxSpriteCount);
         for (uint32_t i = 0; i < sprite_context->m_MaxSpriteCount; ++i)
@@ -152,9 +150,20 @@ namespace dmGameSystem
         };
 
         sprite_world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(render_context), ve, sizeof(ve) / sizeof(dmGraphics::VertexElement));
-
         sprite_world->m_VertexBuffer = dmGraphics::NewVertexBuffer(dmRender::GetGraphicsContext(render_context), 0, 0x0, dmGraphics::BUFFER_USAGE_STREAM_DRAW);
         sprite_world->m_VertexBufferData = malloc(sizeof(SpriteVertex) * 6 * sprite_world->m_Components.Capacity());
+
+        sprite_world->m_RenderObjects.SetCapacity(sprite_context->m_MaxSpriteCount);
+        sprite_world->m_RenderObjects.SetSize(sprite_context->m_MaxSpriteCount);
+        for (uint32_t i = 0; i < sprite_context->m_MaxSpriteCount; ++i)
+        {
+            dmRender::RenderObject &ro = sprite_world->m_RenderObjects[i];
+            ro.Init();
+            ro.m_VertexDeclaration = sprite_world->m_VertexDeclaration;
+            ro.m_VertexBuffer = sprite_world->m_VertexBuffer;
+            ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
+        }
+        sprite_world->m_RenderObjects.SetSize(0);
 
         *params.m_World = sprite_world;
         return dmGameObject::CREATE_RESULT_OK;
@@ -481,10 +490,8 @@ namespace dmGameSystem
         }
 
         // Render object
-        dmRender::RenderObject ro;
-        ro.m_VertexDeclaration = sprite_world->m_VertexDeclaration;
-        ro.m_VertexBuffer = sprite_world->m_VertexBuffer;
-        ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
+        sprite_world->m_RenderObjects.SetSize(sprite_world->m_RenderObjects.Size()+1);
+        dmRender::RenderObject& ro = sprite_world->m_RenderObjects.Back();
         ro.m_VertexStart = start_index * 6;
         ro.m_VertexCount = (end_index - start_index) * 6;
         ro.m_Material = first->m_Resource->m_Material;
@@ -529,9 +536,7 @@ namespace dmGameSystem
         }
         ro.m_SetBlendFactors = 1;
 
-        sprite_world->m_RenderObjects.Push(ro);
-
-        dmRender::AddToRender(render_context, &sprite_world->m_RenderObjects[sprite_world->m_RenderObjects.Size() - 1]);
+        dmRender::AddToRender(render_context, &ro);
 
         CreateVertexData(sprite_world, vertex_buffer, texture_set, start_index, end_index);
         return end_index;

@@ -64,7 +64,6 @@ namespace dmGameSystem
         uint32_t particle_fx_count = ctx->m_MaxParticleFXCount;
         world->m_ParticleContext = dmParticle::CreateContext(particle_fx_count, ctx->m_MaxParticleCount);
         world->m_Components.SetCapacity(particle_fx_count);
-        world->m_RenderObjects.SetCapacity(particle_fx_count);
         world->m_Prototypes.SetCapacity(particle_fx_count);
         world->m_Prototypes.SetSize(particle_fx_count);
         world->m_PrototypeIndices.SetCapacity(particle_fx_count);
@@ -79,6 +78,19 @@ namespace dmGameSystem
             {"texcoord0", 2, 2, dmGraphics::TYPE_UNSIGNED_SHORT, true},
         };
         world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(ctx->m_RenderContext), ve, 3);
+
+        world->m_RenderObjects.SetCapacity(particle_fx_count);
+        world->m_RenderObjects.SetSize(particle_fx_count);
+        for (uint32_t i = 0; i < particle_fx_count; ++i)
+        {
+            dmRender::RenderObject& ro = world->m_RenderObjects[i];
+            ro.Init();
+            ro.m_VertexDeclaration = world->m_VertexDeclaration;
+            ro.m_VertexBuffer = world->m_VertexBuffer;
+            ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
+        }
+        world->m_RenderObjects.SetSize(0);
+
         *params.m_World = world;
         return dmGameObject::CREATE_RESULT_OK;
     }
@@ -366,20 +378,17 @@ namespace dmGameSystem
         ParticleFXWorld* world = (ParticleFXWorld*)context;
         if (!world->m_RenderObjects.Full())
         {
-            dmRender::RenderObject ro;
+            world->m_RenderObjects.SetSize(world->m_RenderObjects.Size()+1);
+            dmRender::RenderObject& ro = world->m_RenderObjects.Back();
             ro.m_Material = (dmRender::HMaterial)material;
             ro.m_Textures[0] = (dmGraphics::HTexture)texture;
             ro.m_VertexStart = vertex_index;
             ro.m_VertexCount = vertex_count;
-            ro.m_VertexBuffer = world->m_VertexBuffer;
-            ro.m_VertexDeclaration = world->m_VertexDeclaration;
-            ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
             ro.m_CalculateDepthKey = 1;
             ro.m_WorldTransform = world_transform;
             ro.m_SetBlendFactors = 1;
             SetBlendFactors(&ro, blend_mode);
             SetRenderConstants(&ro, constants, constant_count);
-            world->m_RenderObjects.Push(ro);
         }
         else if (!world->m_WarnOutOfROs)
         {
