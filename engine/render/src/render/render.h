@@ -202,6 +202,7 @@ namespace dmRender
 
     void EnableRenderObjectConstant(RenderObject* ro, dmhash_t name_hash, const Vectormath::Aos::Vector4& value);
     void DisableRenderObjectConstant(RenderObject* ro, dmhash_t name_hash);
+    void DisableRenderObjectConstants(RenderObject* ro);
 
     /**
      * Render debug square. The upper left corner of the screen is (-1,-1) and the bottom right is (1,1).

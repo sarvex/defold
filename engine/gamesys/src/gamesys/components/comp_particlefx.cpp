@@ -364,6 +364,7 @@ namespace dmGameSystem
 
     static void SetRenderConstants(dmRender::RenderObject* ro, dmParticle::RenderConstant* constants, uint32_t constant_count)
     {
+        dmRender::DisableRenderObjectConstants(ro);
         for (uint32_t i = 0; i < constant_count; ++i)
         {
             dmParticle::RenderConstant* c = &constants[i];

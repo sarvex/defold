@@ -36,7 +36,7 @@ namespace dmRender
     }
 
     RenderObject::RenderObject()
-    {
+   {
         Init();
     }
 
@@ -402,6 +402,15 @@ namespace dmRender
         }
     }
 
+    void DisableRenderObjectConstants(RenderObject* ro)
+    {
+        assert(ro);
+        for (uint32_t i = 0; i < RenderObject::MAX_CONSTANT_COUNT; ++i)
+        {
+            Constant* c = &ro->m_Constants[i];
+            c->m_Location = -1;
+        }
+    }
 
     struct NamedConstantBuffer
     {

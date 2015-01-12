@@ -576,6 +576,7 @@ namespace dmGameSystem
         ro.m_WorldTransform = first->m_World;
         ro.m_CalculateDepthKey = 1;
 
+        dmRender::DisableRenderObjectConstants(&ro);
         const dmArray<dmRender::Constant>& constants = first->m_RenderConstants;
         uint32_t size = constants.Size();
         for (uint32_t i = 0; i < size; ++i)
