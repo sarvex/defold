@@ -25,7 +25,6 @@ import org.apache.commons.codec.binary.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dynamo.cr.common.providers.ProtobufProviders;
 import com.dynamo.cr.protocol.proto.Protocol.LoginInfo;
 import com.dynamo.cr.protocol.proto.Protocol.TokenExchangeInfo;
 import com.dynamo.cr.protocol.proto.Protocol.TokenExchangeInfo.Type;
@@ -40,6 +39,7 @@ import com.dynamo.cr.server.model.Prospect;
 import com.dynamo.cr.server.model.User;
 import com.dynamo.cr.server.openid.OpenIDException;
 import com.dynamo.cr.server.openid.OpenIDIdentity;
+import com.dynamo.cr.server.providers.ProtobufProviders;
 import com.dynamo.inject.persist.Transactional;
 
 @Path("/login")
