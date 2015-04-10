@@ -13,7 +13,9 @@ import java.io.InputStream;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -28,9 +30,12 @@ import org.apache.commons.io.IOUtils;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.codehaus.jackson.node.ObjectNode;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.InvalidRemoteException;
 import org.eclipse.jgit.api.errors.TransportException;
+import org.eclipse.jgit.transport.Transport;
+import org.eclipse.jgit.transport.TransportHttp;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.junit.After;
 import org.junit.Before;
@@ -682,16 +687,16 @@ public class ProjectsResourceTest extends AbstractResourceTest {
         fos.close();
     }
 
-    /*
-     * TODO:!!
     @Test
     public void pushHTTPBasicAuth() throws Exception {
         ProjectInfo projectInfo = createTemplateProject(joe, "proj1");
         String cloneDir = cloneRepoHttpAuth(joe, projectInfo);
         alterFile(cloneDir, "content/file1.txt", "some content");
-        IGit git = httpAuthGit(joe);
-        git.commitAll(cloneDir, "a commit");
-        git.push(cloneDir);
+
+        UsernamePasswordCredentialsProvider provider = new UsernamePasswordCredentialsProvider(joeEmail, joePasswd);
+        Git git = Git.open(new File(cloneDir));
+        git.commit().setAll(true).setMessage("a commit").call();
+        git.push().setCredentialsProvider(provider).call();
     }
 
     @Test
@@ -699,10 +704,12 @@ public class ProjectsResourceTest extends AbstractResourceTest {
         ProjectInfo projectInfo = createTemplateProject(joe, "proj1");
         String cloneDir = cloneRepoHttpAuth(joe, projectInfo);
         alterFile(cloneDir, "content/file1.txt", "some content");
-        IGit git = openIDGit(joe);
-        git.commitAll(cloneDir, "a commit");
-        git.push(cloneDir);
-    }*/
+
+        UsernamePasswordCredentialsProvider provider = new UsernamePasswordCredentialsProvider(joeEmail, AuthToken.login(joeEmail));
+        Git git = Git.open(new File(cloneDir));
+        git.commit().setAll(true).setMessage("a commit").call();
+        git.push().setCredentialsProvider(provider).call();
+    }
 
     @Test
     public void newProjectFromInvalidTemplateId() throws Exception {
