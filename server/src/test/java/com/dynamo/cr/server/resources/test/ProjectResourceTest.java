@@ -1,9 +1,7 @@
 package com.dynamo.cr.server.resources.test;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -28,13 +26,11 @@ import org.junit.Test;
 
 import com.dynamo.cr.protocol.proto.Protocol.ProjectInfo;
 import com.dynamo.cr.protocol.proto.Protocol.ProjectInfoList;
-import com.dynamo.cr.protocol.proto.Protocol.ProjectStatus;
 import com.dynamo.cr.protocol.proto.Protocol.UserInfo;
 import com.dynamo.cr.server.model.ModelUtil;
 import com.dynamo.cr.server.model.Project;
 import com.dynamo.cr.server.model.User;
 import com.dynamo.cr.server.providers.ProtobufProviders;
-import com.dynamo.server.dgit.CommandUtil;
 import com.sun.jersey.api.client.Client;
 import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.WebResource;
@@ -70,7 +66,7 @@ public class ProjectResourceTest extends AbstractResourceTest {
     private WebResource ownerProjectResource;
 
     private void execCommand(String command, String arg) throws IOException {
-        CommandUtil.Result r = CommandUtil.execCommand(new String[] {"/bin/bash", command, arg});
+        TestUtil.Result r = TestUtil.execCommand(new String[] {"/bin/bash", command, arg});
         if (r.exitValue != 0) {
             System.err.println(r.stdOut);
             System.err.println(r.stdErr);
@@ -213,8 +209,6 @@ public class ProjectResourceTest extends AbstractResourceTest {
     public void projectInfo() throws Exception {
         ProjectInfo projectInfo = get(ownerProjectResource, "/project_info", ProjectInfo.class);
         assertEquals("proj1", projectInfo.getName());
-        // Owner has default free plan and the project has 2 members
-        assertThat(projectInfo.getStatus(), is(ProjectStatus.PROJECT_STATUS_UNQUALIFIED));
 
         ClientResponse response = memberProjectsWebResource.path("/project_info").get(ClientResponse.class);
         assertEquals(200, response.getStatus());

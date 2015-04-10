@@ -37,6 +37,7 @@ import org.apache.commons.io.filefilter.IOFileFilter;
 import org.apache.commons.io.filefilter.TrueFileFilter;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.api.errors.InvalidRefNameException;
 import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.api.errors.RefAlreadyExistsException;
@@ -61,9 +62,6 @@ import com.dynamo.cr.server.model.ModelUtil;
 import com.dynamo.cr.server.model.Project;
 import com.dynamo.cr.server.model.User;
 import com.dynamo.inject.persist.Transactional;
-import com.dynamo.server.dgit.GitFactory;
-import com.dynamo.server.dgit.GitFactory.Type;
-import com.dynamo.server.dgit.IGit;
 import com.google.common.io.Files;
 import com.sun.jersey.api.NotFoundException;
 
@@ -273,18 +271,18 @@ public class ProjectResource extends BaseResource {
                     .setURI(repository)
                     .setBare(false)
                     .setDirectory(cloneTo);
-            Git git = clone.call();
 
             try {
+                Git git = clone.call();
                 git.checkout().setName(version).call();
-            } catch (JGitInternalException e) {
-                throw new ServerException("Failed to checkout repo", e, Status.INTERNAL_SERVER_ERROR);
-            } catch (RefAlreadyExistsException e) {
+            } catch (JGitInternalException|RefAlreadyExistsException e) {
                 throw new ServerException("Failed to checkout repo", e, Status.INTERNAL_SERVER_ERROR);
             } catch (RefNotFoundException e) {
                 throw new ServerException(String.format("Version not found: %s", version), e, Status.INTERNAL_SERVER_ERROR);
             } catch (InvalidRefNameException e) {
                 throw new ServerException(String.format("Version not found: %s", version), e, Status.INTERNAL_SERVER_ERROR);
+            } catch (GitAPIException e) {
+                throw new ServerException("Failed to checkout repo", e, Status.INTERNAL_SERVER_ERROR);
             }
 
             zipFiles(cloneTo, zipFile, sha1);
@@ -371,8 +369,7 @@ public class ProjectResource extends BaseResource {
     public ProjectInfo getProjectInfo(@PathParam("project") String projectId) {
         User user = getUser();
         Project project = server.getProject(em, projectId);
-        return ResourceUtil.createProjectInfo(server.getConfiguration(), user, project,
-                ModelUtil.isMemberQualified(em, user, project, server.getConfiguration().getProductsList()));
+        return ResourceUtil.createProjectInfo(server.getConfiguration(), user, project);
     }
 
     @PUT
@@ -393,7 +390,7 @@ public class ProjectResource extends BaseResource {
     @GET
     @Path("/log")
     public Log log(@PathParam("project") String project,
-                              @QueryParam("max_count") int maxCount) throws IOException {
+                              @QueryParam("max_count") int maxCount) throws Exception {
         Log log = server.log(em, project, maxCount);
         return log;
     }
@@ -407,10 +404,9 @@ public class ProjectResource extends BaseResource {
         Configuration configuration = server.getConfiguration();
         String repositoryRoot = configuration.getRepositoryRoot();
         File projectPath = new File(String.format("%s/%d", repositoryRoot, project.getId()));
-        IGit git = GitFactory.create(Type.CGIT);
         try {
-            git.rmRepo(projectPath.getAbsolutePath());
             ModelUtil.removeProject(em, project);
+            FileUtils.deleteDirectory(projectPath);
         } catch (IOException e) {
             throw new ServerException(String.format("Could not delete git repo for project %s", project.getName()), Status.INTERNAL_SERVER_ERROR);
         }
@@ -480,7 +476,7 @@ public class ProjectResource extends BaseResource {
             throwWebApplicationException(Status.FORBIDDEN, "Forbidden");
         }
 
-        InputStream stream = this.getClass().getResourceAsStream("ota_manifest.plist");
+        InputStream stream = this.getClass().getResourceAsStream("/ota_manifest.plist");
         String manifest = IOUtils.toString(stream);
         stream.close();
 

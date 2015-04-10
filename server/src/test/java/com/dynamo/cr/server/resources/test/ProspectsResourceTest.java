@@ -17,7 +17,6 @@ import com.dynamo.cr.server.model.Invitation;
 import com.dynamo.cr.server.model.User;
 import com.dynamo.cr.server.providers.JsonProviders;
 import com.dynamo.cr.server.providers.ProtobufProviders;
-import com.dynamo.server.dgit.CommandUtil;
 import com.sun.jersey.api.client.Client;
 import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.WebResource;
@@ -43,7 +42,7 @@ public class ProspectsResourceTest extends AbstractResourceTest {
     }
 
     void execCommand(String command, String arg) throws IOException {
-        CommandUtil.Result r = CommandUtil.execCommand(new String[] {"/bin/bash", command, arg});
+        TestUtil.Result r = TestUtil.execCommand(new String[] {"/bin/bash", command, arg});
         if (r.exitValue != 0) {
             System.err.println(r.stdOut);
             System.err.println(r.stdErr);

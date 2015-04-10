@@ -9,10 +9,11 @@ import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.core.Response.Status;
 
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.StoredConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dynamo.cr.proto.Config.BillingProduct;
 import com.dynamo.cr.proto.Config.Configuration;
 import com.dynamo.cr.proto.Config.ProjectTemplate;
 import com.dynamo.cr.protocol.proto.Protocol.NewProject;
@@ -23,11 +24,7 @@ import com.dynamo.cr.server.ServerException;
 import com.dynamo.cr.server.model.ModelUtil;
 import com.dynamo.cr.server.model.Project;
 import com.dynamo.cr.server.model.User;
-import com.dynamo.cr.templates.Templates;
 import com.dynamo.inject.persist.Transactional;
-import com.dynamo.server.dgit.GitFactory;
-import com.dynamo.server.dgit.GitFactory.Type;
-import com.dynamo.server.dgit.IGit;
 
 //NOTE: {member} isn't currently used.
 //See README.md in this project for additional information
@@ -72,31 +69,32 @@ public class ProjectsResource extends BaseResource {
             String repositoryRoot = configuration.getRepositoryRoot();
             File projectPath = new File(String.format("%s/%d", repositoryRoot, project.getId()));
             projectPath.mkdir();
-            IGit git = GitFactory.create(Type.CGIT);
-            String group = null;
-            if (configuration.hasRepositoryRoot())
-                group = configuration.getRepositoryGroup();
 
+            Git git = null;
             if (newProject.hasTemplateId()) {
                 ProjectTemplate projectTemplate = findProjectTemplate(newProject.getTemplateId());
 
-                // NOTE: A bit strange that we substitute variables here. We should perhaps not
-                // expose the actual configuration file represented on disk and instead have some more
-                // abstract run-time structure in the server?
-                String templateRoot = Templates.getDefault().getTemplateRoot();
                 String path = projectTemplate.getPath();
-                path = path.replace("{templates_root}", templateRoot);
+                path = path.replace("{cwd}", System.getProperty("user.dir"));
 
                 File templatePath = new File(path);
                 if (!templatePath.exists()) {
                     throw new ServerException(String.format("Invalid project template path: %s", projectTemplate.getPath()));
                 }
-                git.cloneRepoBare(path, projectPath.getAbsolutePath(), group);
+
+                git = Git.cloneRepository()
+                        .setBare(true)
+                        .setURI(path)
+                        .setDirectory(projectPath.getAbsoluteFile())
+                        .call();
             }
             else {
-                git.initBare(projectPath.getAbsolutePath(), group);
+                git = Git.init().setBare(true).setDirectory(projectPath.getAbsoluteFile()).call();
             }
-            git.config(projectPath.getAbsolutePath(), "http.receivepack", "true");
+            StoredConfig config = git.getRepository().getConfig();
+            config.setBoolean("http", null, "receivepack", true);
+            config.setString("core", null, "sharedRepository", "group");
+            config.save();
         }
         catch (Throwable e) {
             logger.error(e.getMessage(), e);
@@ -104,8 +102,7 @@ public class ProjectsResource extends BaseResource {
             throw new ServerException("Unable to create project. Internal error.", e, Status.INTERNAL_SERVER_ERROR);
         }
 
-        return ResourceUtil.createProjectInfo(server.getConfiguration(), user, project,
-                ModelUtil.isMemberQualified(em, user, project, server.getConfiguration().getProductsList()));
+        return ResourceUtil.createProjectInfo(server.getConfiguration(), user, project);
     }
 
     @GET
@@ -113,11 +110,9 @@ public class ProjectsResource extends BaseResource {
         User user = getUser();
         List<Project> list = em.createQuery("select p from Project p where :user member of p.members", Project.class).setParameter("user", user).getResultList();
 
-        List<BillingProduct> products = server.getConfiguration().getProductsList();
         Builder listBuilder = ProjectInfoList.newBuilder();
         for (Project project : list) {
-            boolean isQualified = ModelUtil.isMemberQualified(em, user, project, products);
-            ProjectInfo pi = ResourceUtil.createProjectInfo(server.getConfiguration(), user, project, isQualified);
+            ProjectInfo pi = ResourceUtil.createProjectInfo(server.getConfiguration(), user, project);
             listBuilder.addProjects(pi);
         }
 

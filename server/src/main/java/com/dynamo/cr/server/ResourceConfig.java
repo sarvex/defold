@@ -6,52 +6,56 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.dynamo.cr.server.auth.AuthenticationExceptionMapper;
+import com.dynamo.cr.server.auth.AuthorizationExceptionMapper;
+import com.dynamo.cr.server.providers.JsonProviders;
+import com.dynamo.cr.server.providers.ProtobufProviders;
+import com.dynamo.cr.server.resources.IOExceptionMapper;
+import com.dynamo.cr.server.resources.LoginOAuthResource;
+import com.dynamo.cr.server.resources.LoginResource;
+import com.dynamo.cr.server.resources.NewsListResource;
+import com.dynamo.cr.server.resources.ProjectResource;
+import com.dynamo.cr.server.resources.ProjectsResource;
+import com.dynamo.cr.server.resources.ProspectsResource;
+import com.dynamo.cr.server.resources.RepositoryResource;
+import com.dynamo.cr.server.resources.RollbackExceptionMapper;
+import com.dynamo.cr.server.resources.StatusResource;
+import com.dynamo.cr.server.resources.UsersResource;
+import com.dynamo.cr.server.resources.WebApplicationExceptionMapper;
 import com.sun.jersey.api.core.DefaultResourceConfig;
 
 public class ResourceConfig extends DefaultResourceConfig {
 
     protected static Logger logger = LoggerFactory.getLogger(ResourceConfig.class);
 
-    public ResourceConfig() {
-    }
-
     @Override
     public Set<Class<?>> getClasses() {
         Set<Class<?>> classes = new HashSet<Class<?>>();
+        classes.add(RepositoryResource.class);
+        classes.add(ProjectResource.class);
+        classes.add(ProjectsResource.class);
+        classes.add(UsersResource.class);
+        classes.add(LoginResource.class);
+        classes.add(LoginOAuthResource.class);
+        classes.add(ProspectsResource.class);
+        classes.add(NewsListResource.class);
+        classes.add(StatusResource.class);
+        classes.add(IOExceptionMapper.class);
+        classes.add(RollbackExceptionMapper.class);
+        classes.add(WebApplicationExceptionMapper.class);
 
-        ClassLoader cl = this.getClass().getClassLoader();
-        try {
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.RepositoryResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.ProjectResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.ProjectsResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.UsersResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.LoginResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.LoginOAuthResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.ProspectsResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.ProductsResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.ChargifyResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.NewsListResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.StatusResource"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.GitExceptionMapper"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.IOExceptionMapper"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.RollbackExceptionMapper"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.resources.WebApplicationExceptionMapper"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.ServerExceptionMapper"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.auth.AuthenticationExceptionMapper"));
-            classes.add(cl.loadClass("com.dynamo.cr.server.auth.AuthorizationExceptionMapper"));
+        classes.add(ServerExceptionMapper.class);
+        classes.add(AuthenticationExceptionMapper.class);
+        classes.add(AuthorizationExceptionMapper.class);
 
-            classes.add(cl.loadClass("com.dynamo.cr.common.providers.ProtobufProviders"));
-            classes.add(cl.loadClass("com.dynamo.cr.common.providers.ProtobufProviders$ProtobufMessageBodyWriter"));
-            classes.add(cl.loadClass("com.dynamo.cr.common.providers.ProtobufProviders$ProtobufMessageBodyReader"));
+        classes.add(ProtobufProviders.class);
+        classes.add(ProtobufProviders.ProtobufMessageBodyWriter.class);
+        classes.add(ProtobufProviders.ProtobufMessageBodyReader.class);
 
-            classes.add(cl.loadClass("com.dynamo.cr.common.providers.JsonProviders"));
-            classes.add(cl.loadClass("com.dynamo.cr.common.providers.JsonProviders$ProtobufMessageBodyWriter"));
-            classes.add(cl.loadClass("com.dynamo.cr.common.providers.JsonProviders$ProtobufMessageBodyReader"));
+        classes.add(JsonProviders.class);
+        classes.add(JsonProviders.ProtobufMessageBodyWriter.class);
+        classes.add(JsonProviders.ProtobufMessageBodyReader.class);
 
-        } catch (ClassNotFoundException e) {
-            logger.error(e.getMessage(), e);
-            throw new RuntimeException(e);
-        }
         return classes;
     }
 }

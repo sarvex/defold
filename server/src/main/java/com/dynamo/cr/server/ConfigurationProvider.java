@@ -1,5 +1,6 @@
 package com.dynamo.cr.server;
 
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 
@@ -26,6 +27,9 @@ public class ConfigurationProvider implements Provider<Configuration>{
             FileReader fr = new FileReader(configurationFile);
             Config.Configuration.Builder builder = Config.Configuration.newBuilder();
             TextFormat.merge(fr, builder);
+            // Convert repository root to absolute. Required by jgit
+            File root = new File(builder.getRepositoryRoot());
+            builder.setRepositoryRoot(root.getAbsolutePath());
             return builder.build();
         } catch (IOException e) {
             throw new RuntimeException(e);

@@ -18,24 +18,16 @@ import org.eclipse.persistence.config.PersistenceUnitProperties;
 import org.eclipse.persistence.jpa.PersistenceProvider;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
-import org.mockito.Mockito;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
 
-import com.dynamo.cr.proto.Config.BillingProduct;
 import com.dynamo.cr.proto.Config.Configuration;
 import com.dynamo.cr.server.ConfigurationProvider;
 import com.dynamo.cr.server.Server;
-import com.dynamo.cr.server.billing.IBillingProvider;
 import com.dynamo.cr.server.mail.EMail;
 import com.dynamo.cr.server.mail.IMailProcessor;
 import com.dynamo.cr.server.mail.IMailer;
 import com.dynamo.cr.server.mail.MailProcessor;
 import com.dynamo.cr.server.model.User;
 import com.dynamo.cr.server.model.User.Role;
-import com.dynamo.cr.server.model.UserSubscription;
-import com.dynamo.cr.server.model.UserSubscription.CreditCard;
-import com.dynamo.cr.server.model.UserSubscription.State;
 import com.dynamo.cr.server.providers.JsonProviders;
 import com.dynamo.cr.server.providers.ProtobufProviders;
 import com.dynamo.cr.server.test.Util;
@@ -54,9 +46,6 @@ public class AbstractResourceTest {
     static Module module;
     static TestMailer mailer;
     static EntityManagerFactory emf;
-    static IBillingProvider billingProvider;
-    static BillingProduct freeProduct;
-    static BillingProduct smallProduct;
     static Injector injector;
 
     static class TestMailer implements IMailer {
@@ -81,28 +70,10 @@ public class AbstractResourceTest {
 
         mailer = new TestMailer();
 
-        billingProvider = mock(IBillingProvider.class);
-
         module = new Module(mailer);
         injector = Guice.createInjector(module);
         server = injector.getInstance(Server.class);
         emf = server.getEntityManagerFactory();
-
-        freeProduct = server.getProductByHandle("free");
-        smallProduct = server.getProductByHandle("small");
-
-        Mockito.doAnswer(new Answer<UserSubscription>() {
-            @Override
-            public UserSubscription answer(InvocationOnMock invocation) throws Throwable {
-                UserSubscription subscription = new UserSubscription();
-                subscription.setCreditCard(new CreditCard("1", 1, 2020));
-                subscription.setExternalId((Long)invocation.getArguments()[0]);
-                subscription.setExternalCustomerId(1l);
-                subscription.setProductId((long) freeProduct.getId());
-                subscription.setState(State.ACTIVE);
-                return subscription;
-            }
-        }).when(billingProvider).getSubscription(Mockito.anyLong());
     }
 
     @AfterClass
@@ -115,24 +86,6 @@ public class AbstractResourceTest {
         emf.getCache().evictAll();
         Util.clearAllTables();
         mailer.emails.clear();
-
-        // Given what we, for performance reasons, keep
-        // the server for all the tests we have to reset
-        // certain things - ugly
-        billingProvider = mock(IBillingProvider.class);
-        Mockito.doAnswer(new Answer<UserSubscription>() {
-            @Override
-            public UserSubscription answer(InvocationOnMock invocation) throws Throwable {
-                UserSubscription subscription = new UserSubscription();
-                subscription.setCreditCard(new CreditCard("1", 1, 2020));
-                subscription.setExternalId((Long)invocation.getArguments()[0]);
-                subscription.setExternalCustomerId(1l);
-                subscription.setProductId((long) freeProduct.getId());
-                subscription.setState(State.ACTIVE);
-                return subscription;
-            }
-        }).when(billingProvider).getSubscription(Mockito.anyLong());
-        server.setBillingProvider(billingProvider);
     }
 
     static class Module extends AbstractModule {
@@ -148,11 +101,11 @@ public class AbstractResourceTest {
 
         @Override
         protected void configure() {
+            System.setProperty(PersistenceUnitProperties.ECLIPSELINK_PERSISTENCE_XML, "META-INF/test_persistence.xml");
             bind(String.class).annotatedWith(Names.named("configurationFile")).toInstance("test_data/crepo_test.config");
             bind(Configuration.class).toProvider(ConfigurationProvider.class).in(Singleton.class);
             bind(IMailProcessor.class).to(MailProcessor.class).in(Singleton.class);
             bind(IMailer.class).toInstance(mailer);
-            bind(IBillingProvider.class).toInstance(billingProvider);
 
             Properties props = new Properties();
             props.put(PersistenceUnitProperties.CLASSLOADER, this.getClass().getClassLoader());

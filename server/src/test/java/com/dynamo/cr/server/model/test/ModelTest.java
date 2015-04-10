@@ -26,17 +26,12 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.dynamo.cr.proto.Config.BillingProduct;
 import com.dynamo.cr.server.model.Invitation;
 import com.dynamo.cr.server.model.InvitationAccount;
 import com.dynamo.cr.server.model.ModelUtil;
 import com.dynamo.cr.server.model.Project;
 import com.dynamo.cr.server.model.Prospect;
 import com.dynamo.cr.server.model.User;
-import com.dynamo.cr.server.model.User.Role;
-import com.dynamo.cr.server.model.UserSubscription;
-import com.dynamo.cr.server.model.UserSubscription.CreditCard;
-import com.dynamo.cr.server.model.UserSubscription.State;
 import com.dynamo.cr.server.test.Util;
 
 public class ModelTest {
@@ -69,6 +64,7 @@ public class ModelTest {
         HashMap<String, Object> props = new HashMap<String, Object>();
         props.put(PersistenceUnitProperties.CLASSLOADER, this.getClass().getClassLoader());
         // NOTE: JPA-PersistenceUnits: unit-test in plug-in MANIFEST.MF has to be set. Otherwise the persistence unit is not found.
+        System.setProperty(PersistenceUnitProperties.ECLIPSELINK_PERSISTENCE_XML, "META-INF/test_persistence.xml");
         factory = new PersistenceProvider().createEntityManagerFactory(PERSISTENCE_UNIT_NAME, props);
         // This is the non-OSGi way of creating a factory.
         //factory = Persistence.createEntityManagerFactory(PERSISTENCE_UNIT_NAME, props);
@@ -419,140 +415,5 @@ public class ModelTest {
         em.getTransaction().commit();
     }
 
-    @Test
-    public void testCreateSubscription() throws Exception {
-        User carl = ModelUtil.findUserByEmail(em, CARL_CONTENT_EMAIL);
-        em.getTransaction().begin();
-        CreditCard cc = new CreditCard();
-        cc.setMaskedNumber("masked_number");
-        cc.setExpirationMonth(1);
-        cc.setExpirationYear(2);
-        ModelUtil.newUserSubscription(em, carl, FREE_PRODUCT_ID, 2l, 3l, cc);
-        em.getTransaction().commit();
-
-        List<UserSubscription> lst = em.createQuery("select us from UserSubscription us", UserSubscription.class)
-                .getResultList();
-        assertThat(lst.size(), is(1));
-        UserSubscription us = lst.get(0);
-        assertThat(us.getUser().getId(), is(carl.getId()));
-        assertThat(us.getProductId(), is(FREE_PRODUCT_ID));
-        assertThat(us.getExternalId(), is(2l));
-        assertThat(us.getExternalCustomerId(), is(3l));
-        assertThat(us.getState(), is(UserSubscription.State.PENDING));
-        assertThat(cc.getMaskedNumber(), is("masked_number"));
-        assertThat(cc.getExpirationMonth(), is(1));
-        assertThat(cc.getExpirationYear(), is(2));
-    }
-
-    @Test
-    public void testUpdateSubscription() throws Exception {
-        User carl = ModelUtil.findUserByEmail(em, CARL_CONTENT_EMAIL);
-        em.getTransaction().begin();
-        UserSubscription subscription = ModelUtil.newUserSubscription(em, carl, SMALL_PRODUCT_ID, 2l, 3l, null);
-        em.getTransaction().commit();
-
-        em.getTransaction().begin();
-        subscription.setProductId(FREE_PRODUCT_ID);
-        CreditCard cc = new CreditCard();
-        cc.setMaskedNumber("masked_number");
-        cc.setExpirationMonth(1);
-        cc.setExpirationYear(2);
-        subscription.setCreditCard(cc);
-        em.persist(subscription);
-        em.getTransaction().commit();
-
-        List<UserSubscription> lst = em.createQuery("select us from UserSubscription us", UserSubscription.class)
-                .getResultList();
-        assertThat(lst.size(), is(1));
-        UserSubscription us = lst.get(0);
-        assertThat(us.getProductId(), is(FREE_PRODUCT_ID));
-        cc = us.getCreditCard();
-        assertThat(cc.getMaskedNumber(), is("masked_number"));
-        assertThat(cc.getExpirationMonth(), is(1));
-        assertThat(cc.getExpirationYear(), is(2));
-    }
-
-    private List<BillingProduct> createProducts() {
-        Long[] productIds = new Long[] { FREE_PRODUCT_ID, SMALL_PRODUCT_ID };
-        List<BillingProduct> products = new ArrayList<BillingProduct>(2);
-        for (Long id : productIds) {
-            BillingProduct.Builder b = BillingProduct.newBuilder();
-            b.setId((int) id.longValue());
-            b.setName("" + id);
-            b.setHandle("" + id);
-            b.setFee(0);
-            b.setMaxMemberCount(id == FREE_PRODUCT_ID ? 1 : -1);
-            b.setDefault(id == FREE_PRODUCT_ID ? 1 : 0);
-            products.add(b.build());
-        }
-        return products;
-    }
-
-    @Test
-    public void testDefaultProduct() throws Exception {
-        List<BillingProduct> products = createProducts();
-        em.getTransaction().begin();
-        User u1 = ModelUtil.findUserByEmail(em, CARL_CONTENT_EMAIL);
-        BillingProduct product = ModelUtil.getUserProduct(em, u1, products);
-        assertThat(FREE_PRODUCT_ID, is((long) product.getId()));
-        em.getTransaction().commit();
-    }
-
-    @Test
-    public void testUserProduct() throws Exception {
-        List<BillingProduct> products = createProducts();
-
-        em.getTransaction().begin();
-        User carl = ModelUtil.findUserByEmail(em, CARL_CONTENT_EMAIL);
-        BillingProduct product = ModelUtil.getUserProduct(em, carl, products);
-        assertThat(FREE_PRODUCT_ID, is((long) product.getId()));
-
-        ModelUtil.newUserSubscription(em, carl, SMALL_PRODUCT_ID, 2l, 3l, null);
-        // Register joe too
-        User joe = ModelUtil.findUserByEmail(em, JOE_CODER_EMAIL);
-        ModelUtil.newUserSubscription(em, joe, SMALL_PRODUCT_ID, 3l, 4l, null);
-        em.getTransaction().commit();
-
-        em.getTransaction().begin();
-        product = ModelUtil.getUserProduct(em, carl, products);
-        assertThat(SMALL_PRODUCT_ID, is((long) product.getId()));
-        em.getTransaction().commit();
-    }
-
-    @Test
-    public void testMemberQualified() throws Exception {
-        List<BillingProduct> products = createProducts();
-
-        em.getTransaction().begin();
-        // p1: u2, u3
-        // p2: u1, u3
-        User u1 = ModelUtil.findUserByEmail(em, CARL_CONTENT_EMAIL);
-        User u2 = ModelUtil.findUserByEmail(em, JOE_CODER_EMAIL);
-
-        // Test membership
-        assertFalse(ModelUtil.isMemberQualified(em, u1, p1, products));
-
-        // Test admin
-        u1.setRole(Role.ADMIN);
-        assertTrue(ModelUtil.isMemberQualified(em, u1, p1, products));
-
-        // Test free plan
-        assertFalse(ModelUtil.isMemberQualified(em, u2, p2, products));
-
-        // Test small plan
-        ModelUtil.newUserSubscription(em, u2, SMALL_PRODUCT_ID, 1l, 2l, null);
-        em.getTransaction().commit();
-        em.getTransaction().begin();
-        assertTrue(ModelUtil.isMemberQualified(em, u2, p2, products));
-        em.getTransaction().commit();
-
-        // Test canceled small plan
-        UserSubscription subscription = ModelUtil.findUserSubscriptionByUser(em, u2);
-        subscription.setState(State.CANCELED);
-        em.getTransaction().begin();
-        em.persist(subscription);
-        em.getTransaction().commit();
-        assertFalse(ModelUtil.isMemberQualified(em, u2, p2, products));
-    }
 }
 

@@ -14,7 +14,6 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Pattern;
 
 import javax.inject.Inject;
 import javax.persistence.EntityManager;
@@ -27,7 +26,11 @@ import javax.ws.rs.core.UriBuilder;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.api.errors.NoHeadException;
 import org.eclipse.jgit.http.server.GitServlet;
+import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.persistence.config.PersistenceUnitProperties;
 import org.glassfish.grizzly.PortRange;
 import org.glassfish.grizzly.http.server.HttpHandler;
@@ -41,19 +44,19 @@ import org.glassfish.grizzly.servlet.ServletHandler;
 import org.glassfish.grizzly.ssl.SSLContextConfigurator;
 import org.glassfish.grizzly.ssl.SSLEngineConfigurator;
 import org.joda.time.DateTime;
+import org.joda.time.format.DateTimeFormat;
+import org.joda.time.format.DateTimeFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.dynamo.cr.proto.Config.BillingProduct;
 import com.dynamo.cr.proto.Config.Configuration;
 import com.dynamo.cr.proto.Config.EMailTemplate;
 import com.dynamo.cr.proto.Config.InvitationCountEntry;
+import com.dynamo.cr.protocol.proto.Protocol.CommitDesc;
 import com.dynamo.cr.protocol.proto.Protocol.Log;
 import com.dynamo.cr.server.auth.GitSecurityFilter;
 import com.dynamo.cr.server.auth.OAuthAuthenticator;
-import com.dynamo.cr.server.auth.OpenIDAuthenticator;
 import com.dynamo.cr.server.auth.SecurityFilter;
-import com.dynamo.cr.server.billing.IBillingProvider;
 import com.dynamo.cr.server.mail.EMail;
 import com.dynamo.cr.server.mail.IMailProcessor;
 import com.dynamo.cr.server.model.Invitation;
@@ -63,11 +66,9 @@ import com.dynamo.cr.server.model.Project;
 import com.dynamo.cr.server.model.Prospect;
 import com.dynamo.cr.server.model.User;
 import com.dynamo.cr.server.model.User.Role;
-import com.dynamo.cr.server.openid.OpenID;
 import com.dynamo.cr.server.resources.LoginOAuthResource;
 import com.dynamo.cr.server.resources.LoginResource;
 import com.dynamo.cr.server.resources.NewsListResource;
-import com.dynamo.cr.server.resources.ProductsResource;
 import com.dynamo.cr.server.resources.ProjectResource;
 import com.dynamo.cr.server.resources.ProjectsResource;
 import com.dynamo.cr.server.resources.ProspectsResource;
@@ -76,9 +77,6 @@ import com.dynamo.cr.server.resources.ResourceUtil;
 import com.dynamo.cr.server.resources.UsersResource;
 import com.dynamo.inject.persist.PersistFilter;
 import com.dynamo.inject.persist.jpa.JpaPersistModule;
-import com.dynamo.server.dgit.GitFactory;
-import com.dynamo.server.dgit.GitFactory.Type;
-import com.dynamo.server.dgit.IGit;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.servlet.GuiceFilter;
@@ -94,24 +92,18 @@ public class Server {
 
     private HttpServer httpServer;
     private String baseUri;
-    private Pattern[] filterPatterns;
     private Configuration configuration;
     private EntityManagerFactory emf;
     private static final int MAX_ACTIVE_LOGINS = 1024;
-    private OpenID openID = new OpenID();
-    private OpenIDAuthenticator openIDAuthentication = new OpenIDAuthenticator(MAX_ACTIVE_LOGINS);
     private SecureRandom secureRandom;
 
     private IMailProcessor mailProcessor;
-    private IBillingProvider billingProvider;
 
     private ExecutorService executorService;
 
     // Value it retrieved from configuration in order to
     // be run-time changeable. Required for unit-tests
     private int openRegistrationMaxUsers;
-
-    private GitServer gitServer;
 
     public static class Config extends GuiceServletContextListener {
 
@@ -141,7 +133,6 @@ public class Server {
                     bind(LoginResource.class);
                     bind(LoginOAuthResource.class);
                     bind(ProspectsResource.class);
-                    bind(ProductsResource.class);
 
                     Map<String, String> params = new HashMap<String, String>();
                     params.put("com.sun.jersey.config.property.resourceConfigClass",
@@ -250,15 +241,13 @@ public class Server {
     @Inject
     public Server(EntityManagerFactory emf,
                   Configuration configuration,
-                  IMailProcessor mailProcessor,
-            IBillingProvider billingProvider) throws IOException {
+                  IMailProcessor mailProcessor) throws IOException {
 
         this.openRegistrationMaxUsers = configuration.getOpenRegistrationMaxUsers();
 
         this.emf = emf;
         this.configuration = configuration;
         this.mailProcessor = mailProcessor;
-        this.billingProvider = billingProvider;
 
         try {
             secureRandom = SecureRandom.getInstance("SHA1PRNG");
@@ -266,11 +255,6 @@ public class Server {
             throw new RuntimeException(e1);
         }
 
-        filterPatterns = new Pattern[configuration.getFiltersCount()];
-        int i = 0;
-        for (String f : configuration.getFiltersList()) {
-            filterPatterns[i++] = Pattern.compile(f);
-        }
         bootStrapUsers();
         migrateNewsSubscriptions();
         updateRegistrationDate();
@@ -307,27 +291,17 @@ public class Server {
         String basePath = ResourceUtil.getGitBasePath(getConfiguration());
         logger.info("git base-path: {}", basePath);
 
-        if (getConfiguration().getGoGitSrv()) {
-            String crUrl  = String.format("http://%s:%d",
-                    configuration.getHostname(),
-                    configuration.getServicePort());
+        GitServlet gitServlet = new GitServlet();
+        ServletHandler gitHandler = new ServletHandler(gitServlet);
 
-            gitServer = new GitServer(crUrl, Activator.getDefault().getGitSrvPath(), basePath, getConfiguration().getGitsrvPort());
-            gitServer.start();
-        } else {
-            GitServlet gitServlet = new GitServlet();
-            ServletHandler gitHandler = new ServletHandler(gitServlet);
-            gitHandler.addFilter(new GitSecurityFilter(emf), "gitAuth", null);
+        gitHandler.addFilter(new GitSecurityFilter(emf), "gitAuth", null);
 
-            gitHandler.addInitParameter("base-path", basePath);
-            gitHandler.addInitParameter("export-all", "1");
+        gitHandler.addInitParameter("base-path", basePath);
+        gitHandler.addInitParameter("export-all", "1");
 
-            String baseUri = ResourceUtil.getGitBaseUri(getConfiguration());
-            logger.info("git base uri: {}", baseUri);
-            httpServer.getServerConfiguration().addHttpHandler(gitHandler, baseUri);
-        }
-
-        addRedirectHandler();
+        String baseUri = ResourceUtil.getGitBaseUri(getConfiguration());
+        logger.info("git base uri: {}", baseUri);
+        httpServer.getServerConfiguration().addHttpHandler(gitHandler, baseUri);
 
         this.mailProcessor.start();
 
@@ -359,15 +333,6 @@ public class Server {
 
     }
 
-    private void addRedirectHandler() {
-        Configuration c = getConfiguration();
-        if (c.hasRedirectDownloadsHost()) {
-            RedirectHandler handler = new RedirectHandler(c.getRedirectDownloadsHost(), c.getRedirectDownloadsPort());
-            httpServer.getServerConfiguration().addHttpHandler(handler, "/downloads");
-            logger.info("adding redirect handler for downloads to {}:{}", c.getRedirectDownloadsHost(), c.getRedirectDownloadsPort());
-        }
-    }
-
     public ExecutorService getExecutorService() {
         return executorService;
     }
@@ -376,24 +341,8 @@ public class Server {
         return mailProcessor;
     }
 
-    public IBillingProvider getBillingProvider() {
-        return billingProvider;
-    }
-
-    public void setBillingProvider(IBillingProvider provider) {
-        this.billingProvider = provider;
-    }
-
     public SecureRandom getSecureRandom() {
         return secureRandom;
-    }
-
-    public OpenID getOpenID() {
-        return openID;
-    }
-
-    public OpenIDAuthenticator getOpenIDAuthentication() {
-        return openIDAuthentication;
     }
 
     private void bootStrapUsers() {
@@ -403,7 +352,8 @@ public class Server {
                 { "dynamogameengine@gmail.com", "admin", "Mr", "Admin" } };
 
         for (String[] entry : users) {
-            if (ModelUtil.findUserByEmail(em, entry[0]) == null) {
+            User dynamoUser = ModelUtil.findUserByEmail(em, entry[0]);
+            if (dynamoUser == null) {
                 User u = new User();
                 u.setEmail(entry[0]);
                 u.setFirstName(entry[2]);
@@ -479,12 +429,7 @@ public class Server {
 
     public void stop() {
         mailProcessor.stop();
-
         httpServer.stop();
-        if (getConfiguration().getGoGitSrv()) {
-            gitServer.stop();
-        }
-
         emf.close();
     }
 
@@ -521,46 +466,29 @@ public class Server {
         return 0;
     }
 
-    public BillingProduct getProduct(String productId) {
-        int id = Integer.parseInt(productId);
-        for (BillingProduct product : configuration.getProductsList()) {
-            if (product.getId() == id) {
-                return product;
-            }
-        }
-        throw new ServerException(String.format("No such product %s", productId),
-                javax.ws.rs.core.Response.Status.NOT_FOUND);
-    }
-
-    public BillingProduct getDefaultProduct() {
-        for (BillingProduct product : configuration.getProductsList()) {
-            if (product.getDefault() != 0) {
-                return product;
-            }
-        }
-        throw new ServerException(String.format("No default product"),
-                javax.ws.rs.core.Response.Status.NOT_FOUND);
-    }
-
-    public BillingProduct getProductByHandle(String productHandle) {
-        for (BillingProduct product : configuration.getProductsList()) {
-            if (product.getHandle().equals(productHandle)) {
-                return product;
-            }
-        }
-        throw new ServerException(String.format("No such product %s", productHandle),
-                javax.ws.rs.core.Response.Status.NOT_FOUND);
-    }
-
     public String getBaseURI() {
         return baseUri;
     }
 
-    public Log log(EntityManager em, String project, int maxCount) throws IOException, ServerException {
+    public Log log(EntityManager em, String project, int maxCount) throws IOException, ServerException, NoHeadException, GitAPIException {
         getProject(em, project);
         String sourcePath = String.format("%s/%s", configuration.getRepositoryRoot(), project);
-        IGit git = GitFactory.create(Type.CGIT);
-        return git.log(sourcePath, maxCount);
+
+        DateTimeFormatter formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss Z");
+        Log.Builder logBuilder = Log.newBuilder();
+        Git git = Git.open(new File(sourcePath));
+        Iterable<RevCommit> revLog = git.log().setMaxCount(maxCount).call();
+        for (RevCommit revCommit : revLog) {
+            CommitDesc.Builder commit = CommitDesc.newBuilder();
+            commit.setId(revCommit.getId().toString());
+            commit.setMessage(revCommit.getCommitterIdent().getName());
+            commit.setEmail(revCommit.getCommitterIdent().getEmailAddress());
+            long commitTime = revCommit.getCommitTime();
+            commit.setDate(formatter.print(new DateTime(commitTime * 1000)));
+            logBuilder.addCommits(commit);
+        }
+
+        return logBuilder.build();
     }
 
     public EntityManagerFactory getEntityManagerFactory() {

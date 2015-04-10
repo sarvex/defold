@@ -7,11 +7,6 @@ import java.util.Set;
 import javax.persistence.EntityManager;
 import javax.persistence.TypedQuery;
 
-import com.dynamo.cr.proto.Config.BillingProduct;
-import com.dynamo.cr.server.model.User.Role;
-import com.dynamo.cr.server.model.UserSubscription.CreditCard;
-import com.dynamo.cr.server.model.UserSubscription.State;
-
 public class ModelUtil {
 
     /**
@@ -126,101 +121,6 @@ public class ModelUtil {
         else {
             assert list.size() == 1;
             return list.get(0);
-        }
-    }
-
-    public static UserSubscription newUserSubscription(EntityManager entityManager, User user, long productId,
-            long externalId, long externalCustomerId, CreditCard creditCard) {
-        UserSubscription subscription = new UserSubscription();
-        subscription.setUser(user);
-        subscription.setProductId(productId);
-        subscription.setExternalId(externalId);
-        subscription.setExternalCustomerId(externalCustomerId);
-        subscription.setCreditCard(creditCard);
-        entityManager.persist(subscription);
-        return subscription;
-    }
-
-    public static CreditCard newCreditCard(String maskedNumber, Integer expirationMonth, Integer expirationYear) {
-        CreditCard cc = new CreditCard();
-        cc.setMaskedNumber(maskedNumber);
-        cc.setExpirationMonth(expirationMonth);
-        cc.setExpirationYear(expirationYear);
-        return cc;
-    }
-
-    public static UserSubscription findUserSubscriptionByExternalId(EntityManager entityManager, String externalId) {
-        List<UserSubscription> list = entityManager
-                .createQuery("select us from UserSubscription us where us.externalId = :externalId",
-                        UserSubscription.class).setParameter("externalId", Long.parseLong(externalId)).getResultList();
-        if (list.size() == 0) {
-            return null;
-        } else {
-            assert list.size() == 1;
-            return list.get(0);
-        }
-    }
-
-    public static UserSubscription findUserSubscriptionByUser(EntityManager entityManager, User user) {
-        List<UserSubscription> list = entityManager
-                .createQuery("select us from UserSubscription us where us.user = :user",
-                        UserSubscription.class).setParameter("user", user).getResultList();
-        if (list.size() == 0) {
-            return null;
-        } else {
-            assert list.size() == 1;
-            return list.get(0);
-        }
-    }
-
-    public static BillingProduct getUserProduct(EntityManager entityManager, User user, List<BillingProduct> products) {
-        UserSubscription subscription = findUserSubscriptionByUser(entityManager, user);
-        BillingProduct result = null;
-        // Return product with identical id, default if not
-        for (BillingProduct product : products) {
-            if (subscription != null && subscription.getProductId() == product.getId()) {
-                result = product;
-                break;
-            } else if (product.getDefault() != 0) {
-                result = product;
-            }
-        }
-        return result;
-    }
-
-    public static int getUserMaxMemberCount(EntityManager entityManager, User user,
-            List<BillingProduct> products) {
-        BillingProduct product = getUserProduct(entityManager, user, products);
-        // Use default in case the subscription is canceled
-        UserSubscription subscription = ModelUtil.findUserSubscriptionByUser(entityManager, user);
-        if (subscription != null && subscription.getState().equals(State.CANCELED)) {
-            for (BillingProduct p : products) {
-                if (p.getDefault() != 0) {
-                    product = p;
-                    break;
-                }
-            }
-        }
-        return product.getMaxMemberCount();
-    }
-
-    public static boolean isMemberQualified(EntityManager em, User user, Project project, List<BillingProduct> products) {
-        // Check membership
-        if (!project.getMembers().contains(user)) {
-            return false;
-        }
-        // Admins don't need a subscription to have access
-        if (user.getRole() == Role.ADMIN) {
-            return true;
-        }
-        int maxMemberCount = ModelUtil.getUserMaxMemberCount(em, user, products);
-        // Unlimited member count is -1
-        if (maxMemberCount < 0) {
-            // Check subscription status
-            return true;
-        } else {
-            int memberCount = project.getMemberCount();
-            return memberCount <= maxMemberCount;
         }
     }
 

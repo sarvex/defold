@@ -43,8 +43,8 @@ public class JobQueueTest {
                 .getClassLoader());
         // NOTE: JPA-PersistenceUnits: unit-test in plug-in MANIFEST.MF has to
         // be set. Otherwise the persistence unit is not found.
-        factory = new PersistenceProvider().createEntityManagerFactory(
-                PERSISTENCE_UNIT_NAME, props);
+        System.setProperty(PersistenceUnitProperties.ECLIPSELINK_PERSISTENCE_XML, "META-INF/test_persistence.xml");
+        factory = new PersistenceProvider().createEntityManagerFactory(PERSISTENCE_UNIT_NAME, props);
     }
 
     @After
