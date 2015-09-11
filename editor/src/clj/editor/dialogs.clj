@@ -166,7 +166,7 @@
                                                  KeyCode/ESCAPE true
                                                  false)
                                            (.close stage)))))
-    
+
     (.initModality stage Modality/WINDOW_MODAL)
     (.setScene stage scene)
     (ui/show-and-wait! stage)
@@ -198,7 +198,7 @@
 
     (.bind (.textProperty ^TextField (:path controls))
       (.concat (.concat (.textProperty ^TextField (:location controls)) "/") (.concat (.textProperty ^TextField (:name controls)) (str "." ext))))
-    
+
     (ui/on-action! (:browse controls) (fn [_] (let [location (-> (doto (DirectoryChooser.)
                                                                    (.setInitialDirectory (File. (str base-dir "/" (ui/text (:location controls)))))
                                                                    (.setTitle "Set Path"))

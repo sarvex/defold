@@ -154,7 +154,10 @@
 
 (defn on-double! [^Node node fn]
   (.setOnMouseClicked node (event-handler e (when (= 2 (.getClickCount ^MouseEvent e))
-                                        (fn e)))))
+                                              (fn e)))))
+
+(defn on-key-pressed! [^Node node fn]
+  (.setOnKeyPressed node (event-handler e (fn e))))
 
 (defprotocol Text
   (text [this])
@@ -240,7 +243,13 @@
         (proxy-super updateItem (and object (:text render-data)) empty)
         (let [name (or (and (not empty) (:text render-data)) nil)]
           (proxy-super setText name))
-        (proxy-super setGraphic (jfx/get-image-view (:icon render-data) 16))))))
+        (when (:content-display render-data)
+          (proxy-super setContentDisplay (:content-display render-data)))
+        (let [gfx (cond
+                    (:gfx render-data) (:gfx render-data)
+                    (:icon render-data) (jfx/get-image-view (:icon render-data) 16)
+                    :else nil)]
+          (proxy-super setGraphic gfx))))))
 
 (defn- make-list-cell-factory [render-fn]
   (reify Callback (call ^ListCell [this view] (make-list-cell render-fn))))
