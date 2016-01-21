@@ -11,6 +11,7 @@
             [editor.resource :as resource])
   (:import [com.defold.editor EditorApplication]
            [com.defold.editor Start]
+           [com.defold.editor Profiler]
            [com.jogamp.opengl.util.awt Screenshot]
            [java.awt Desktop]
            [javafx.application Platform]
@@ -21,7 +22,7 @@
            [javafx.fxml FXMLLoader]
            [javafx.geometry Insets]
            [javafx.scene Scene Node Parent]
-           [javafx.scene.control Button ColorPicker Label TextField TitledPane TextArea TreeItem Menu MenuItem MenuBar TabPane Tab ProgressBar]
+           [javafx.scene.control Button ColorPicker Label TextField TitledPane TextArea TreeItem Menu MenuItem MenuBar TabPane Tab ProgressBar Tooltip]
            [javafx.scene.image Image ImageView WritableImage PixelWriter]
            [javafx.scene.input MouseEvent]
            [javafx.scene.layout AnchorPane GridPane StackPane HBox Priority]
@@ -139,6 +140,10 @@
   (enabled? [] true)
   (run [] (make-about-dialog)))
 
+(handler/defhandler :profile :global
+  (enabled? [] true)
+  (run [] (Profiler/dump "misc/timeseries.csv")))
+
 (handler/defhandler :reload-stylesheet :global
   (enabled? [] true)
   (run [] (ui/reload-root-styles!)))
@@ -192,13 +197,22 @@
                               :acc "Shortcut+BACKSPACE"
                               :icon_ "icons/redo.png"
                               :command :delete}
-                             ]}
+                             {:label :separator}
+                             {:label "Move Up"
+                              :acc "Alt+UP"
+                              :command :move-up}
+                             {:label "Move Down"
+                              :acc "Alt+DOWN"
+                              :command :move-down}]}
                  {:label "Help"
-                  :children [{:label "About"
-                              :command :about}
+                  :children [{:label "Profile"
+                              :command :profile
+                              :acc "Shift+Shortcut+P"}
                              {:label "Reload Stylesheet"
                               :acc "F5"
-                              :command :reload-stylesheet}]}])
+                              :command :reload-stylesheet}
+                             {:label "About"
+                              :command :about}]}])
 
 (defrecord DummySelectionProvider []
   workspace/SelectionProvider
@@ -277,10 +291,40 @@
         (project/select! project [resource-node]))
       (.open (Desktop/getDesktop) (File. (resource/abs-path resource))))))
 
+(defn- gen-tooltip [workspace project app-view resource]
+  (let [resource-type (resource/resource-type resource)
+        view-type (or (first (:view-types resource-type)) (workspace/get-view-type workspace :text))]
+    (when-let [make-preview-fn (:make-preview-fn view-type)]
+      (let [tooltip (Tooltip.)]
+        (doto tooltip
+          (.setGraphic (doto (ImageView.)
+                         (.setScaleY -1.0)))
+          (.setOnShowing (ui/event-handler
+                           e
+                           (let [image-view ^ImageView (.getGraphic tooltip)]
+                             (when-not (.getImage image-view)
+                               (let [resource-node (project/get-resource-node project resource)
+                                         view-graph (g/make-graph! :history false :volatility 2)
+                                         opts (assoc ((:id view-type) (:view-opts resource-type))
+                                                     :app-view app-view
+                                                     :project project
+                                                     :workspace workspace)
+                                         preview (make-preview-fn view-graph resource-node opts 256 256)]
+                                     (.setImage image-view ^Image (g/node-value preview :image))
+                                     (ui/user-data! image-view :graph view-graph))))))
+          (.setOnHiding (ui/event-handler
+                          e
+                          (let [image-view ^ImageView (.getGraphic tooltip)]
+                            (when-let [graph (ui/user-data image-view :graph)]
+                              (g/delete-graph! graph))))))))))
+
+(defn- make-resource-dialog [workspace project app-view]
+  (when-let [resource (first (dialogs/make-resource-dialog workspace {:tooltip-gen (partial gen-tooltip workspace project app-view)}))]
+    (open-resource app-view workspace project resource)))
+
 (handler/defhandler :open-asset :global
   (enabled? [] true)
-  (run [workspace project app-view] (when-let [resource (first (dialogs/make-resource-dialog workspace {}))]
-                                      (open-resource app-view workspace project resource))))
+  (run [workspace project app-view] (make-resource-dialog workspace project app-view)))
 
 (defn fetch-libraries [workspace project]
   (workspace/set-project-dependencies! workspace (project/project-dependencies project))
