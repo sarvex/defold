@@ -25,7 +25,7 @@
             [editor.outline :as outline]
             [editor.material :as material]
             [editor.validation :as validation])
-  (:import [com.dynamo.gui.proto Gui$SceneDesc Gui$SceneDesc$AdjustReference Gui$NodeDesc$Type Gui$NodeDesc$XAnchor Gui$NodeDesc$YAnchor
+  (:import [com.dynamo.gui.proto Gui$SceneDesc Gui$SceneDesc$AdjustReference Gui$NodeDesc Gui$NodeDesc$Type Gui$NodeDesc$XAnchor Gui$NodeDesc$YAnchor
             Gui$NodeDesc$Pivot Gui$NodeDesc$AdjustMode Gui$NodeDesc$BlendMode Gui$NodeDesc$ClippingMode Gui$NodeDesc$PieBounds]
            [editor.types AABB]
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
@@ -232,100 +232,103 @@
 (defn- pairs [v]
   (filter (fn [[v0 v1]] (> (Math/abs (double (- v1 v0))) 0)) (partition 2 1 v)))
 
-(g/defnk produce-node-scene [_node-id type index layer-index aabb transform pivot size color blend-mode slice9 pie-data text-data inherit-alpha texture gpu-texture anim-data material-shader child-scenes]
-  (let [min (types/min-p aabb)
-        max (types/max-p aabb)
-        size (if (= type :type-text) [(- (.x max) (.x min)) (- (.y max) (.y min))] size)
-        [w h _] size
-        offset (pivot-offset pivot size)
-        userdata (if (= type :type-text)
-                   (let [lines (mapv conj (apply concat (take 4 (partition 2 1 (cycle (geom/transl offset [[0 0] [w 0] [w h] [0 h]]))))) (repeat 0))]
-                     (when-let [font-data (get text-data :font-data)]
-                       {:text-data (assoc text-data :offset (let [[x y] offset]
-                                                              [x (+ y (- h (get-in font-data [:font-map :max-ascent])))]))
-                        :line-data lines
-                        :color color}))
-                   (let [[geom-data uv-data line-data] (case type
-                                                         :type-box (let [order [0 1 3 3 1 2]
-                                                                         x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
-                                                                         y-vals (pairs [0 (get slice9 3) (- h (get slice9 1)) h])
-                                                                         corners (for [[x0 x1] x-vals
-                                                                                       [y0 y1] y-vals]
-                                                                                   (geom/transl offset [[x0 y0 0] [x0 y1 0] [x1 y1 0] [x1 y0 0]]))
-                                                                         vs (vec (mapcat #(map (partial nth %) order) corners))
-                                                                         tex (get anim-data texture)
-                                                                         tex-w (:width tex 1)
-                                                                         tex-h (:height tex 1)
-                                                                         u-vals (pairs [0 (/ (get slice9 0) tex-w) (- 1 (/ (get slice9 2) tex-w)) 1])
-                                                                         v-vals (pairs [1 (- 1 (/ (get slice9 3) tex-h)) (/ (get slice9 1) tex-h) 0])
-                                                                         uv-trans (get-in tex [:uv-transforms 0])
-                                                                         uvs (for [[u0 u1] u-vals
-                                                                                   [v0 v1] v-vals]
-                                                                               (geom/uv-trans uv-trans [[u0 v0] [u0 v1] [u1 v1] [u1 v0]]))
-                                                                         uvs (vec (mapcat #(map (partial nth %) order) uvs))
-                                                                         lines (vec (mapcat #(interleave % (drop 1 (cycle %))) corners))]
-                                                                     [vs uvs lines])
-                                                         :type-pie (let [offset (mapv + offset [(* 0.5 w) (* 0.5 h) 0])
-                                                                         {:keys [outer-bounds inner-radius perimeter-vertices pie-fill-angle]} pie-data
-                                                                         outer-rect? (= :piebounds-rectangle outer-bounds)
-                                                                         cut-off? (< pie-fill-angle 360)
-                                                                         hole? (> inner-radius 0)
-                                                                         vs (pie-circling perimeter-vertices pie-fill-angle outer-rect? [[1 0 0]])
-                                                                         vs-outer (if outer-rect?
-                                                                                    (mapv (fn [[x y z]]
-                                                                                            (let [abs-x (Math/abs (double x))
-                                                                                                  abs-y (Math/abs (double y))]
-                                                                                              (if (< abs-x abs-y)
-                                                                                                [(/ x abs-y) (/ y abs-y) z]
-                                                                                                [(/ x abs-x) (/ y abs-x) z]))) vs)
-                                                                                    vs)
-                                                                         vs-inner (if (> inner-radius 0)
-                                                                                    (let [xs (/ inner-radius w)
-                                                                                          ys (* xs (/ h w))]
-                                                                                      (geom/scale [xs ys 1] vs))
-                                                                                    [[0 0 0]])
-                                                                         lines (->> (cond-> (vec (apply concat (partition 2 1 vs-outer)))
-                                                                                      hole? (into (apply concat (partition 2 1 vs-inner)))
-                                                                                      cut-off? (into [(first vs-outer) (first vs-inner) (last vs-outer) (last vs-inner)]))
-                                                                                 (geom/scale [(* 0.5 w) (* 0.5 h) 1])
-                                                                                 (geom/transl offset))
-                                                                         vs (if hole?
-                                                                              (reduce into []
-                                                                                      (concat
-                                                                                        (map #(do [%1 (second %2) (first %2)]) vs-outer (partition 2 1 vs-inner))
-                                                                                        (map #(do [%1 (first %2) (second %2)]) (drop 1 (cycle vs-inner)) (partition 2 1 vs-outer))))
-                                                                              (vec (mapcat into (repeat vs-inner) (partition 2 1 vs-outer))))
-                                                                         uvs (->> vs
-                                                                               (map #(subvec % 0 2))
-                                                                               (geom/transl [1 1])
-                                                                               (geom/scale [0.5 -0.5])
-                                                                               (geom/transl [0 1])
-                                                                               (geom/uv-trans (get-in anim-data [texture :uv-transforms 0])))
-                                                                         vs (->> vs
-                                                                              (geom/scale [(* 0.5 w) (* 0.5 h) 1])
-                                                                              (geom/transl offset))]
-                                                                     [vs uvs lines])
-                                                         [[] [] []])]
-                     {:geom-data geom-data
-                      :line-data line-data
-                      :uv-data uv-data
-                      :color color}))
-        userdata (assoc userdata
-                        :gpu-texture gpu-texture
-                        :inherit-alpha inherit-alpha
-                        :material-shader material-shader
-                        :blend-mode blend-mode)]
-    {:node-id _node-id
-     :aabb aabb
-     :transform transform
-     :renderable {:render-fn render-nodes
-                  :passes [pass/transparent pass/selection pass/outline]
-                  :user-data userdata
-                  :batch-key [gpu-texture blend-mode]
-                  :select-batch-key _node-id
-                  :index index
-                  :layer-index (if layer-index (inc layer-index) 0)}
-     :children child-scenes}))
+(g/defnk produce-node-scene [_node-id type index layer-index aabb transform pivot size color blend-mode slice9 pie-data text-data inherit-alpha texture gpu-texture anim-data material-shader child-scenes template-scene]
+  (let [scene {:node-id _node-id
+               :aabb aabb
+               :transform transform
+               :children (if template-scene (:children template-scene) child-scenes)}]
+    (if (= type :type-template)
+      scene
+      (let [renderable (let [min (types/min-p aabb)
+                             max (types/max-p aabb)
+                             size (if (= type :type-text) [(- (.x max) (.x min)) (- (.y max) (.y min))] size)
+                             [w h _] size
+                             offset (pivot-offset pivot size)
+                             userdata (if (= type :type-text)
+                                        (let [lines (mapv conj (apply concat (take 4 (partition 2 1 (cycle (geom/transl offset [[0 0] [w 0] [w h] [0 h]]))))) (repeat 0))]
+                                          (when-let [font-data (get text-data :font-data)]
+                                            {:text-data (assoc text-data :offset (let [[x y] offset]
+                                                                                   [x (+ y (- h (get-in font-data [:font-map :max-ascent])))]))
+                                             :line-data lines
+                                             :color color}))
+                                        (let [[geom-data uv-data line-data] (case type
+                                                                              :type-box (let [order [0 1 3 3 1 2]
+                                                                                              x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
+                                                                                              y-vals (pairs [0 (get slice9 3) (- h (get slice9 1)) h])
+                                                                                              corners (for [[x0 x1] x-vals
+                                                                                                            [y0 y1] y-vals]
+                                                                                                        (geom/transl offset [[x0 y0 0] [x0 y1 0] [x1 y1 0] [x1 y0 0]]))
+                                                                                              vs (vec (mapcat #(map (partial nth %) order) corners))
+                                                                                              tex (get anim-data texture)
+                                                                                              tex-w (:width tex 1)
+                                                                                              tex-h (:height tex 1)
+                                                                                              u-vals (pairs [0 (/ (get slice9 0) tex-w) (- 1 (/ (get slice9 2) tex-w)) 1])
+                                                                                              v-vals (pairs [1 (- 1 (/ (get slice9 3) tex-h)) (/ (get slice9 1) tex-h) 0])
+                                                                                              uv-trans (get-in tex [:uv-transforms 0])
+                                                                                              uvs (for [[u0 u1] u-vals
+                                                                                                        [v0 v1] v-vals]
+                                                                                                    (geom/uv-trans uv-trans [[u0 v0] [u0 v1] [u1 v1] [u1 v0]]))
+                                                                                              uvs (vec (mapcat #(map (partial nth %) order) uvs))
+                                                                                              lines (vec (mapcat #(interleave % (drop 1 (cycle %))) corners))]
+                                                                                          [vs uvs lines])
+                                                                              :type-pie (let [offset (mapv + offset [(* 0.5 w) (* 0.5 h) 0])
+                                                                                              {:keys [outer-bounds inner-radius perimeter-vertices pie-fill-angle]} pie-data
+                                                                                              outer-rect? (= :piebounds-rectangle outer-bounds)
+                                                                                              cut-off? (< pie-fill-angle 360)
+                                                                                              hole? (> inner-radius 0)
+                                                                                              vs (pie-circling perimeter-vertices pie-fill-angle outer-rect? [[1 0 0]])
+                                                                                              vs-outer (if outer-rect?
+                                                                                                         (mapv (fn [[x y z]]
+                                                                                                                 (let [abs-x (Math/abs (double x))
+                                                                                                                       abs-y (Math/abs (double y))]
+                                                                                                                   (if (< abs-x abs-y)
+                                                                                                                     [(/ x abs-y) (/ y abs-y) z]
+                                                                                                                     [(/ x abs-x) (/ y abs-x) z]))) vs)
+                                                                                                         vs)
+                                                                                              vs-inner (if (> inner-radius 0)
+                                                                                                         (let [xs (/ inner-radius w)
+                                                                                                               ys (* xs (/ h w))]
+                                                                                                           (geom/scale [xs ys 1] vs))
+                                                                                                         [[0 0 0]])
+                                                                                              lines (->> (cond-> (vec (apply concat (partition 2 1 vs-outer)))
+                                                                                                           hole? (into (apply concat (partition 2 1 vs-inner)))
+                                                                                                           cut-off? (into [(first vs-outer) (first vs-inner) (last vs-outer) (last vs-inner)]))
+                                                                                                      (geom/scale [(* 0.5 w) (* 0.5 h) 1])
+                                                                                                      (geom/transl offset))
+                                                                                              vs (if hole?
+                                                                                                   (reduce into []
+                                                                                                           (concat
+                                                                                                             (map #(do [%1 (second %2) (first %2)]) vs-outer (partition 2 1 vs-inner))
+                                                                                                             (map #(do [%1 (first %2) (second %2)]) (drop 1 (cycle vs-inner)) (partition 2 1 vs-outer))))
+                                                                                                   (vec (mapcat into (repeat vs-inner) (partition 2 1 vs-outer))))
+                                                                                              uvs (->> vs
+                                                                                                    (map #(subvec % 0 2))
+                                                                                                    (geom/transl [1 1])
+                                                                                                    (geom/scale [0.5 -0.5])
+                                                                                                    (geom/transl [0 1])
+                                                                                                    (geom/uv-trans (get-in anim-data [texture :uv-transforms 0])))
+                                                                                              vs (->> vs
+                                                                                                   (geom/scale [(* 0.5 w) (* 0.5 h) 1])
+                                                                                                   (geom/transl offset))]
+                                                                                          [vs uvs lines])
+                                                                              [[] [] []])]
+                                          {:geom-data geom-data
+                                           :line-data line-data
+                                           :uv-data uv-data
+                                           :color color}))
+                             userdata (assoc userdata
+                                             :gpu-texture gpu-texture
+                                             :inherit-alpha inherit-alpha
+                                             :material-shader material-shader
+                                             :blend-mode blend-mode)]
+                         {:render-fn render-nodes
+                          :passes [pass/transparent pass/selection pass/outline]
+                          :user-data userdata
+                          :batch-key [gpu-texture blend-mode]
+                          :select-batch-key _node-id
+                          :index index
+                          :layer-index (if layer-index (inc layer-index) 0)})]
+        (assoc scene :renderable renderable)))))
 
 (defn- proj-path [resource]
   (if resource
@@ -396,6 +399,8 @@
 (def ^:private layer-connections [[:name :layer-input]
                                   [:index :layer-index]])
 
+(def ^:private TemplateData {:resource (g/maybe (g/protocol resource/Resource)) :overrides {}})
+
 (g/defnode GuiNode
   (inherits scene/ScalableSceneNode)
   (inherits outline/OutlineNode)
@@ -416,9 +421,31 @@
                                   :max 1.0
                                   :precision 0.01})))
   ; Template
-  (property template g/Str (dynamic visible template?))
-
+  (property template TemplateData
+            (dynamic visible template?)
+            (dynamic edit-type (g/always {:type (g/protocol resource/Resource)
+                                          :ext "gui"
+                                          :to-type (fn [v] (:resource v))
+                                          :from-type (fn [r] {:resource r :overrides {}})}))
+            (value (g/fnk [template-resource]
+                          {:resource template-resource :overrides {}}))
+            (set (fn [basis self old-value new-value]
+                   (let [project (project/get-project self)]
+                     (project/connect-resource-node project (:resource new-value) self []
+                                            (fn [scene-node]
+                                              (let [override (g/override scene-node)
+                                                    or-scene (get (:id-mapping override) scene-node)]
+                                                (prn "existing" (g/node-value scene-node :node-ids :basis basis))
+                                                (prn "OVERRIDES" (:overrides new-value))
+                                                (concat
+                                                  (:tx-data override)
+                                                  (g/connect or-scene :node-outline self :template-outline)
+                                                  (g/connect or-scene :scene self :template-scene)
+                                                  (g/connect scene-node :resource self :template-resource)))))))))
   (property inherit-alpha g/Bool (default true))
+  (input template-resource (g/protocol resource/Resource))
+  (input template-outline outline/OutlineData)
+  (input template-scene g/Any)
 
   ; Text
   (property text g/Str (dynamic visible text?))
@@ -541,7 +568,7 @@
   (input child-scenes g/Any :array)
   (input child-indices g/Int :array)
   (output node-outline outline/OutlineData :cached
-    (g/fnk [_node-id id index child-outlines type]
+    (g/fnk [_node-id id index child-outlines type template-outline]
       (let [reqs (if (= type :type-template)
                    []
                    [{:node-type GuiNode
@@ -564,18 +591,22 @@
                             (let [node-id (g/node-id node)]
                               (and (g/node-instance? GuiNode node-id)
                                 (not= node-id (g/node-value node-id :parent)))))
-         :children (vec (sort-by :index child-outlines))})))
+         :children (if template-outline
+                     (get-in template-outline [:children 0 :children])
+                     (vec (sort-by :index child-outlines)))})))
   (output pb-msg g/Any produce-node-msg)
-  (output aabb g/Any (g/fnk [pivot size type font-map text line-break]
-                            (let [size (if (= type :type-text)
-                                         (font/measure font-map text line-break (first size))
-                                         size)
-                                  offset-fn (partial mapv + (pivot-offset pivot size))
-                                  [min-x min-y _] (offset-fn [0 0 0])
-                                  [max-x max-y _] (offset-fn size)]
-                              (-> (geom/null-aabb)
-                                (geom/aabb-incorporate min-x min-y 0)
-                                (geom/aabb-incorporate max-x max-y 0)))))
+  (output aabb g/Any (g/fnk [pivot size type font-map text line-break template-scene]
+                            (if template-scene
+                              (:aabb template-scene)
+                              (let [size (if (= type :type-text)
+                                           (font/measure font-map text line-break (first size))
+                                           size)
+                                    offset-fn (partial mapv + (pivot-offset pivot size))
+                                    [min-x min-y _] (offset-fn [0 0 0])
+                                    [max-x max-y _] (offset-fn size)]
+                                (-> (geom/null-aabb)
+                                  (geom/aabb-incorporate min-x min-y 0)
+                                  (geom/aabb-incorporate max-x max-y 0))))))
   (output scene g/Any :cached produce-node-scene)
   (output pie-data {g/Keyword g/Any} (g/fnk [outer-bounds inner-radius perimeter-vertices pie-fill-angle]
                                        {:outer-bounds outer-bounds :inner-radius inner-radius
@@ -1100,12 +1131,16 @@
         alpha (if (protobuf/field-set? node-desc alpha-field) (get node-desc alpha-field) (get color 3))]
     (conj (subvec color 0 3) alpha)))
 
+(defn- extract-overrides [node-desc]
+  (select-keys node-desc (protobuf/fields-by-indices Gui$NodeDesc (:overridden-fields node-desc))))
+
 (defn load-gui-scene [project self input]
   (let [def pb-def
         scene (protobuf/read-text (:pb-class def) input)
         resource (g/node-value self :resource)
         workspace (project/workspace project)
         graph-id (g/node-id->graph-id self)]
+    (prn "loading" resource)
     (concat
       (g/set-property self :script (workspace/resolve-resource resource (:script scene)))
       (g/set-property self :material (workspace/resolve-resource resource (:material scene)))
@@ -1176,54 +1211,63 @@
         (g/connect nodes-node :_node-id self :nodes)
         (g/connect nodes-node :node-outline self :child-outlines)
         (g/connect nodes-node :scene self :child-scenes)
-        (loop [node-descs (:nodes scene)
-               id->node {}
-               all-tx-data []
-               index 0]
-          (if-let [node-desc (first node-descs)]
-            (let [color (color-alpha node-desc :color :alpha)
-                  outline (color-alpha node-desc :outline :outline-alpha)
-                  shadow (color-alpha node-desc :shadow :shadow-alpha)
-                  tx-data (g/make-nodes graph-id [gui-node [GuiNode
-                                                            :index index
-                                                            :type (:type node-desc)
-                                                            :id (:id node-desc)
-                                                            :position (v4->v3 (:position node-desc))
-                                                            :rotation (v4->v3 (:rotation node-desc))
-                                                            :scale (v4->v3 (:scale node-desc))
-                                                            :size (v4->v3 (:size node-desc))
-                                                            :color color
-                                                            :blend-mode (:blend-mode node-desc)
-                                                            :text (:text node-desc)
-                                                            :x-anchor (:xanchor node-desc)
-                                                            :y-anchor (:yanchor node-desc)
-                                                            :pivot (:pivot node-desc)
-                                                            :outline outline
-                                                            :shadow shadow
-                                                            :adjust-mode (:adjust-mode node-desc)
-                                                            :line-break (:line-break node-desc)
-                                                            :alpha (:alpha node-desc)
-                                                            :inherit-alpha (:inherit-alpha node-desc)
-                                                            :slice9 (:slice9 node-desc)
-                                                            :outer-bounds (:outerBounds node-desc)
-                                                            :inner-radius (:innerRadius node-desc)
-                                                            :perimeter-vertices (:perimeterVertices node-desc)
-                                                            :pie-fill-angle (:pieFillAngle node-desc)
-                                                            :clipping-mode (:clipping-mode node-desc)
-                                                            :clipping-visible (:clipping-visible node-desc)
-                                                            :clipping-inverted (:clipping-inverted node-desc)
-                                                            :alpha (:alpha node-desc)
-                                                            :template (:template node-desc)]]
-                            (let [parent (if (empty? (:parent node-desc)) nodes-node (id->node (:parent node-desc)))]
-                              (attach-gui-node self parent gui-node (:type node-desc)))
-                            ; Needs to be done after attaching so textures etc can be fetched
-                            (g/set-property gui-node
-                              :texture (:texture node-desc)
-                              :font (:font node-desc)
-                              :layer (:layer node-desc)))
-                  node-id (first (map tx-node-id (filter tx-create-node? tx-data)))]
-            (recur (rest node-descs) (assoc id->node (:id node-desc) node-id) (into all-tx-data tx-data) (inc index)))
-            all-tx-data))))))
+        (let [node-descs (filter (complement :template-node-child) (:nodes scene))
+              tmpl-node-descs (into {} (map (fn [n] [(:id n) {:parent (:parent n) :data (extract-overrides n)}]) (filter :template-node-child (:nodes scene))))
+              tmpl-children (group-by (comp :parent second) tmpl-node-descs)
+              tmpl-roots (filter (complement tmpl-node-descs) (map first tmpl-children))
+              template-data (into {} (map (fn [r] [r (into {} (map (fn [[id tmpl]] [(s/replace id (str r "/") "") (:data tmpl)]) (rest (tree-seq (constantly true) (comp tmpl-children first) [r nil]))))]) tmpl-roots))]
+          (prn "tmpl" template-data)
+          (loop [node-descs node-descs
+                 id->node {}
+                 all-tx-data []
+                 index 0]
+            (if-let [node-desc (first node-descs)]
+              (let [color (color-alpha node-desc :color :alpha)
+                    outline (color-alpha node-desc :outline :outline-alpha)
+                    shadow (color-alpha node-desc :shadow :shadow-alpha)
+                    tx-data (g/make-nodes graph-id [gui-node [GuiNode
+                                                              :index index
+                                                              :type (:type node-desc)
+                                                              :id (:id node-desc)
+                                                              :position (v4->v3 (:position node-desc))
+                                                              :rotation (v4->v3 (:rotation node-desc))
+                                                              :scale (v4->v3 (:scale node-desc))
+                                                              :size (v4->v3 (:size node-desc))
+                                                              :color color
+                                                              :blend-mode (:blend-mode node-desc)
+                                                              :text (:text node-desc)
+                                                              :x-anchor (:xanchor node-desc)
+                                                              :y-anchor (:yanchor node-desc)
+                                                              :pivot (:pivot node-desc)
+                                                              :outline outline
+                                                              :shadow shadow
+                                                              :adjust-mode (:adjust-mode node-desc)
+                                                              :line-break (:line-break node-desc)
+                                                              :alpha (:alpha node-desc)
+                                                              :inherit-alpha (:inherit-alpha node-desc)
+                                                              :slice9 (:slice9 node-desc)
+                                                              :outer-bounds (:outerBounds node-desc)
+                                                              :inner-radius (:innerRadius node-desc)
+                                                              :perimeter-vertices (:perimeterVertices node-desc)
+                                                              :pie-fill-angle (:pieFillAngle node-desc)
+                                                              :clipping-mode (:clipping-mode node-desc)
+                                                              :clipping-visible (:clipping-visible node-desc)
+                                                              :clipping-inverted (:clipping-inverted node-desc)
+                                                              :alpha (:alpha node-desc)]]
+                                          (if (= :type-template (:type node-desc))
+                                            (g/set-property gui-node :template {:resource (workspace/resolve-resource resource (:template node-desc))
+                                                                                :overrides (get template-data (:id node-desc) {})})
+                                            [])
+                                          (let [parent (if (empty? (:parent node-desc)) nodes-node (id->node (:parent node-desc)))]
+                                            (attach-gui-node self parent gui-node (:type node-desc)))
+                                          ; Needs to be done after attaching so textures etc can be fetched
+                                          (g/set-property gui-node
+                                                          :texture (:texture node-desc)
+                                                          :font (:font node-desc)
+                                                          :layer (:layer node-desc)))
+                    node-id (first (map tx-node-id (filter tx-create-node? tx-data)))]
+                (recur (rest node-descs) (assoc id->node (:id node-desc) node-id) (into all-tx-data tx-data) (inc index)))
+              all-tx-data)))))))
 
 (defn- register [workspace def]
   (let [ext (:ext def)

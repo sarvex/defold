@@ -206,19 +206,22 @@
                                         (properties/set-values! (property-fn) (repeat new-val)))))
     [cb update-ui-fn]))
 
-(defmethod create-property-control! (g/protocol resource/Resource) [_ workspace property-fn]
+(defmethod create-property-control! (g/protocol resource/Resource) [edit-type workspace property-fn]
   (let [box (HBox.)
         button (Button. "...")
         text (TextField.)
+        from-type (or (:from-type edit-type) identity)
+        to-type (or (:to-type edit-type) identity)
+        dialog-opts (if (:ext edit-type) {:ext (:ext edit-type)} {})
         update-ui-fn (fn [values message]
-                       (let [val (properties/unify-values values)]
+                       (let [val (properties/unify-values (map to-type values))]
                          (ui/text! text (when val (resource/proj-path val))))
                        (update-field-message [text] message))]
-    (ui/on-action! button (fn [_]  (when-let [resource (first (dialogs/make-resource-dialog workspace {}))]
-                                     (properties/set-values! (property-fn) (repeat resource)))))
+    (ui/on-action! button (fn [_]  (when-let [resource (first (dialogs/make-resource-dialog workspace dialog-opts))]
+                                     (properties/set-values! (property-fn) (repeat (from-type resource))))))
     (ui/on-action! text (fn [_] (let [path (ui/text text)
                                       resource (workspace/resolve-workspace-resource workspace path)]
-                                  (properties/set-values! (property-fn) (repeat resource)))))
+                                  (properties/set-values! (property-fn) (repeat (from-type resource))))))
     (ui/children! box [text button])
     [box update-ui-fn]))
 

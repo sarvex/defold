@@ -133,3 +133,19 @@
       (is (= ["pie" "box1" "box" "text"] (render-order renderer)))
       (g/set-property! (gui-node node-id "box") :layer "")
       (is (= ["box" "pie" "box1" "text"] (render-order renderer))))))
+
+;; Templates
+
+(deftest gui-templates
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          app-view (test-util/setup-app-view!)
+          node-id (test-util/resource-node project "/gui/scene.gui")
+          original-template (test-util/resource-node project "/gui/sub_scene.gui")
+          tmpl-node (gui-node node-id "new_file2")]
+      (prn "nodes" (g/node-value original-template :node-ids))
+      (is (nil? (gui-node node-id "new_file2/sub_box")))
+      #_(prn "tmpl" (g/node-value tmpl-node :scene)))))
+
+(gui-templates)
