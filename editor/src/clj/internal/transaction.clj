@@ -321,12 +321,11 @@
 (defmethod perform :update-property [ctx {:keys [node-id property fn args]}]
   (let [basis (:basis ctx)]
     (if-let [node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
-      (do
-        (let [old-value (node-value basis node-id property)
-              new-value (apply fn old-value args)]
-          (if (not= old-value new-value)
-            (invoke-setter ctx node-id node property old-value new-value)
-            ctx)))
+      (let [old-value (node-value basis node-id property)
+            new-value (apply fn old-value args)]
+        (if (not= old-value new-value)
+          (invoke-setter ctx node-id node property old-value new-value)
+          ctx))
       ctx)))
 
 (defn- ctx-set-property-to-nil [ctx node-id node property]

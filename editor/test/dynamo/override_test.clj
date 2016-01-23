@@ -2,7 +2,8 @@
   (:require [clojure.test :refer :all]
             [dynamo.graph :as g]
             [support.test-support :refer :all]
-            [internal.util :refer :all]))
+            [internal.util :refer :all])
+  (:import  [javax.vecmath Vector3d]))
 
 (g/defnode MainNode
   (property a-property g/Str)
@@ -155,14 +156,14 @@
     (let [[[main sub]
            [or-main or-sub]] (setup world 1)]
       (testing "defective base"
-               (let [error (g/error-severe {:type :som-error :message "Something went wrong"})]
+               (let [error (g/error-severe {:type :some-error :message "Something went wrong"})]
                  (g/transact
                    (g/mark-defective main error))
-               (is (g/error? (g/node-value or-main :a-property))))))
+                 (is (g/error? (g/node-value or-main :a-property))))))
     (let [[[main sub]
            [or-main or-sub]] (setup world 1)]
       (testing "defective override, which throws exception"
-               (let [error (g/error-severe {:type :som-error :message "Something went wrong"})]
+               (let [error (g/error-severe {:type :some-error :message "Something went wrong"})]
                  (is (thrown? Exception (g/transact
                                           (g/mark-defective or-main error)))))))))
 
@@ -337,3 +338,17 @@
         (let [p' (get-in (g/node-value comp :_properties) [:properties :speed])]
           (is (= 0 (:value p')))
           (is (not (contains? p' :original-value))))))))
+
+;; Overloaded outputs with different types
+
+(g/defnode TypedOutputNode
+  (property value [(g/one g/Num "x") (g/one g/Num "y") (g/one g/Num "z")])
+  (output value Vector3d (g/fnk [value] (let [[x y z] value] (Vector3d. x y z))))
+  (output complex {g/Keyword Vector3d} (g/fnk [value] {:value value})))
+
+(deftest overloaded-outputs-and-types
+  (with-clean-system
+    (let [[a b] (tx-nodes (g/make-nodes world [n [TypedOutputNode :value [1 2 3]]]
+                                        (:tx-data (g/override n))))]
+      (g/transact (g/set-property b :value [2 3 4]))
+      (is (not= (g/node-value b :complex) (g/node-value a :complex))))))

@@ -629,7 +629,7 @@
         default?            (ip/default-getter? property-definition)
         validation          (ip/validation property-definition)
         get-expr            (if default?
-                              `(get ~self-name ~prop)
+                              `(gt/get-property ~self-name (:basis ~ctx-name) ~prop)
                               (call-with-error-checked-fnky-arguments self-name ctx-name propmap-sym prop node-type-name node-type
                                                                       (ip/getter-for (gt/property-type node-type prop))
                                                                       `(get-in ~propmap-sym [~prop :internal.property/value])))
@@ -680,14 +680,25 @@
 
 (def ^:private jammable? (complement internal-keys))
 
+(defn original-root [basis node-id]
+  (let [node (ig/node-by-id-at basis node-id)
+        orig-id (gt/original node)]
+    (if orig-id
+      (recur basis orig-id)
+      node-id)))
+
 (defn jam [self-name ctx-name nodeid-sym transform forms]
   (if (jammable? transform)
-    `(if-let [jammer# (get (:_output-jammers ~self-name) ~transform)]
-       (let [jam-value# (jammer#)]
-         (if (ie/error? jam-value#)
-           (assoc jam-value# :_label ~transform :_node-id ~nodeid-sym)
-           jam-value#))
-       ~forms)
+    `(let [basis# (:basis ~ctx-name)
+           original# (if (gt/original ~self-name)
+                       (ig/node-by-id-at basis# (original-root basis# ~nodeid-sym))
+                       ~self-name)]
+       (if-let [jammer# (get (:_output-jammers original#) ~transform)]
+        (let [jam-value# (jammer#)]
+          (if (ie/error? jam-value#)
+            (assoc jam-value# :_label ~transform :_node-id ~nodeid-sym)
+            jam-value#))
+        ~forms))
     forms))
 
 (defn- property-has-default-getter? [node-type transform] (get (gt/property-type node-type transform) :internal.property/default-getter))
@@ -698,7 +709,7 @@
   (if (and (property-has-default-getter? node-type transform)
            (property-has-no-overriding-output? node-type transform)
            (not (has-validation? node-type transform)))
-    `(get ~self-name ~transform)
+    `(gt/get-property ~self-name (:basis ~ctx-name) ~transform)
     forms))
 
 (defn detect-cycles [ctx-name nodeid-sym transform node-type-name forms]
@@ -1078,7 +1089,7 @@
   (node-id             [this] node-id)
   (node-type           [this basis] (gt/node-type (ig/node-by-id-at basis original-id) basis))
   (property-types      [this basis] (gt/public-properties (gt/node-type this basis)))
-  (get-property        [this basis property] (get properties property))
+  (get-property        [this basis property] (get properties property (gt/get-property (ig/node-by-id-at basis original-id) basis property)))
   (set-property        [this basis property value] (if (= :_output-jammers property)
                                                      (throw (ex-info "Not possible to mark override nodes as defective" {}))
                                                      (assoc-in this [:properties property] value)))
@@ -1104,12 +1115,7 @@
                                                          original-props (:properties props))
                                              res (assoc res :properties (into {} (map (fn [[key value]] [key (assoc value :node-id node-id)]) (:properties res))))]
                                          res))
-        ((gt/property-labels type) output) (if (ip/default-getter? (gt/property-type type output))
-                                             (if (contains? properties output)
-                                               (get properties output)
-                                               (node-value* original output evaluation-context))
-                                             ((output-fn type output) this evaluation-context))
-        ((gt/output-labels type) output) ((output-fn type output) this evaluation-context)
+        ((gt/transforms type) output) ((output-fn type output) this evaluation-context)
         ((gt/input-labels type) output) ((output-fn type output) this evaluation-context)
         true (let [dyn-properties (node-value* original :_properties evaluation-context)]
                (if (contains? (:properties dyn-properties) output)
