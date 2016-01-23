@@ -287,8 +287,7 @@
                                                     (update :properties dissoc :script-properties)
                                                     (update :properties merge (into {} (map (fn [[key value]] [key {:value value
                                                                                                                     :type (g/make-property-type key (type value))
-                                                                                                                    :node-id _node-id
-                                                                                                                    :path [:script-properties key]}]) script-properties)))
+                                                                                                                    :node-id _node-id}]) script-properties)))
                                                     (update :display-order (comp vec (partial remove #{:script-properties})))))))
 
 (g/defnode Component
@@ -302,14 +301,11 @@
                      (let [gid (g/node-id->graph-id self)
                            path (:path new-value)]
                        (if-let [script (get (g/graph-value basis gid :resources) path)]
-                         (let [{:keys [id-mapping tx-data]} (g/override script {})
+                         (let [{:keys [id-mapping tx-data]} (g/override basis script {})
                                or-script (id-mapping script)
                                script-props (g/node-value script :_properties :basis basis)
-                               set-prop-data (for [[key value] (:overrides new-value)
-                                                   :let [prop-path (get-in script-props [:properties key :path])]]
-                                               (if prop-path
-                                                 (g/update-property or-script (first prop-path) assoc-in (rest prop-path) value)
-                                                 (g/set-property or-script key value)))
+                               set-prop-data (for [[key value] (:overrides new-value)]
+                                               (g/set-property or-script key value))
                                conn-data (for [[src tgt] [[:_node-id :instance]
                                                           [:_properties :script-properties]]]
                                            (g/connect or-script src self tgt))]
@@ -330,11 +326,11 @@
       (let [p (get-in (g/node-value comp :_properties) [:properties :speed])]
         (is (= 10 (:value p)))
         (is (= 0 (:original-value p)))
-        (g/transact (g/update-property (:node-id p) (first (:path p)) assoc-in (rest (:path p)) 20))
+        (g/transact (g/set-property comp :speed 20))
         (let [p' (get-in (g/node-value comp :_properties) [:properties :speed])]
           (is (= 20 (:value p')))
           (is (= 0 (:original-value p'))))
-        (g/transact (g/update-property (:node-id p) (first (:path p)) dissoc (last (:path p))))
+        (g/transact (g/clear-property comp :speed))
         (let [p' (get-in (g/node-value comp :_properties) [:properties :speed])]
           (is (= 0 (:value p')))
           (is (not (contains? p' :original-value))))))))

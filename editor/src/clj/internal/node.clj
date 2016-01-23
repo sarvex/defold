@@ -1084,6 +1084,20 @@
 (defn- output-fn [type output]
   (eval (dollar-name (:name type) output)))
 
+(defn- override-prop [p key node-id overrides]
+  (cond-> p
+    true (assoc :node-id node-id)
+    (contains? overrides key) (assoc :value (get overrides key)
+                                     :original-value (:value p))))
+
+(defn- override-props [props node-id overrides]
+  (loop [props props
+         ks (keys props)]
+    (if-let [k (first ks)]
+      (recur (update props k override-prop k node-id overrides)
+             (rest ks))
+      props)))
+
 (defrecord OverrideNode [override-id node-id original-id properties]
   gt/Node
   (node-id             [this] node-id)
@@ -1101,20 +1115,8 @@
       (cond
         (= :_node-id output) node-id
         (or (= :_declared-properties output)
-            (= :_properties output)) (let [props ((output-fn type output) this evaluation-context)
-                                           original-props ((output-fn type output) original evaluation-context)]
-                                       (let [res (reduce (fn [props [key p]]
-                                                           (let [overridden? (if (contains? p :path)
-                                                                               (not= nil (get-in properties (:path p)))
-                                                                               (contains? properties key))]
-                                                             (if overridden?
-                                                               (-> props
-                                                                 (update-in [:properties key] assoc :original-value (get-in props [:properties key :value]))
-                                                                 (update-in [:properties key] assoc :value (:value p)))
-                                                               props)))
-                                                         original-props (:properties props))
-                                             res (assoc res :properties (into {} (map (fn [[key value]] [key (assoc value :node-id node-id)]) (:properties res))))]
-                                         res))
+            (= :_properties output)) (let [props ((output-fn type output) original evaluation-context)]
+                                       (update props :properties override-props node-id properties))
         ((gt/transforms type) output) ((output-fn type output) this evaluation-context)
         ((gt/input-labels type) output) ((output-fn type output) this evaluation-context)
         true (let [dyn-properties (node-value* original :_properties evaluation-context)]
