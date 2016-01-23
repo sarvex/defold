@@ -456,3 +456,19 @@
     (with-clean-system
       (let [[nid] (tx-nodes (g/make-node world AlwaysNode))]
         (is (= AlwaysNode (g/node-type* nid)))))))
+
+(g/defnode SetPropertyNode
+  (property bar g/Str)
+  (property foo g/Str
+            (set (fn [basis self old-value new-value]
+                   (concat
+                     (g/set-property self :foo new-value)
+                     (g/set-property self :bar new-value))))))
+
+(deftest test-set-property-recursive
+  (testing "node type from node-id"
+    (with-clean-system
+      (let [[nid] (tx-nodes (g/make-node world SetPropertyNode))]
+        (g/transact (g/set-property nid :foo "test-value"))
+        (is (= "test-value" (g/node-value nid :foo)))
+        (is (= "test-value" (g/node-value nid :bar)))))))
