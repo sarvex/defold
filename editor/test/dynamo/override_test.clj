@@ -102,6 +102,7 @@
       (testing "Clearing property"
                (g/transact (g/clear-property or-main :a-property))
                (is (= "main" (g/node-value or-main :a-property)))
+               (is (= "main" (g/node-value or-main :virt-property)))
                (is (= "main" (g/node-value or-main :cached-output))))
       (testing "Update property"
                (g/transact (g/update-property or-main :a-property (fn [prop] (str prop "_changed"))))
