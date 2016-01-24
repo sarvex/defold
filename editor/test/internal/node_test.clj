@@ -460,15 +460,25 @@
 (g/defnode SetPropertyNode
   (property bar g/Str)
   (property foo g/Str
+            (value (g/fnk [foo] foo))
             (set (fn [basis self old-value new-value]
                    (concat
                      (g/set-property self :foo new-value)
-                     (g/set-property self :bar new-value))))))
+                     (g/set-property self :bar new-value)))))
+  (property multi-prop g/Str
+            (value (g/fnk [bar foo] (str bar "-" foo)))
+            (dynamic visible (g/fnk [multi-prop] multi-prop))
+            (validate (g/fnk [multi-prop]
+                             (when (not= "foo-foo" multi-prop)
+                               (g/error-warning "invalid value"))))))
 
 (deftest test-set-property-recursive
   (testing "node type from node-id"
     (with-clean-system
       (let [[nid] (tx-nodes (g/make-node world SetPropertyNode))]
-        (g/transact (g/set-property nid :foo "test-value"))
-        (is (= "test-value" (g/node-value nid :foo)))
-        (is (= "test-value" (g/node-value nid :bar)))))))
+        (g/transact (g/set-property nid :foo "foo"))
+        (is (= "foo" (g/node-value nid :foo)))
+        (is (= "foo" (g/node-value nid :bar)))
+        (is (= "foo-foo" (g/node-value nid :multi-prop)))
+        (let [p (get-in (g/node-value nid :_properties) [:properties :multi-prop])]
+          (is (= "foo-foo" (:visible p))))))))

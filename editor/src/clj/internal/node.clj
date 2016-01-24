@@ -607,7 +607,9 @@
 (defn call-with-error-checked-fnky-arguments
   [self-name ctx-name propmap-sym label node-type-name node-type compile-time-fnk runtime-fnk-expr & [supplied-arguments]]
   (let [arglist          (without (util/fnk-arguments compile-time-fnk) (keys supplied-arguments))
-        argument-forms   (zipmap arglist (map #(node-input-forms self-name ctx-name propmap-sym label node-type-name node-type [% nil]) arglist))
+        argument-forms   (zipmap arglist (map #(if (= label %)
+                                                 `(gt/get-property ~self-name (:basis ~ctx-name) ~label)
+                                                 (node-input-forms self-name ctx-name propmap-sym label node-type-name node-type [% nil])) arglist))
         argument-forms   (merge argument-forms supplied-arguments)]
     `(let [arg-forms# ~argument-forms]
        (let [bad-errors# (ie/worse-than (:ignore-errors ~ctx-name) (flatten (vals arg-forms#)))]
