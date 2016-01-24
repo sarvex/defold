@@ -191,7 +191,7 @@
                                                  new-keys (into {} (map #(do [% (conj k %)]) (keys (:properties properties))))]
                                                {:properties (into {} (map (fn [[o-k o-v]]
                                                                       (let [prop (-> o-v
-                                                                                   (set/rename-keys {:value :default-value})
+                                                                                   (set/rename-keys {:value :original-value})
                                                                                    (assoc :node-id (:node-id v)
                                                                                           :value (get (:value v) o-k)))]
                                                                         [(conj k o-k) prop]))
@@ -244,8 +244,8 @@
                                               :validation-problems (mapv :validation-problems v)
                                               :edit-type (property-edit-type (first v))
                                               :label (:label (first v))}
-                                        default-vals (mapv :default-value (filter #(contains? % :default-value) v))
-                                        prop (if (empty? default-vals) prop (assoc prop :default-values default-vals))]
+                                        default-vals (mapv :original-value (filter #(contains? % :original-value) v))
+                                        prop (if (empty? default-vals) prop (assoc prop :original-values default-vals))]
                                     [k prop]))
                                 common-props))]
     {:properties coalesced
@@ -259,7 +259,7 @@
               value
               default-value)))
         (:values property)
-        (:default-values property (repeat nil))
+        (:original-values property (repeat nil))
         (:validation-problems property)))
 
 (defn- set-values [property values]
@@ -314,7 +314,7 @@
       v0)))
 
 (defn overridden? [property]
-  (and (contains? property :default-values) (not-every? nil? (:values property))))
+  (and (contains? property :original-values) (not-every? nil? (:values property))))
 
 (defn validation-message [property]
   (when-let [err (validation/error-aggregate (:validation-problems property))]
@@ -324,10 +324,10 @@
   (when (overridden? property)
     (g/transact
       (concat
-        (g/operation-label (str "Set " (label property)))
+        (g/operation-label (str "Clear " (label property)))
         (let [key (:key property)]
           (for [node-id (:node-ids property)]
-            (g/update-property node-id (first key) dissoc-in (rest key))))))))
+            (g/clear-property node-id key)))))))
 
 (defn ->choicebox [vals]
   {:type :choicebox
