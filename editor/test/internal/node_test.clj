@@ -157,6 +157,14 @@
         (is (g/error? (g/node-value source :overridden)))
         (is (= "jammed" (:user-data (g/node-value source :overridden))))))))
 
+(deftest construct-with-maps
+  (testing "supplying a map to make-nodes"
+           (let [params {:foo "foo"}]
+             (with-clean-system
+               (let [[n] (tx-nodes (g/make-node world SimpleTestNode params))]
+                 (is (= "foo" (g/node-value n :foo))))
+               (let [[n] (tx-nodes (g/make-nodes world [n [SimpleTestNode params]]))]
+                 (is (= "foo" (g/node-value n :foo))))))))
 
 (defn- expect-modified
   [node-type properties f]
@@ -435,10 +443,10 @@
         (is (thrown? AssertionError (g/connect! node1 :o node2 :no-such-label)))))))
 
 (deftest error-on-bad-property
-  (testing "Exception on setting bad property"
+  (testing "AssertionError on setting bad property"
     (with-clean-system
       (let [[node] (tx-nodes (g/make-node world Dummy))]
-        (is (thrown? Exception (g/set-property! node :no-such-property 4711)))))))
+        (is (thrown? AssertionError (g/set-property! node :no-such-property 4711)))))))
 
 (g/defnode AlwaysNode
   (output always-99 g/Int (g/always 99))

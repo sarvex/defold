@@ -360,7 +360,9 @@
            (fn [ctor id]
              (list `it/new-node
                    (if (sequential? ctor)
-                     `(construct ~@ctor :_node-id ~id)
+                     (if (= 2 (count ctor))
+                       `(apply construct ~(first ctor) :_node-id ~id (mapcat identity ~(second ctor)))
+                       `(construct ~@ctor :_node-id ~id))
                      `(construct  ~ctor :_node-id ~id))))
            ctors locals)
         ~@body-exprs))))
@@ -388,8 +390,13 @@
   Example:
 
   `(transact (make-node world SimpleTestNode))`"
-  [graph-id node-type & {:as args}]
-  (it/new-node (construct-node-with-id graph-id node-type args)))
+  [graph-id node-type & args]
+  (let [args (if (empty? args)
+               {}
+               (if (= 1 (count args))
+                 (first args)
+                 (apply assoc {} args)))]
+    (it/new-node (construct-node-with-id graph-id node-type args))))
 
 (defn make-node!
   "Creates the transaction step and runs it in a transaction, returning the resulting node.
