@@ -722,6 +722,14 @@
   ([basis node-id label]
    (gt/sources basis node-id label)))
 
+(defn targets-of
+  "Find the [node-id label] pairs for all connections out of the given
+  node's output label. The result is a sequence of pairs."
+  ([node-id label]
+   (targets-of (now) node-id label))
+  ([basis node-id label]
+   (gt/targets basis node-id label)))
+
 (defn find-node
   "Looks up nodes with a property that matches the given value. Exact
   equality is used. At present, this does a linear scan of all
@@ -996,6 +1004,18 @@
     (overrides (now) root-id))
   ([basis root-id]
     (ig/overrides basis root-id)))
+
+(defn override-original
+  ([node-id]
+    (override-original (now) node-id))
+  ([basis node-id]
+    (gt/original (node-by-id basis node-id))))
+
+(defn override?
+  ([node-id]
+    (override? (now) node-id))
+  ([basis node-id]
+    (not (nil? (override-original basis node-id)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Boot, initialization, and facade

@@ -349,3 +349,21 @@
                                         (:tx-data (g/override n))))]
       (g/transact (g/set-property b :value [2 3 4]))
       (is (not= (g/node-value b :complex) (g/node-value a :complex))))))
+
+;; Dynamic property production
+
+(g/defnode IDNode
+  (input super-id g/Str)
+  (property id g/Str (value (g/fnk [_node-id super-id id] (if super-id (str super-id "/" id) id)))))
+
+(deftest dynamic-id-in-properties
+  (with-clean-system
+    (let [[node parent sub] (tx-nodes (g/make-nodes world [node [IDNode :id "child-id"]
+                                                           parent [IDNode :id "parent-id"]]
+                                                    (let [or-data (g/override node)
+                                                          or-node (get-in or-data [:id-mapping node])]
+                                                      (concat
+                                                        (:tx-data or-data)
+                                                        (g/connect parent :id or-node :super-id)))))]
+      (is (= (g/node-value sub :id)
+             (get-in (g/node-value sub :_declared-properties) [:properties :id :value]))))))

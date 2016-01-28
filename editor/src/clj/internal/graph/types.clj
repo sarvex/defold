@@ -44,7 +44,7 @@
 (defn node-type? [x] (satisfies? NodeType x))
 
 (defn input-labels        [node-type]          (-> node-type declared-inputs keys set))
-(defn output-labels       [node-type]          (-> node-type declared-outputs))
+(defn output-labels       [node-type]          (-> node-type transforms keys set))
 (defn property-labels     [node-type]          (-> node-type declared-properties keys set))
 (defn internal-properties [node-type]          (->> node-type declared-properties (util/filter-vals :internal?)))
 (defn public-properties   [node-type]          (->> node-type declared-properties (util/filter-vals (comp not :internal?))))

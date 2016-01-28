@@ -30,11 +30,11 @@
 
 (deftest node-property-defaults
   (are [expected property] (= expected (get (g/construct WithDefaults) property))
-    "o rly?"      :default-value
-    "ya rly."     :overridden-literal-value
-    "uff-da"      :overridden-indirect
-    "uff-da"      :overridden-indirect-by-var
-    'string-value :overridden-indirect-by-symbol))
+       "o rly?"      :default-value
+       "ya rly."     :overridden-literal-value
+       "uff-da"      :overridden-indirect
+       "uff-da"      :overridden-indirect-by-var
+       'string-value :overridden-indirect-by-symbol))
 
 (g/defnode SimpleTestNode
   (property foo g/Str (default "FOO!")))
@@ -64,9 +64,9 @@
 
 (deftest node-respects-namespaces
   (testing "node can implement protocols not known/visible to internal.node"
-    (is (= :owie (complainer (g/construct MyNode)))))
+           (is (= :owie (complainer (g/construct MyNode)))))
   (testing "node can implement interface not known/visible to internal.node"
-    (is (= :ok (.allGood (g/construct MyNode))))))
+           (is (= :ok (.allGood (g/construct MyNode))))))
 
 (g/defnk depends-on-self [this] this)
 (g/defnk depends-on-input [an-input] an-input)
@@ -86,14 +86,14 @@
 
 (deftest dependency-mapping
   (testing "node reports its own dependencies"
-    (let [deps (g/input-dependencies DependencyTestNode)]
-      (are [input affected-outputs] (and (contains? deps input) (= affected-outputs (get deps input)))
-           :an-input           #{:depends-on-input :depends-on-several}
-           :a-property         #{:depends-on-property :depends-on-several :a-property :_properties :_declared-properties}
-           :project            #{:depends-on-several})
-      (is (not (contains? deps :this)))
-      (is (not (contains? deps :g)))
-      (is (not (contains? deps :unused-input))))))
+           (let [deps (g/input-dependencies DependencyTestNode)]
+             (are [input affected-outputs] (and (contains? deps input) (= affected-outputs (get deps input)))
+                  :an-input           #{:depends-on-input :depends-on-several}
+                  :a-property         #{:depends-on-property :depends-on-several :a-property :_properties :_declared-properties}
+                  :project            #{:depends-on-several})
+             (is (not (contains? deps :this)))
+             (is (not (contains? deps :g)))
+             (is (not (contains? deps :unused-input))))))
 
 (g/defnode EmptyNode)
 
@@ -106,21 +106,21 @@
 
 (deftest node-intrinsics
   (testing "the _properties output delivers properties (except the 'internal' properties)"
-    (with-clean-system
-      (let [[n1]         (tx-nodes     (g/make-node world SimpleTestNode))
-            foo-before   (g/node-value n1 :foo)
-            tx-result    (g/transact   (g/set-property n1 :foo "quux"))
-            foo-after    (g/node-value n1 :foo)
-            [n2]         (tx-nodes     (g/make-node world SimpleTestNode :foo "bar"))
-            foo-override (g/node-value n2 :foo)]
-        (is (= "FOO!" foo-before))
-        (is (= "quux" foo-after))
-        (is (= "bar"  foo-override))
-        (let [properties (g/node-value n1 :_properties)]
-          (is (not (empty? (:properties properties))))
-          (is (every? gt/property-type? (map :type (vals (:properties properties)))))
-          (is (empty? (filter (fn [k] (some k #{:_output-jammers :_node-id})) (keys (:properties properties)))))
-          (is (not (empty? (:display-order properties))))))))
+           (with-clean-system
+             (let [[n1]         (tx-nodes     (g/make-node world SimpleTestNode))
+                   foo-before   (g/node-value n1 :foo)
+                   tx-result    (g/transact   (g/set-property n1 :foo "quux"))
+                   foo-after    (g/node-value n1 :foo)
+                   [n2]         (tx-nodes     (g/make-node world SimpleTestNode :foo "bar"))
+                   foo-override (g/node-value n2 :foo)]
+               (is (= "FOO!" foo-before))
+               (is (= "quux" foo-after))
+               (is (= "bar"  foo-override))
+               (let [properties (g/node-value n1 :_properties)]
+                 (is (not (empty? (:properties properties))))
+                 (is (every? gt/property-type? (map :type (vals (:properties properties)))))
+                 (is (empty? (filter (fn [k] (some k #{:_output-jammers :_node-id})) (keys (:properties properties)))))
+                 (is (not (empty? (:display-order properties))))))))
 
   (testing "the _node-id output delivers the node's id."
     (with-clean-system
@@ -461,9 +461,9 @@
 
 (deftest test-node-type*
   (testing "node type from node-id"
-    (with-clean-system
-      (let [[nid] (tx-nodes (g/make-node world AlwaysNode))]
-        (is (= AlwaysNode (g/node-type* nid)))))))
+           (with-clean-system
+             (let [[nid] (tx-nodes (g/make-node world AlwaysNode))]
+               (is (= AlwaysNode (g/node-type* nid)))))))
 
 (g/defnode SetPropertyNode
   (property bar g/Str)
@@ -482,11 +482,42 @@
 
 (deftest test-set-property-recursive
   (testing "node type from node-id"
-    (with-clean-system
-      (let [[nid] (tx-nodes (g/make-node world SetPropertyNode))]
-        (g/transact (g/set-property nid :foo "foo"))
-        (is (= "foo" (g/node-value nid :foo)))
-        (is (= "foo" (g/node-value nid :bar)))
-        (is (= "foo-foo" (g/node-value nid :multi-prop)))
-        (let [p (get-in (g/node-value nid :_properties) [:properties :multi-prop])]
-          (is (= "foo-foo" (:visible p))))))))
+           (with-clean-system
+             (let [[nid] (tx-nodes (g/make-node world SetPropertyNode))]
+               (g/transact (g/set-property nid :foo "foo"))
+               (is (= "foo" (g/node-value nid :foo)))
+               (is (= "foo" (g/node-value nid :bar)))
+               (is (= "foo-foo" (g/node-value nid :multi-prop)))
+               (let [p (get-in (g/node-value nid :_properties) [:properties :multi-prop])]
+                 (is (= "foo-foo" (:visible p))))))))
+
+(g/defnode DynamicGetterNode
+  (property foo g/Str
+            (value (g/fnk [in-foo foo]
+                          (str in-foo "/" foo)))
+            (set (fn [basis self old-value new-value]
+                   (g/set-property self :foo new-value))))
+  (input in-foo g/Str))
+
+(g/defnode DynamicGetterOutputNode
+  (inherits DynamicGetterNode)
+  (output foo g/Str (g/fnk [foo] (subs foo 1))))
+
+(deftest test-dynamic-getter
+  (testing "input collection for dynamic getters"
+           (with-clean-system
+             (let [[_ nid] (tx-nodes (g/make-nodes world [from [SimpleTestNode :foo "in-foo"]
+                                                          to [DynamicGetterNode :foo "foo"]]
+                                                   (g/connect from :foo to :in-foo)))]
+               (is (= "in-foo/foo" (g/node-value nid :foo)))
+               (g/transact (g/set-property nid :foo "foo2"))
+               (is (= "in-foo/foo2" (g/node-value nid :foo)))
+               (is (= "in-foo/foo2" (get-in (g/node-value nid :_properties) [:properties :foo :value]))))))
+  (testing "input collection for dynamic getters with overloaded outputs"
+           (with-clean-system
+             (let [[_ nid] (tx-nodes (g/make-nodes world [from [SimpleTestNode :foo "in-foo"]
+                                                          to [DynamicGetterOutputNode :foo "foo"]]
+                                                   (g/connect from :foo to :in-foo)))]
+               (is (= "n-foo/foo" (g/node-value nid :foo)))
+               (g/transact (g/set-property nid :foo "foo2"))
+               (is (= "n-foo/foo2" (g/node-value nid :foo)))))))
