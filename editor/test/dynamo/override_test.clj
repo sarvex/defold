@@ -135,6 +135,66 @@
                     (g/disconnect sub :value main :cached-values)))
       (is (= [] (g/node-value or-main :cached-values))))))
 
+(g/defnode DetectCacheInvalidation
+  (property invalid-cache g/Any (default (atom 0)))
+  (input value g/Str :cascade-delete)
+  (output cached-value g/Str :cached (g/fnk [value invalid-cache]
+                                            (swap! invalid-cache inc)
+                                            value)))
+
+(deftest inherit-targets []
+  (testing "missing override"
+           (with-clean-system
+             (let [[main cache-node or-main] (tx-nodes (g/make-nodes world [main [SubNode :value "test"]
+                                                                            cache DetectCacheInvalidation]
+                                                                     (g/connect main :value cache :value)
+                                                                     (:tx-data (g/override main {}))))]
+               (is (= cache-node (ffirst (g/targets-of main :value))))
+               (is (empty? (g/targets-of or-main :value))))))
+  (testing "existing override"
+           (with-clean-system
+             (let [[main cache-node] (tx-nodes (g/make-nodes world [main [SubNode :value "test"]
+                                                                    cache DetectCacheInvalidation]
+                                                             (g/connect main :value cache :value)))
+                   [or-cache-node or-main] (tx-nodes (:tx-data (g/override cache-node {})))]
+               (is (= cache-node (ffirst (g/targets-of main :value))))
+               (is (= or-cache-node (ffirst (g/targets-of or-main :value))))))))
+
+(g/defnode StringInput
+  (input value g/Str :cascade-delete))
+
+(deftest inherit-sources []
+  (testing "missing override"
+           (with-clean-system
+             (let [[main cache-node or-main] (tx-nodes (g/make-nodes world [main StringInput
+                                                                            cache DetectCacheInvalidation]
+                                                                     (g/connect cache :cached-value main :value)
+                                                                     (:tx-data (g/override main {}))))]
+               (is (= cache-node (ffirst (g/sources-of main :value))))
+               (is (= cache-node (ffirst (g/sources-of or-main :value)))))))
+  (testing "existing override"
+           (with-clean-system
+             (let [[main cache-node] (tx-nodes (g/make-nodes world [main StringInput
+                                                                    cache DetectCacheInvalidation]
+                                                             (g/connect cache :cached-value main :value)))
+                   [or-main or-cache-node] (tx-nodes (:tx-data (g/override cache-node {})))]
+               (is (= cache-node (ffirst (g/sources-of main :value))))
+               (is (= or-cache-node (ffirst (g/sources-of or-main :value))))))))
+
+(deftest lonely-override-leaves-cache []
+  (with-clean-system
+    (let [[main cache-node or-main] (tx-nodes (g/make-nodes world [main [SubNode :value "test"]
+                                                                   cache DetectCacheInvalidation]
+                                                            (g/connect main :value cache :value)
+                                                            (:tx-data (g/override main {}))))]
+      (is (= 0 @(g/node-value cache-node :invalid-cache)))
+      (is (= "test" (g/node-value cache-node :cached-value)))
+      (is (= 1 @(g/node-value cache-node :invalid-cache)))
+      (is (= "test" (g/node-value cache-node :cached-value)))
+      (is (= 1 @(g/node-value cache-node :invalid-cache)))
+      (g/transact (g/set-property or-main :value "override"))
+      (is (= 1 @(g/node-value cache-node :invalid-cache))))))
+
 (deftest multi-override
   (with-clean-system
     (let [[[main sub]
