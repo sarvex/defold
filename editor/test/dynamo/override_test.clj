@@ -1,7 +1,6 @@
 (ns dynamo.override-test
   (:require [clojure.test :refer :all]
             [dynamo.graph :as g]
-            [internal.graph.types :as gt]
             [support.test-support :refer :all]
             [internal.util :refer :all])
   (:import  [javax.vecmath Vector3d]))
