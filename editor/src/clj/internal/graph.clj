@@ -246,8 +246,9 @@
   (pre-traverse basis start (partial successors-sources traverse?)))
 
 (defn- override-of [basis node-id override-id inherit?]
-  (or (first (filter #(= override-id (gt/override-id (node-by-id-at basis %))) (overrides basis node-id)))
-      (when inherit? node-id)))
+  (let [overrides (tree-seq (constantly true) (partial overrides basis) node-id)]
+    (or (first (filter #(= override-id (gt/override-id (node-by-id-at basis %))) overrides))
+       (when inherit? node-id))))
 
 (defn- find-arcs [basis node-id graph-field group-fn primary secondary inherit?]
   (let [graphs (:graphs basis)

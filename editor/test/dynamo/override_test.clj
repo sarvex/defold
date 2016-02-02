@@ -1,6 +1,7 @@
 (ns dynamo.override-test
   (:require [clojure.test :refer :all]
             [dynamo.graph :as g]
+            [internal.graph.types :as gt]
             [support.test-support :refer :all]
             [internal.util :refer :all])
   (:import  [javax.vecmath Vector3d]))
@@ -277,25 +278,40 @@
                  (g/transact (g/clear-property or-res :reference))
                  (is (= :node-a2 (g/node-value or-res :reference))))))))
 
-(def IDPair [(g/one g/Str "id") (g/one g/NodeID "node-id")])
+(def ^:private IDMap {g/Str g/NodeID})
 
 (g/defnode Node
   (property id g/Str)
-  (property value g/Str)
-  (output node-id IDPair (g/fnk [_node-id id] [id _node-id])))
+  (input id-prefix g/Str)
+  (output id g/Str (g/fnk [id id-prefix] (str id-prefix id)))
+  (output node-ids IDMap (g/fnk [_node-id id] {id _node-id})))
+
+(g/defnode VisualNode
+  (inherits Node)
+  (property value g/Str))
 
 (g/defnode Scene
   (property path g/Str)
   (input nodes g/NodeID :array :cascade-delete)
-  (input node-ids IDPair :array)
+  (input node-ids IDMap :array)
   (input node-properties g/Properties :array)
-  (output node-ids {g/Str g/NodeID} (g/fnk [node-ids] (into {} node-ids)))
+  (input id-prefix g/Str)
+  (output id-prefix g/Str (g/fnk [id-prefix] id-prefix))
+  (output node-ids IDMap (g/fnk [node-ids] (reduce into {} node-ids)))
   (output node-overrides g/Any :cached (g/fnk [node-ids node-properties]
                                               (let [node-ids (clojure.set/map-invert node-ids)
                                                     properties (group-by (comp node-ids :node-id second) (filter (comp :original-value second) (mapcat :properties node-properties)))]
                                                 (into {} (map (fn [[nid props]] [nid (into {} (map (fn [[key value]] [key (:value value)]) props))]) properties))))))
 
+(defn- scene-by-path
+  ([graph path]
+    (scene-by-path (g/now) graph path))
+  ([basis graph path]
+    (let [resources (or (g/graph-value basis graph :resources) {})]
+      (get resources path))))
+
 (g/defnode Template
+  (inherits Node)
   (property path g/Any
             (set (fn [basis self old-value new-value]
                    (concat
@@ -304,40 +320,77 @@
                        [])
                      (let [gid (g/node-id->graph-id self)
                            path (:path new-value)]
-                       (if-let [scene (get (g/graph-value basis gid :resources) path)]
+                       (if-let [scene (scene-by-path basis gid path)]
                          (let [{:keys [id-mapping tx-data]} (g/override scene {})
-                               mapping (comp id-mapping (g/node-value scene :node-ids :basis basis))
+                               path (g/node-value self :template-path :basis basis)
+                               mapping (comp id-mapping (into {} (map (fn [[k v]] [(str path k) v])
+                                                                      (g/node-value scene :node-ids :basis basis))))
                                set-prop-data (for [[id props] (:overrides new-value)
                                                    :let [node-id (mapping id)]
                                                    [key value] props]
-                                               (g/set-property node-id key value))]
-                           (concat tx-data set-prop-data
-                                   (for [[from to] [[:node-ids :node-ids]
-                                                    [:node-overrides :node-overrides]]]
-                                     (g/connect (id-mapping scene) from self to))))
+                                               (g/set-property node-id key value))
+                               or-scene (id-mapping scene)]
+                           (concat
+                             tx-data
+                             set-prop-data
+                             (for [[from to] [[:node-ids :node-ids]
+                                              [:node-overrides :node-overrides]]]
+                               (g/connect or-scene from self to))
+                             (g/connect self :template-path or-scene :id-prefix)))
                          []))))))
 
   (input instance g/NodeID)
   (input scene-path g/Str)
-  (input node-ids g/Any)
-  (input node-overrides g/Any))
+  (input node-ids IDMap :cascade-delete)
+  (input node-overrides g/Any)
+  (output template-path g/Str (g/fnk [id] (str id "/")))
+  (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids))))
+
+(def ^:private scene-inputs [[:_node-id :nodes]
+                             [:node-ids :node-ids]
+                             [:_properties :node-properties]])
+
+(def ^:private scene-outputs [[:id-prefix :id-prefix]])
+
+(defn- make-scene! [graph path nodes]
+  (let [resources (or (g/graph-value graph :resources) {})]
+    (tx-nodes (g/make-nodes graph [scene [Scene :path path]]
+                            (-> (g/set-graph-value graph :resources (assoc resources path scene))
+                              ((partial reduce (fn [tx [node-type props]]
+                                                 (into tx (g/make-nodes graph [n [node-type props]]
+                                                                        (for [[output input] scene-inputs]
+                                                                          (g/connect n output scene input))
+                                                                        (for [[output input] scene-outputs]
+                                                                          (g/connect scene output n input))))))
+                                nodes))))))
 
 (deftest scene-loading
   (with-clean-system
-    (let [[node scene template] (tx-nodes (g/make-nodes world [node [Node :id "my-node" :value "initial"]
-                                                               scene [Scene :path "my-scene"]
-                                                               template [Template]]
-                                                       (g/set-graph-value world :resources {"my-scene" scene})
-                                                       (for [[output input] [[:_node-id :nodes]
-                                                                             [:node-id :node-ids]
-                                                                             [:_properties :node-properties]]]
-                                                         (g/connect node output scene input))))
-          overrides {"my-node" {:value "new value"}}]
-      (g/transact (g/set-property template :path {:path "my-scene" :overrides overrides}))
+    (let [[scene node] (make-scene! world "my-scene" [[VisualNode {:id "my-node" :value "initial"}]])
+          overrides {"my-template/my-node" {:value "new value"}}
+          [super-scene template] (make-scene! world "my-super-scene" [[Template {:id "my-template" :path {:path "my-scene" :overrides overrides}}]])]
       (is (= "initial" (g/node-value node :value)))
-      (let [or-node (get (g/node-value template :node-ids) "my-node")]
+      (let [or-node (get (g/node-value template :node-ids) "my-template/my-node")]
         (is (= "new value" (g/node-value or-node :value))))
       (is (= overrides (g/node-value template :node-overrides))))))
+
+(defn- has-node? [scene node-id]
+  (contains? (g/node-value scene :node-ids) node-id))
+
+(defn- node-by-id [scene node-id]
+  (get (g/node-value scene :node-ids) node-id))
+
+(defn- target [n label]
+  (ffirst (g/targets-of n label)))
+
+(deftest hierarchical-ids
+  (with-clean-system
+    (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
+          [scene] (make-scene! world "scene" [[Template {:id "template" :path {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :path {:path "scene" :overrides {}}}]])]
+      (is (has-node? sub-scene "my-node"))
+      (is (has-node? scene "template/my-node"))
+      (is (has-node? super-scene "super-template/template/my-node")))))
 
 ;; User-defined dynamic properties
 
