@@ -275,7 +275,6 @@
 (g/defnode SceneRenderer
   (input scene g/Any :substitute substitute-scene)
   (input selection g/Any)
-  (input viewport Region)
   (input camera Camera)
   (input aux-renderables pass/RenderData :array)
 

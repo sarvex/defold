@@ -67,12 +67,12 @@
          project   (test-util/setup-project! workspace)
          node-id   (test-util/resource-node project "/logic/main.gui")
          outline (g/node-value node-id :node-outline)
-         atlas-gui-node (get-in outline [:children 0 :children 2 :node-id])
+         box (get-in outline [:children 0 :children 2 :node-id])
          atlas-tex (get-in outline [:children 1 :children 1 :node-id])]
      (is (some? atlas-tex))
-     (is (= "atlas_texture/anim" (prop atlas-gui-node :texture)))
+     (is (= "atlas_texture/anim" (prop box :texture)))
      (prop! atlas-tex :name "new-name")
-     (is (= "new-name/anim" (prop atlas-gui-node :texture))))))
+     (is (= "new-name/anim" (prop box :texture))))))
 
 (deftest gui-shaders
   (with-clean-system
@@ -142,7 +142,52 @@
           app-view (test-util/setup-app-view!)
           node-id (test-util/resource-node project "/gui/scene.gui")
           original-template (test-util/resource-node project "/gui/sub_scene.gui")
-          tmpl-node (gui-node node-id "new_file2")]
-      (prn "nodes" (g/node-value original-template :node-ids))
-      (is (nil? (gui-node node-id "new_file2/sub_box")))
-      #_(prn "tmpl" (g/node-value tmpl-node :scene)))))
+          tmpl-node (gui-node node-id "sub_scene")
+          path [:children 0 :children 0 :node-id]]
+      (is (not= (get-in (g/node-value tmpl-node :scene) path)
+                (get-in (g/node-value original-template :scene) path))))))
+
+(deftest gui-template-ids
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          app-view (test-util/setup-app-view!)
+          node-id (test-util/resource-node project "/gui/scene.gui")
+          original-template (test-util/resource-node project "/gui/sub_scene.gui")
+          tmpl-node (gui-node node-id "sub_scene")
+          old-name "sub_scene/sub_box"
+          new-name "sub_scene2/sub_box"]
+      (is (not (nil? (gui-node node-id old-name))))
+      (is (nil? (gui-node node-id new-name)))
+      (g/transact (g/set-property tmpl-node :id "sub_scene2"))
+      (is (not (nil? (gui-node node-id new-name))))
+      (is (nil? (gui-node node-id old-name)))
+      (let [sub-node (gui-node node-id new-name)]
+        (is (= new-name (prop sub-node :id)))
+        (is (= (g/node-value sub-node :id)
+               (get-in (g/node-value sub-node :_declared-properties) [:properties :id :value])))))))
+
+(deftest gui-templates-complex-property
+ (with-clean-system
+   (let [workspace (test-util/setup-workspace! world)
+         project (test-util/setup-project! workspace)
+         app-view (test-util/setup-app-view!)
+         node-id (test-util/resource-node project "/gui/scene.gui")
+         sub-node (gui-node node-id "sub_scene/sub_box")]
+     (let [color (prop sub-node :color)
+           alpha (prop sub-node :alpha)]
+       (g/transact (g/set-property sub-node :alpha (* 0.5 alpha)))
+       (is (not= color (prop sub-node :color)))
+       (is (not= alpha (prop sub-node :alpha)))
+       (g/transact (g/clear-property sub-node :alpha))
+       (is (= color (prop sub-node :color)))
+       (is (= alpha (prop sub-node :alpha)))))))
+
+(deftest gui-template-hierarchy
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          app-view (test-util/setup-app-view!)
+          node-id (test-util/resource-node project "/gui/super_scene.gui")
+          sub-node (gui-node node-id "scene/sub_scene/sub_box")]
+      (is (not= nil sub-node)))))

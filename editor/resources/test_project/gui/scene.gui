@@ -151,7 +151,7 @@ nodes {
   }
   type: TYPE_TEMPLATE
   blend_mode: BLEND_MODE_ALPHA
-  id: "new_file2"
+  id: "sub_scene"
   xanchor: XANCHOR_NONE
   yanchor: YANCHOR_NONE
   pivot: PIVOT_CENTER
@@ -199,8 +199,8 @@ nodes {
   type: TYPE_BOX
   blend_mode: BLEND_MODE_ALPHA
   texture: ""
-  id: "new_file2/sub_box"
-  parent: "new_file2"
+  id: "sub_scene/sub_box"
+  parent: "sub_scene"
   xanchor: XANCHOR_NONE
   yanchor: YANCHOR_NONE
   pivot: PIVOT_CENTER

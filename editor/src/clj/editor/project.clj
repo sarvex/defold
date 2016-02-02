@@ -57,12 +57,16 @@ ordinary paths."
           (g/mark-defective node-id node-type (g/error-severe {:type :invalid-content :message (format "The file '%s' could not be loaded." (resource/proj-path resource))}))))
       [])))
 
-(defn- load-nodes! [project node-ids]
-  (g/transact
+(defn load-resource-nodes [project node-ids]
+  (doall
     (for [node-id node-ids
           :when (g/has-output? (g/node-type* node-id) :resource)
           :let [resource (g/node-value node-id :resource)]]
       (load-node project node-id (g/node-type* node-id) resource))))
+
+(defn- load-nodes! [project node-ids]
+  (g/transact
+    (load-resource-nodes project node-ids)))
 
 (defn- connect-if-output [src-type src tgt connections]
   (let [outputs (g/output-labels src-type)]
@@ -425,12 +429,10 @@ ordinary paths."
           (if attach-fn
             (attach-fn node)
             []))
-        (do
-          (prn "NEW!!!" path-or-resource)
-          (make-resource-node (g/node-id->graph-id project) project resource true {project [[:_node-id :nodes]
-                                                                                           [:resource :node-resources]]
-                                                                                  consumer-node connections}
-                             attach-fn)))
+        (make-resource-node (g/node-id->graph-id project) project resource true {project [[:_node-id :nodes]
+                                                                                          [:resource :node-resources]]
+                                                                                 consumer-node connections}
+                            attach-fn))
     [])))
 
 (defn select
