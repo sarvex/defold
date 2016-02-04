@@ -561,7 +561,7 @@
   [record-name node-type argument output]
   (cond
     (= :this argument)
-    record-name
+    s/Any
 
     (property-overloads-output? node-type argument output)
     (relax-schema (property-schema node-type argument))

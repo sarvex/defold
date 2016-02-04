@@ -191,3 +191,14 @@
           node-id (test-util/resource-node project "/gui/super_scene.gui")
           sub-node (gui-node node-id "scene/sub_scene/sub_box")]
       (is (not= nil sub-node)))))
+
+(deftest gui-template-selection
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          app-view (test-util/setup-app-view!)
+          node-id (test-util/resource-node project "/gui/super_scene.gui")
+          tmpl-node (gui-node node-id "scene/sub_scene")]
+      (project/select! project [tmpl-node])
+      (let [props (g/node-value project :selected-node-properties)]
+        (is (not (empty? (keys props))))))))
