@@ -216,7 +216,12 @@
         tree-with-hits     (append-match-snippet-nodes new-tree (group-by :resource matching-resources))]
     (update-tree-view tree-view tree-with-hits)
     (doseq [^TreeItem item (ui/tree-item-seq (.getRoot tree-view))]
-      (.setExpanded item true))))
+      (.setExpanded item true))
+    (let [first-match (->> (ui/tree-item-seq (.getRoot tree-view))
+                           (filter (fn [^TreeItem item]
+                                     (instance? MatchContextResource (.getValue item))))
+                           first)]
+      (.select (.getSelectionModel tree-view) first-match))))
 
 (defn make-search-in-files-dialog [workspace project]
   (let [root      ^Parent (ui/load-fxml "search-in-files-dialog.fxml")
@@ -263,8 +268,9 @@
     (.setScene stage scene)
     (ui/show-and-wait! stage)
 
-    (let [resource (update @return :children
-                           (fn [children] (remove #(instance? MatchContextResource %) children)))]
+    (let [resource (and @return
+                        (update @return :children
+                                (fn [children] (remove #(instance? MatchContextResource %) children))))]
       (cond
         (instance? MatchContextResource resource)
         [(:parent-resource resource) {:caret-position (:caret-position resource)}]
