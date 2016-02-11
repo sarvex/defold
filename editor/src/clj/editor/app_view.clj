@@ -5,7 +5,7 @@
             [editor.handler :as handler]
             [editor.jfx :as jfx]
             [editor.login :as login]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.prefs-dialog :as prefs-dialog]
             [editor.ui :as ui]
             [editor.workspace :as workspace]
@@ -34,6 +34,8 @@
            [java.nio.file Paths]
            [java.util.prefs Preferences]
            [javax.media.opengl GL GL2 GLContext GLProfile GLDrawableFactory GLCapabilities]))
+
+(set! *warn-on-reflection* true)
 
 (g/defnode AppView
   (property stage Stage)
@@ -273,7 +275,7 @@
     app-view))
 
 (defn- create-new-tab [app-view workspace project resource resource-node
-                       resource-type view-type make-view-fn tabs opts]
+                       resource-type view-type make-view-fn ^ObservableList tabs opts]
   (let [parent     (AnchorPane.)
         tab        (doto (Tab. (resource/resource-name resource))
                      (.setContent parent)

@@ -17,7 +17,7 @@
             [editor.outline-view :as outline-view]
             [editor.platformer :as platformer]
             [editor.prefs :as prefs]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.properties-view :as properties-view]
             [editor.scene-selection :as scene-selection]
             [editor.scene :as scene]
@@ -64,6 +64,8 @@
            [java.nio.file Paths]
            [javax.media.opengl GL GL2 GLContext GLProfile GLDrawableFactory GLCapabilities]
            [com.defold.control ListCell TreeCell]))
+
+(set! *warn-on-reflection* true)
 
 (defn- setup-console [^VBox root]
   (let [^TextArea node (.lookup root "#console")]
