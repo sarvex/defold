@@ -119,8 +119,6 @@
                                                  (:tx-data (g/override main {}))))]
       (is (= "inherited" (g/node-value or-main prop))))))
 
-(inherited-property)
-
 (deftest new-node-created
   (with-clean-system
     (let [[main or-main sub] (tx-nodes (g/make-nodes world [main MainNode]
