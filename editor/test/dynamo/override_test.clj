@@ -5,7 +5,11 @@
             [internal.util :refer :all])
   (:import  [javax.vecmath Vector3d]))
 
+(g/defnode BaseNode
+  (property base-property g/Str))
+
 (g/defnode MainNode
+  (inherits BaseNode)
   (property a-property g/Str)
   (property b-property g/Str)
   (property virt-property g/Str
@@ -107,6 +111,15 @@
       (testing "Update property"
                (g/transact (g/update-property or-main :a-property (fn [prop] (str prop "_changed"))))
                (is (= "main_changed" (g/node-value or-main :a-property)))))))
+
+(deftest inherited-property
+  (with-clean-system
+    (let [prop :base-property
+          [main or-main] (tx-nodes (g/make-nodes world [main [MainNode prop "inherited"]]
+                                                 (:tx-data (g/override main {}))))]
+      (is (= "inherited" (g/node-value or-main prop))))))
+
+(inherited-property)
 
 (deftest new-node-created
   (with-clean-system
@@ -279,6 +292,13 @@
 
 (def ^:private IDMap {g/Str g/NodeID})
 
+(defprotocol Resource
+  (path [this]))
+
+(defrecord PathResource [path]
+  Resource
+  (path [this] path))
+
 (g/defnode Node
   (property id g/Str)
   (input id-prefix g/Str)
@@ -289,8 +309,11 @@
   (inherits Node)
   (property value g/Str))
 
+(g/defnode SceneResourceNode
+  (extern resource (g/protocol Resource)))
+
 (g/defnode Scene
-  (property path g/Str)
+  (inherits SceneResourceNode)
   (input nodes g/NodeID :array :cascade-delete)
   (input node-ids IDMap :array)
   (input node-properties g/Properties :array)
@@ -307,11 +330,13 @@
     (scene-by-path (g/now) graph path))
   ([basis graph path]
     (let [resources (or (g/graph-value basis graph :resources) {})]
-      (get resources path))))
+      (get resources (->PathResource path)))))
 
 (g/defnode Template
   (inherits Node)
-  (property path g/Any
+  (property template g/Any
+            (value (g/fnk [template-resource]
+                          {:resource template-resource :overrides {}}))
             (set (fn [basis self old-value new-value]
                    (concat
                      (if-let [instance (g/node-value self :instance :basis basis)]
@@ -335,11 +360,11 @@
                              (for [[from to] [[:node-ids :node-ids]
                                               [:node-overrides :node-overrides]]]
                                (g/connect or-scene from self to))
+                             (g/connect scene :resource self :template-resource)
                              (g/connect self :template-path or-scene :id-prefix)))
                          []))))))
-
+  (input template-resource (g/protocol Resource))
   (input instance g/NodeID)
-  (input scene-path g/Str)
   (input node-ids IDMap :cascade-delete)
   (input node-overrides g/Any)
   (output template-path g/Str (g/fnk [id] (str id "/")))
@@ -352,9 +377,10 @@
 (def ^:private scene-outputs [[:id-prefix :id-prefix]])
 
 (defn- make-scene! [graph path nodes]
-  (let [resources (or (g/graph-value graph :resources) {})]
-    (tx-nodes (g/make-nodes graph [scene [Scene :path path]]
-                            (-> (g/set-graph-value graph :resources (assoc resources path scene))
+  (let [resources (or (g/graph-value graph :resources) {})
+        resource (->PathResource path)]
+    (tx-nodes (g/make-nodes graph [scene [Scene :resource resource]]
+                            (-> (g/set-graph-value graph :resources (assoc resources resource scene))
                               ((partial reduce (fn [tx [node-type props]]
                                                  (into tx (g/make-nodes graph [n [node-type props]]
                                                                         (for [[output input] scene-inputs]
@@ -367,7 +393,7 @@
   (with-clean-system
     (let [[scene node] (make-scene! world "my-scene" [[VisualNode {:id "my-node" :value "initial"}]])
           overrides {"my-template/my-node" {:value "new value"}}
-          [super-scene template] (make-scene! world "my-super-scene" [[Template {:id "my-template" :path {:path "my-scene" :overrides overrides}}]])]
+          [super-scene template] (make-scene! world "my-super-scene" [[Template {:id "my-template" :template {:path "my-scene" :overrides overrides}}]])]
       (is (= "initial" (g/node-value node :value)))
       (let [or-node (get (g/node-value template :node-ids) "my-template/my-node")]
         (is (= "new value" (g/node-value or-node :value))))
@@ -385,11 +411,25 @@
 (deftest hierarchical-ids
   (with-clean-system
     (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
-          [scene] (make-scene! world "scene" [[Template {:id "template" :path {:path "sub-scene" :overrides {}}}]])
-          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :path {:path "scene" :overrides {}}}]])]
+          [scene] (make-scene! world "scene" [[Template {:id "template" :template {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :template {:path "scene" :overrides {}}}]])]
       (is (has-node? sub-scene "my-node"))
       (is (has-node? scene "template/my-node"))
-      (is (has-node? super-scene "super-template/template/my-node")))))
+      (is (has-node? super-scene "super-template/template/my-node"))
+      (let [tmp (node-by-id super-scene "super-template/template")]
+        (g/transact (g/set-property sub-scene :resource (->PathResource "sub-scene2")))
+        (is (= "sub-scene2" (get-in (g/node-value tmp :template) [:resource :path])))))))
+
+;; Bug occurring in properties in overloads
+
+(deftest scene-paths
+  (with-clean-system
+    (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
+          [scene] (make-scene! world "scene" [[Template {:id "template" :template {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :template {:path "scene" :overrides {}}}]])
+          template (node-by-id super-scene "super-template/template")
+          or-scene (ffirst (g/sources-of template :template-resource))]
+      (is (= "sub-scene" (:path (g/node-value (g/override-original or-scene) :resource)))))))
 
 ;; User-defined dynamic properties
 

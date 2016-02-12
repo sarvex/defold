@@ -154,7 +154,7 @@
 ;; Definition handling
 ;; ---------------------------------------------------------------------------
 (defrecord NodeTypeImpl
-    [name supertypes interfaces protocols method-impls outputs transforms transform-types declared-properties inputs injectable-inputs cached-outputs input-dependencies substitutes cardinalities cascade-deletes  property-display-order]
+    [name supertypes interfaces protocols method-impls outputs transforms transform-types declared-properties passthroughs inputs injectable-inputs cached-outputs input-dependencies substitutes cardinalities cascade-deletes  property-display-order]
 
   gt/NodeType
   (supertypes            [_] supertypes)
@@ -174,7 +174,7 @@
   (input-cardinality     [_ input] (get cardinalities input))
   (cascade-deletes       [_]        cascade-deletes)
   (output-type           [_ output] (get transform-types output))
-  (property-passthrough? [_ output] false)
+  (passthroughs          [_] passthroughs)
   (property-display-order [this] property-display-order))
 
 (defmethod print-method NodeTypeImpl
@@ -208,7 +208,7 @@
 (defn inputs-for
   [pfn]
   (if (gt/pfnk? pfn)
-    (disj (util/fnk-arguments pfn) :this :g)
+    (disj (util/fnk-arguments pfn) :this :g :basis)
     #{}))
 
 (defn- warn-missing-arguments
@@ -306,6 +306,7 @@
       (update-in [:inputs]                combine-with merge      {} (from-supertypes description gt/declared-inputs))
       (update-in [:injectable-inputs]     combine-with set/union #{} (from-supertypes description gt/injectable-inputs))
       (update-in [:declared-properties]   combine-with merge      {} (from-supertypes description gt/declared-properties))
+      (update-in [:passthroughs]          combine-with set/union #{} (from-supertypes description gt/passthroughs))
       (update-in [:outputs]               combine-with merge      {} (from-supertypes description gt/declared-outputs))
       (update-in [:transforms]            combine-with merge      {} (from-supertypes description gt/transforms))
       (update-in [:transform-types]       combine-with merge      {} (from-supertypes description gt/transform-types))
@@ -408,17 +409,19 @@
   "Update the node type description with the given property."
   [description label property-type]
   (let [property-type   (if (contains? internal-keys label) (assoc property-type :internal? true) property-type)
-        getter          (if (ip/default-getter? property-type)
-                          (eval (ip/default-getter label))
-                          (ip/getter-for property-type))]
+        getter          (or (ip/getter-for property-type)
+                            (eval `(pc/fnk [~'this ~'basis ~(symbol (name label))] (gt/get-property ~'this ~'basis ~label))))]
     (-> description
         (update    :declared-properties     assoc     label  property-type)
         (update-in [:transforms]            assoc-in [label] getter)
         (update-in [:transform-types]       assoc     label  (:value-type property-type))
-        (update-in [:passthroughs]          #(conj (or % #{}) label))
         (cond->
             (not (internal-keys label))
-            (update-in [:property-order-decl] #(conj (or % []) label))))))
+            (update-in [:property-order-decl] #(conj (or % []) label))
+
+            (and (nil? (ip/validation property-type))
+                 (nil? getter))
+            (update-in [:passthroughs] #(conj (or % #{}) label))))))
 
 (defn attach-extern
   "Update the node type description with the given extern. It will be
@@ -719,8 +722,8 @@
         ~forms))
     forms))
 
-(defn- property-has-default-getter? [node-type transform] (get (gt/property-type node-type transform) :internal.property/default-getter))
-(defn- property-has-no-overriding-output? [node-type transform] (get-in node-type [:passthroughs transform]))
+(defn- property-has-default-getter? [node-type transform] (ip/default-getter? (gt/property-type node-type transform)))
+(defn- property-has-no-overriding-output? [node-type transform] (not (contains? (gt/declared-outputs node-type) transform)))
 (defn- has-validation? [node-type prop] (ip/validation (get (gt/declared-properties node-type) prop)))
 
 (defn apply-default-property-shortcut [self-name ctx-name transform node-type forms]
@@ -783,7 +786,7 @@
 
 (defn call-production-function [self-name ctx-name node-type node-type-name transform input-sym nodeid-sym output-sym forms]
   `(let [production-function# (get (gt/transforms ~node-type-name) ~transform)
-         ~output-sym          (production-function# (assoc ~input-sym :_node-id ~nodeid-sym :basis (:basis ~ctx-name)))]
+         ~output-sym (production-function# (assoc ~input-sym :_node-id ~nodeid-sym :basis (:basis ~ctx-name)))]
      ~forms))
 
 (defn cache-output [ctx-name node-type transform nodeid-sym output-sym forms]
@@ -814,12 +817,12 @@
                    :expected         ~output-schema
                    :actual           ~output-sym
                    :validation-error validation-error#})))
-       ~forms)))
+      ~forms)))
 
 (defn validate-output [self-name ctx-name node-type node-type-name transform nodeid-sym propmap-sym output-sym forms]
   (if (and (has-property? node-type transform)
-        (property-has-no-overriding-output? node-type transform)
-        (has-validation? node-type transform))
+           (property-has-no-overriding-output? node-type transform)
+           (has-validation? node-type transform))
     (let [property-definition (gt/property-type node-type transform)
           validation (ip/validation property-definition)
           validate-expr (property-validation-exprs self-name ctx-name node-type-name node-type propmap-sym transform)]
@@ -1045,8 +1048,7 @@
        (node-id        [this#]    (:_node-id this#))
        (node-type      [_ _]        ~node-type-name)
        (property-types [_ _]     (gt/public-properties ~node-type-name))
-       (get-property   [~'this basis# property#]
-         (get ~'this property#))
+       (get-property   [~'this basis# property#] (get ~'this property#))
        (set-property   [~'this basis# property# value#]
          (let [type# (gt/node-type ~'this basis#)]
            (assert (contains? (gt/property-labels type#) property#)
@@ -1132,8 +1134,9 @@
                                                                    (assoc-in [:properties k :original-value]
                                                                              (get-in orig-props [k :value]))))
                                                props properties))
-        ((gt/transforms type) output) ((output-fn type output) this evaluation-context)
-        ((gt/input-labels type) output) ((output-fn type output) this evaluation-context)
+        (or ((gt/passthroughs type) output)
+            ((gt/transforms type) output)
+            ((gt/input-labels type) output)) ((output-fn type output) this evaluation-context)
         true (let [dyn-properties (node-value* original :_properties evaluation-context)]
                (if (contains? (:properties dyn-properties) output)
                  (get properties output)
