@@ -454,11 +454,12 @@
                                                 (concat
                                                   (:tx-data override)
                                                   (g/connect self :id or-scene :super-id)
-                                                  (g/connect or-scene :_node-id self :template-scene-node)
-                                                  (g/connect or-scene :node-ids self :node-ids)
-                                                  (g/connect or-scene :node-outline self :template-outline)
-                                                  (g/connect or-scene :scene self :template-scene)
-                                                  (g/connect scene-node :resource self :template-resource)
+                                                  (for [[from to] [[:_node-id :template-scene-node]
+                                                                   [:node-ids :node-ids]
+                                                                   [:node-outline :template-outline]
+                                                                   [:scene :template-scene]
+                                                                   [:resource :template-resource]]]
+                                                    (g/connect or-scene from self to))
                                                   (for [[id data] (:overrides new-value)
                                                         :let [node-id (node-mapping id)]
                                                         :when node-id

@@ -190,7 +190,10 @@
           app-view (test-util/setup-app-view!)
           node-id (test-util/resource-node project "/gui/super_scene.gui")
           sub-node (gui-node node-id "scene/sub_scene/sub_box")]
-      (is (not= nil sub-node)))))
+      (is (not= nil sub-node))
+      (let [template (gui-node node-id "scene/sub_scene")
+            resource (workspace/find-resource workspace "/gui/sub_scene.gui")]
+        (is (= resource (get-in (g/node-value template :_properties) [:properties :template :value :resource])))))))
 
 (deftest gui-template-selection
   (with-clean-system
