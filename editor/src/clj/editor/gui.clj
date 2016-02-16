@@ -441,35 +441,43 @@
             (value (g/fnk [template-resource]
                           {:resource template-resource :overrides {}}))
             (set (fn [basis self old-value new-value]
-                   (let [project (project/get-project self)]
-                     (project/connect-resource-node project (:resource new-value) self []
-                                            (fn [scene-node]
-                                              (let [override (g/override basis scene-node {:traverse? (fn [[src src-label tgt tgt-label]]
-                                                                                                        (or (g/node-instance? basis GuiNode src)
-                                                                                                            (g/node-instance? basis NodesNode src)
-                                                                                                            (g/node-instance? basis GuiSceneNode src)))})
-                                                    id-mapping (:id-mapping override)
-                                                    or-scene (get id-mapping scene-node)
-                                                    node-mapping (comp id-mapping (g/node-value scene-node :node-ids :basis basis))]
-                                                (concat
-                                                  (:tx-data override)
-                                                  (g/connect self :id or-scene :super-id)
-                                                  (for [[from to] [[:_node-id :template-scene-node]
-                                                                   [:node-ids :node-ids]
-                                                                   [:node-outline :template-outline]
-                                                                   [:scene :template-scene]
-                                                                   [:resource :template-resource]]]
-                                                    (g/connect or-scene from self to))
-                                                  (for [[id data] (:overrides new-value)
-                                                        :let [node-id (node-mapping id)]
-                                                        :when node-id
-                                                        [label value] data]
-                                                    (g/set-property node-id label value))))))))))
+                   (let [project (project/get-project self)
+                         current-scene (g/node-feeding-into basis self :template-resource)]
+                     (concat
+                       (if current-scene
+                         (g/delete-node current-scene)
+                         [])
+                       (if (and new-value (:resource new-value))
+                         (do
+                           (project/connect-resource-node project (:resource new-value) self []
+                                                (fn [scene-node]
+                                                  (let [override (g/override basis scene-node {:traverse? (fn [basis [src src-label tgt tgt-label]]
+                                                                                                            (if (not= src current-scene)
+                                                                                                              (or (g/node-instance? basis GuiNode src)
+                                                                                                                  (g/node-instance? basis NodesNode src)
+                                                                                                                  (g/node-instance? basis GuiSceneNode src))
+                                                                                                              false))})
+                                                        id-mapping (:id-mapping override)
+                                                        or-scene (get id-mapping scene-node)
+                                                        node-mapping (comp id-mapping (g/node-value scene-node :node-ids :basis basis))]
+                                                    (concat
+                                                      (:tx-data override)
+                                                      (g/connect self :id or-scene :super-id)
+                                                      (for [[from to] [[:node-ids :node-ids]
+                                                                       [:node-outline :template-outline]
+                                                                       [:scene :template-scene]
+                                                                       [:resource :template-resource]]]
+                                                        (g/connect or-scene from self to))
+                                                      (for [[id data] (:overrides new-value)
+                                                            :let [node-id (node-mapping id)]
+                                                            :when node-id
+                                                            [label value] data]
+                                                        (g/set-property node-id label value)))))))
+                         []))))))
   (property inherit-alpha g/Bool (default true))
-  (input template-resource (g/protocol resource/Resource))
+  (input template-resource (g/protocol resource/Resource) :cascade-delete)
   (input template-outline outline/OutlineData)
   (input template-scene g/Any)
-  (input template-scene-node g/NodeID :cascade-delete)
 
   ; Text
   (property text g/Str (dynamic visible text?))

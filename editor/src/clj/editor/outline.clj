@@ -54,12 +54,12 @@
   (input child-outlines OutlineData :array)
   (output node-outline OutlineData :abstract))
 
-(defn- default-copy-traverse [[src-node src-label tgt-node tgt-label]]
+(defn- default-copy-traverse [basis [src-node src-label tgt-node tgt-label]]
   (and (g/node-instance? OutlineNode tgt-node)
     (or (= :child-outlines tgt-label)
       (= :source-outline tgt-label))
-    (not (and (g/node-instance? resource/ResourceNode src-node)
-           (some? (resource/path (g/node-value src-node :resource)))))))
+    (not (and (g/node-instance? basis resource/ResourceNode src-node)
+           (some? (resource/path (g/node-value src-node :resource :basis basis)))))))
 
 (defn copy
   ([src-item-iterators]

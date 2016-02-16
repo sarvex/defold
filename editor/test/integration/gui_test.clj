@@ -205,3 +205,15 @@
       (project/select! project [tmpl-node])
       (let [props (g/node-value project :selected-node-properties)]
         (is (not (empty? (keys props))))))))
+
+(deftest gui-template-set-leak
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          app-view (test-util/setup-app-view!)
+          node-id (test-util/resource-node project "/gui/scene.gui")
+          sub-node (test-util/resource-node project "/gui/sub_scene.gui")
+          tmpl-node (gui-node node-id "sub_scene")]
+      (is (= 1 (count (g/overrides sub-node))))
+      (g/transact (g/set-property tmpl-node :template {:resource (workspace/find-resource workspace "/gui/layers.gui") :overrides {}}))
+      (is (= 0 (count (g/overrides sub-node)))))))

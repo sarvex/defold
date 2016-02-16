@@ -862,16 +862,16 @@
           [(mapcat #(gt/arcs-by-tail basis %) nodes)
            (mapcat #(gt/arcs-by-head basis %) nodes)]))
 
-(defn- in-same-graph? [arc]
+(defn- in-same-graph? [_ arc]
   (apply = (map node-id->graph-id (take-nth 2 arc))))
 
-(defn- predecessors [pred basis node-id]
-  (let [preds (every-pred in-same-graph? pred)]
-    (mapv first (filter preds (inputs basis node-id)))))
+(defn- predecessors [preds basis node-id]
+  (let [preds (conj preds in-same-graph?)]
+    (mapv first (filter #(reduce (fn [v f] (and v (f basis %))) true preds) (inputs basis node-id)))))
 
 (defn- input-traverse
   [basis pred root-ids]
-  (ig/pre-traverse basis root-ids (partial predecessors pred)))
+  (ig/pre-traverse basis root-ids (partial predecessors [pred])))
 
 (defn default-node-serializer
   [basis node]
@@ -897,7 +897,7 @@
   predicate returns true, then that node --- or a stand-in for it ---
   will be included in the fragment.
 
-  `:traverse?` will be called with the arc data.
+  `:traverse?` will be called with the basis and arc data.
 
    The `:serializer` function determines _how_ to represent the node
   in the fragment.  `dynamo.graph/default-node-serializer` adds a map
@@ -989,8 +989,8 @@
     (override (now) root-id opts))
   ([basis root-id {:keys [traverse?] :or {traverse? (constantly true)}}]
     (let [graph-id (node-id->graph-id root-id)
-          pred (every-pred (partial traverse-cascade-delete basis) traverse?)
-          node-ids (ig/pre-traverse basis [root-id] (partial predecessors pred))
+          preds [traverse-cascade-delete traverse?]
+          node-ids (ig/pre-traverse basis [root-id] (partial predecessors preds))
           override-id (is/next-override-id @*the-system* graph-id)
           overrides (mapv (partial make-override-node graph-id override-id) node-ids)
           new-node-ids (map gt/node-id overrides)

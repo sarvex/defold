@@ -336,34 +336,35 @@
             (value (g/fnk [template-resource]
                           {:resource template-resource :overrides {}}))
             (set (fn [basis self old-value new-value]
-                   (concat
-                     (if-let [instance (g/node-value self :instance :basis basis)]
-                       (g/delete-node instance)
-                       [])
-                     (let [gid (g/node-id->graph-id self)
-                           path (:path new-value)]
-                       (if-let [scene (scene-by-path basis gid path)]
-                         (let [{:keys [id-mapping tx-data]} (g/override scene {})
-                               path (g/node-value self :template-path :basis basis)
-                               mapping (comp id-mapping (into {} (map (fn [[k v]] [(str path k) v])
-                                                                      (g/node-value scene :node-ids :basis basis))))
-                               set-prop-data (for [[id props] (:overrides new-value)
-                                                   :let [node-id (mapping id)]
-                                                   [key value] props]
-                                               (g/set-property node-id key value))
-                               or-scene (id-mapping scene)]
-                           (concat
-                             tx-data
-                             set-prop-data
-                             (for [[from to] [[:node-ids :node-ids]
-                                              [:node-overrides :node-overrides]]]
-                               (g/connect or-scene from self to))
-                             (g/connect scene :resource self :template-resource)
-                             (g/connect self :template-path or-scene :id-prefix)))
-                         []))))))
-  (input template-resource (g/protocol Resource))
+                   (let [current-scene (g/node-feeding-into self :template-resource)]
+                     (concat
+                      (if current-scene
+                        (g/delete-node current-scene)
+                        [])
+                      (let [gid (g/node-id->graph-id self)
+                            path (:path new-value)]
+                        (if-let [scene (scene-by-path basis gid path)]
+                          (let [{:keys [id-mapping tx-data]} (g/override scene {})
+                                path (g/node-value self :template-path :basis basis)
+                                mapping (comp id-mapping (into {} (map (fn [[k v]] [(str path k) v])
+                                                                       (g/node-value scene :node-ids :basis basis))))
+                                set-prop-data (for [[id props] (:overrides new-value)
+                                                    :let [node-id (mapping id)]
+                                                    [key value] props]
+                                                (g/set-property node-id key value))
+                                or-scene (id-mapping scene)]
+                            (concat
+                              tx-data
+                              set-prop-data
+                              (for [[from to] [[:node-ids :node-ids]
+                                               [:node-overrides :node-overrides]
+                                               [:resource :template-resource]]]
+                                (g/connect or-scene from self to))
+                              (g/connect self :template-path or-scene :id-prefix)))
+                          [])))))))
+  (input template-resource (g/protocol Resource) :cascade-delete)
+  (input node-ids IDMap)
   (input instance g/NodeID)
-  (input node-ids IDMap :cascade-delete)
   (input node-overrides g/Any)
   (output template-path g/Str (g/fnk [id] (str id "/")))
   (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids))))

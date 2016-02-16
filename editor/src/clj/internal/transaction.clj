@@ -366,7 +366,7 @@
                 or-node (ig/node-by-id-at basis or)
                 override-id (gt/override-id or-node)
                 traverse-fn (ig/override-traverse-fn basis override-id)]
-            (if (traverse-fn source-id source-label target-id target-label)
+            (if (traverse-fn basis [source-id source-label target-id target-label])
               (let [gid (gt/node-id->graph-id or)
                    new-sub-id (next-node-id ctx gid)
                    new-sub-node (in/make-override-node override-id new-sub-id source-id {})]

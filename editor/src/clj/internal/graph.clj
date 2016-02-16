@@ -239,7 +239,7 @@
 (def ^:private sources-of (comp arcs->tuples gt/arcs-by-tail))
 
 (defn- successors-sources [pred basis node-id]
-  (mapv first (filter pred (sources-of basis node-id))))
+  (mapv first (filter (partial pred basis) (sources-of basis node-id))))
 
 (defn pre-traverse-sources
   [basis start traverse?]
