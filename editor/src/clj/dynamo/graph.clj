@@ -34,7 +34,7 @@
 
 (namespaces/import-vars [internal.graph.types always PropertyType property-value-type property-default-value property-tags property-type? Properties])
 
-(namespaces/import-vars [internal.graph arc type-compatible? node-by-id-at node-ids])
+(namespaces/import-vars [internal.graph arc type-compatible? node-by-id-at node-ids pre-traverse])
 
 (namespaces/import-macro schema.core/defn      s-defn)
 (namespaces/import-macro schema.core/defrecord s-defrecord)
@@ -74,7 +74,8 @@
   ([node-id]
    (node-type* (now) node-id))
   ([basis node-id]
-   (gt/node-type (ig/node-by-id-at basis node-id) basis)))
+   (when-let [n (ig/node-by-id-at basis node-id)]
+     (gt/node-type n basis))))
 
 (defn node-type
   "Return the node-type given a node. Uses the current basis if not provided."
@@ -1011,7 +1012,8 @@
   ([node-id]
     (override-original (now) node-id))
   ([basis node-id]
-    (gt/original (node-by-id basis node-id))))
+    (when-let [n (node-by-id basis node-id)]
+      (gt/original n))))
 
 (defn override?
   ([node-id]
