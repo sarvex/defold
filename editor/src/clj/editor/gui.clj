@@ -344,27 +344,31 @@
 (g/defnk pie? [type] (= :type-pie type))
 (g/defnk template? [type] (= :type-template type))
 
-(defn- v3->v4 [v3]
-  (conj v3 1.0))
+(defn- v3->v4 [v3 default]
+  (conj (or v3 default) 1.0))
 
-(g/defnk produce-node-msg [type parent index _declared-properties]
+(g/defnk produce-node-msg [type parent index _declared-properties _node-id basis]
   (let [pb-renames {:x-anchor :xanchor
-                    :y-anchor :yanchor
-                    :outer-bounds :outerBounds
-                    :inner-radius :innerRadius
-                    :perimeter-vertices :perimeterVertices
-                    :pie-fill-angle :pieFillAngle}
-        v3-fields [:position :rotation :scale :size]
+                    :y-anchor :yanchor}
+        v3-fields {:position [0.0 0.0 0.0] :rotation [0.0 0.0 0.0] :scale [1.0 1.0 1.0] :size [200.0 100.0 0.0]}
         props (:properties _declared-properties)
-        msg (-> (into {:parent parent
-                       :type type
-                       :index index}
-                      (map (fn [[k v]] [k (:value v)])
-                           (filter (fn [[k v]] (and (get v :visible true)
-                                                    (not (contains? (set (keys pb-renames)) k))))
-                                   props)))
+        indices (clojure.set/map-invert (protobuf/fields-by-indices Gui$NodeDesc))
+        overrides (map first (filter (fn [[k v]] (contains? v :original-value)) props))
+        msg (-> {:parent parent
+                 :type type
+                 :index index
+                 :overridden-fields (mapv indices overrides)
+                 :template-node-child (not (nil? (g/override-original basis _node-id)))}
+              (into (map (fn [[k v]] [k (:value v)])
+                         (filter (fn [[k v]] (and (get v :visible true)
+                                                  (not (contains? (set (keys pb-renames)) k))))
+                                 props)))
+              (cond->
+                (= type :type-template) (->
+                                          (update :template (fn [t] (resource/proj-path (:resource t))))
+                                          (assoc :color [1.0 1.0 1.0 1.0])))
               (into (map (fn [[k v]] [v (get-in props [k :value])]) pb-renames)))
-        msg (reduce (fn [msg k] (update msg k v3->v4)) msg v3-fields)]
+        msg (reduce (fn [msg [k default]] (update msg k v3->v4 default)) msg v3-fields)]
     msg))
 
 (defn- attach-gui-node [self parent gui-node type]
@@ -374,7 +378,7 @@
     (g/connect gui-node :node-outline parent :child-outlines)
     (g/connect gui-node :scene parent :child-scenes)
     (g/connect gui-node :index parent :child-indices)
-    (g/connect gui-node :pb-msg self :node-msgs)
+    (g/connect gui-node :pb-msgs self :node-msgs)
     (g/connect gui-node :node-ids self :node-ids)
     (g/connect self :layer-ids gui-node :layer-ids)
     (g/connect self :textures gui-node :textures)
@@ -466,11 +470,11 @@
                                                       (for [[from to] [[:node-ids :node-ids]
                                                                        [:node-outline :template-outline]
                                                                        [:scene :template-scene]
-                                                                       [:resource :template-resource]]]
+                                                                       [:resource :template-resource]
+                                                                       [:pb-msg :scene-pb-msg]]]
                                                         (g/connect or-scene from self to))
                                                       (for [[id data] (:overrides new-value)
                                                             :let [node-id (node-mapping id)]
-                                                            :when node-id
                                                             [label value] data]
                                                         (g/set-property node-id label value)))))))
                          []))))))
@@ -626,7 +630,11 @@
          :children (if template-outline
                      (get-in template-outline [:children 0 :children])
                      (vec (sort-by :index child-outlines)))})))
-  (output pb-msg g/Any produce-node-msg)
+  (output pb-msg g/Any :cached produce-node-msg)
+  (output pb-msgs g/Any :cached (g/fnk [id type pb-msg scene-pb-msg]
+                                       (if (= type :type-template)
+                                         (into [pb-msg] (map #(cond-> % (empty? (:parent %)) (assoc :parent id)) (:nodes scene-pb-msg)))
+                                         [pb-msg])))
   (output aabb g/Any (g/fnk [pivot size type font-map text line-break template-scene]
                             (if template-scene
                               (:aabb template-scene)
@@ -647,6 +655,7 @@
                                         {:text text :font-data font-data
                                          :line-break line-break :outline outline :shadow shadow :max-width (first size)}))
   (input node-ids IDMap)
+  (input scene-pb-msg g/Any)
   (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids))))
 
 (g/defnode ImageTextureNode
@@ -858,11 +867,12 @@
                :children (mapv (partial apply-alpha 1.0) child-scenes)}]
     (sort-scene scene)))
 
-(g/defnk produce-pb-msg [script-resource material-resource adjust-reference node-msgs layer-msgs font-msgs texture-msgs layout-msgs]
+(g/defnk produce-pb-msg [script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs]
   {:script (proj-path script-resource)
    :material (proj-path material-resource)
    :adjust-reference adjust-reference
-   :nodes (map #(dissoc % :index) (sort-by :index node-msgs))
+   :background-color background-color
+   :nodes (map #(dissoc % :index) (flatten (sort-by #(get-in % [0 :index]) node-msgs)))
    :layers (map #(dissoc % :index) (sort-by :index layer-msgs))
    :fonts font-msgs
    :textures texture-msgs
@@ -927,6 +937,7 @@
   (property adjust-reference g/Keyword (dynamic edit-type (g/always (properties/->pb-choicebox Gui$SceneDesc$AdjustReference))))
   (property pb g/Any (dynamic visible (g/always false)))
   (property def g/Any (dynamic visible (g/always false)))
+  (property background-color types/Color (dynamic visible (g/always false)) (default [1 1 1 1]))
 
   (input script-resource (g/protocol resource/Resource))
 
@@ -1169,7 +1180,7 @@
     (conj (subvec color 0 3) alpha)))
 
 (defn- extract-overrides [node-desc]
-  (select-keys node-desc (protobuf/fields-by-indices Gui$NodeDesc (:overridden-fields node-desc))))
+  (select-keys node-desc (map (protobuf/fields-by-indices Gui$NodeDesc) (:overridden-fields node-desc))))
 
 (def node-property-fns (-> {}
                          (into (map (fn [label] [label [label (comp v4->v3 label)]]) [:position :rotation :scale :size]))
@@ -1178,11 +1189,7 @@
                                      [:shadow :shadow-alpha]
                                      [:outline :outline-alpha]]))
                          (into (map (fn [[ddf-label label]] [ddf-label [label ddf-label]]) [[:xanchor :x-anchor]
-                                                                                            [:yanchor :y-anchor]
-                                                                                            [:outerBounds :outer-bounds]
-                                                                                            [:innerRadius :inner-radius]
-                                                                                            [:perimeterVertices :perimeter-vertices]
-                                                                                            [:pieFillAngle :pie-fill-angle]]))))
+                                                                                            [:yanchor :y-anchor]]))))
 
 (defn- convert-node-desc [node-desc]
   (into {} (map (fn [[key val]] (let [[new-key f] (get node-property-fns key [key key])]
@@ -1196,11 +1203,15 @@
         workspace (project/workspace project)
         graph-id (g/node-id->graph-id self)
         node-descs (map convert-node-desc (:nodes scene))
-        tmpl-node-descs (into {} (map (fn [n] [(:id n) {:parent (:parent n) :data (extract-overrides n)}]) (filter :template-node-child node-descs)))
+        tmpl-node-descs (into {} (map (fn [n] [(:id n) {:template (:parent n) :data (extract-overrides n)}]) (filter :template-node-child node-descs)))
+        tmpl-node-descs (into {} (map (fn [[id data]] [id (update data :template (fn [parent] (if (contains? tmpl-node-descs parent)
+                                                                                                (recur (:template (get tmpl-node-descs parent)))
+                                                                                                parent)))])
+                                      tmpl-node-descs))
         node-descs (filter (complement :template-node-child) node-descs)
-        tmpl-children (group-by (comp :parent second) tmpl-node-descs)
+        tmpl-children (group-by (comp :template second) tmpl-node-descs)
         tmpl-roots (filter (complement tmpl-node-descs) (map first tmpl-children))
-        template-data (into {} (map (fn [r] [r (into {} (map (fn [[id tmpl]] [(s/replace id (str r "/") "") (:data tmpl)]) (rest (tree-seq (constantly true) (comp tmpl-children first) [r nil]))))]) tmpl-roots))
+        template-data (into {} (map (fn [r] [r (into {} (map (fn [[id tmpl]] [(subs id (inc (count r))) (:data tmpl)]) (rest (tree-seq (constantly true) (comp tmpl-children first) [r nil]))))]) tmpl-roots))
         template-resources (map (comp resolve-fn :template) (filter #(= :type-template (:type %)) node-descs))
         texture-resources (map (comp resolve-fn :texture) (:textures scene))
         scene-load-data (project/load-resource-nodes project (map #(project/get-resource-node project %) (concat template-resources
@@ -1212,6 +1223,7 @@
       (g/set-property self :adjust-reference (:adjust-reference scene))
       (g/set-property self :pb scene)
       (g/set-property self :def def)
+      (g/set-property self :background-color (:background-color scene))
       (g/connect project :settings self :project-settings)
       (g/make-nodes graph-id [fonts-node FontsNode]
                     (g/connect fonts-node :_node-id self :fonts-node)

@@ -129,4 +129,4 @@
     (is (= m new-m))))
 
 (deftest field-order
-  (is (= [:uint-value] (protobuf/fields-by-indices TestDdf$Msg [1]))))
+  (is (= :uint-value ((protobuf/fields-by-indices TestDdf$Msg) 1))))

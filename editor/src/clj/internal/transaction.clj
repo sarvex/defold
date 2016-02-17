@@ -283,14 +283,19 @@
 
 (defn- invoke-setter
   [ctx node-id node property old-value new-value]
-  (let [ctx (mark-activated ctx node-id property)]
-    (if-let [setter-fn (in/setter-for (:basis ctx) node property)]
-      (-> ctx
-        (update :basis ip/property-default-setter node-id property old-value new-value)
-        (apply-tx (setter-fn (:basis ctx) node-id old-value new-value)))
-      (-> ctx
-        (update :basis ip/property-default-setter node-id property old-value new-value)
-        (update-in [:properties-modified node-id] conj property)))))
+  (let [setter-fn (in/setter-for (:basis ctx) node property)]
+    (-> ctx
+      (update :basis ip/property-default-setter node-id property old-value new-value)
+      (cond->
+        (not= old-value new-value)
+        (->
+          (mark-activated node-id property)
+          (cond->
+            (not (nil? setter-fn))
+            (apply-tx (setter-fn (:basis ctx) node-id old-value new-value))
+
+            (nil? setter-fn)
+            (update-in [:properties-modified node-id] conj property)))))))
 
 (defn apply-defaults [ctx node]
   (let [node-id (gt/node-id node)]
@@ -325,9 +330,7 @@
     (if-let [node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
       (let [old-value (gt/get-property node basis property)
             new-value (apply fn old-value args)]
-        (if (not= old-value new-value)
-          (invoke-setter ctx node-id node property old-value new-value)
-          ctx))
+        (invoke-setter ctx node-id node property old-value new-value))
       ctx)))
 
 (defn- ctx-set-property-to-nil [ctx node-id node property]
