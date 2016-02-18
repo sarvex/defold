@@ -29,7 +29,7 @@
             Gui$NodeDesc$Pivot Gui$NodeDesc$AdjustMode Gui$NodeDesc$BlendMode Gui$NodeDesc$ClippingMode Gui$NodeDesc$PieBounds]
            [editor.types AABB]
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
-           [javax.vecmath Matrix4d Point3d Quat4d]
+           [javax.vecmath Matrix4d Point3d Quat4d Vector3d]
            [java.awt.image BufferedImage]
            [com.defold.editor.pipeline TextureSetGenerator$UVTransform]
            [org.apache.commons.io FilenameUtils]
@@ -379,6 +379,7 @@
     (g/connect gui-node :scene parent :child-scenes)
     (g/connect gui-node :index parent :child-indices)
     (g/connect gui-node :pb-msgs self :node-msgs)
+    (g/connect gui-node :rt-pb-msgs self :node-rt-msgs)
     (g/connect gui-node :node-ids self :node-ids)
     (g/connect self :layer-ids gui-node :layer-ids)
     (g/connect self :textures gui-node :textures)
@@ -408,6 +409,21 @@
 
 (def ^:private IDMap {g/Str g/NodeID})
 (def ^:private TemplateData {:resource (g/maybe (g/protocol resource/Resource)) :overrides {}})
+
+(defn- trans-position [pos parent-p ^Quat4d parent-q parent-s]
+  (let [[x y z] (mapv * pos parent-s)]
+    (conj (->>
+           (math/rotate parent-q (Vector3d. x y z))
+           (math/vecmath->clj)
+           (mapv + parent-p))
+          1.0)))
+
+(defn- trans-rotation [rot ^Quat4d parent-q]
+  (let [q (math/euler->quat rot)]
+    (-> q
+      (doto (.mul parent-q q))
+      (math/quat->euler)
+      (conj 1.0))))
 
 (def GuiNode)
 (def NodesNode)
@@ -471,7 +487,8 @@
                                                                        [:node-outline :template-outline]
                                                                        [:scene :template-scene]
                                                                        [:resource :template-resource]
-                                                                       [:pb-msg :scene-pb-msg]]]
+                                                                       [:pb-msg :scene-pb-msg]
+                                                                       [:rt-pb-msg :scene-rt-pb-msg]]]
                                                         (g/connect or-scene from self to))
                                                       (for [[id data] (:overrides new-value)
                                                             :let [node-id (node-mapping id)]
@@ -635,6 +652,24 @@
                                        (if (= type :type-template)
                                          (into [pb-msg] (map #(cond-> % (empty? (:parent %)) (assoc :parent id)) (:nodes scene-pb-msg)))
                                          [pb-msg])))
+  (output rt-pb-msgs g/Any :cached (g/fnk [type scene-rt-pb-msg pb-msg]
+                                          (if (= type :type-template)
+                                            (let [parent-q (math/euler->quat (:rotation pb-msg))]
+                                              (into [] (map #(-> %
+                                                               (assoc :index (:index pb-msg))
+                                                               (cond->
+                                                                 (empty? (:layer %)) (assoc :layer (:layer pb-msg))
+                                                                 (:inherit-alpha %) (->
+                                                                                      (update :alpha * (:alpha pb-msg))
+                                                                                      (assoc :inherit-alpha (:inherit-alpha pb-msg)))
+                                                                 (empty? (:parent %)) (->
+                                                                                        (assoc :parent (:parent pb-msg))
+                                                                                        ;; In fact incorrect, but only possibility to retain rotation/scale separation
+                                                                                        (update :scale (partial mapv * (:scale pb-msg)))
+                                                                                        (update :position trans-position (:position pb-msg) parent-q (:scale pb-msg))
+                                                                                        (update :rotation trans-rotation parent-q))))
+                                                           (:nodes scene-rt-pb-msg))))
+                                            [pb-msg])))
   (output aabb g/Any (g/fnk [pivot size type font-map text line-break template-scene]
                             (if template-scene
                               (:aabb template-scene)
@@ -656,6 +691,7 @@
                                          :line-break line-break :outline outline :shadow shadow :max-width (first size)}))
   (input node-ids IDMap)
   (input scene-pb-msg g/Any)
+  (input scene-rt-pb-msg g/Any)
   (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids))))
 
 (g/defnode ImageTextureNode
@@ -867,7 +903,7 @@
                :children (mapv (partial apply-alpha 1.0) child-scenes)}]
     (sort-scene scene)))
 
-(g/defnk produce-pb-msg [script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs]
+(defn- ->scene-pb-msg [script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs]
   {:script (proj-path script-resource)
    :material (proj-path material-resource)
    :adjust-reference adjust-reference
@@ -877,6 +913,12 @@
    :fonts font-msgs
    :textures texture-msgs
    :layouts layout-msgs})
+
+(g/defnk produce-pb-msg [script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs]
+  (->scene-pb-msg script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs))
+
+(g/defnk produce-rt-pb-msg [script-resource material-resource adjust-reference background-color node-rt-msgs layer-msgs font-msgs texture-msgs layout-msgs]
+  (->scene-pb-msg script-resource material-resource adjust-reference background-color node-rt-msgs layer-msgs font-msgs texture-msgs layout-msgs))
 
 (g/defnk produce-save-data [resource pb-msg]
   {:resource resource
@@ -895,16 +937,16 @@
                             (:dep-resources user-data)))]
     {:resource resource :content (protobuf/map->bytes (:pb-class user-data) pb)}))
 
-(g/defnk produce-build-targets [_node-id project-id resource pb dep-build-targets]
+(g/defnk produce-build-targets [_node-id project-id resource rt-pb-msg dep-build-targets]
   (let [def pb-def
         dep-build-targets (flatten dep-build-targets)
         deps-by-source (into {} (map #(let [res (:resource %)] [(proj-path (:resource res)) res]) dep-build-targets))
-        resource-fields (mapcat (fn [field] (if (vector? field) (mapv (fn [i] (into [(first field) i] (rest field))) (range (count (get pb (first field))))) [field])) (:resource-fields def))
-        dep-resources (map (fn [label] [label (get deps-by-source (if (vector? label) (get-in pb label) (get pb label)))]) resource-fields)]
+        resource-fields (mapcat (fn [field] (if (vector? field) (mapv (fn [i] (into [(first field) i] (rest field))) (range (count (get rt-pb-msg (first field))))) [field])) (:resource-fields def))
+        dep-resources (map (fn [label] [label (get deps-by-source (if (vector? label) (get-in rt-pb-msg label) (get rt-pb-msg label)))]) resource-fields)]
     [{:node-id _node-id
       :resource (workspace/make-build-resource resource)
       :build-fn build-pb
-      :user-data {:pb pb
+      :user-data {:pb rt-pb-msg
                   :pb-class (:pb-class def)
                   :def def
                   :dep-resources dep-resources}
@@ -949,6 +991,7 @@
   (input dep-build-targets g/Any :array)
   (input project-settings g/Any)
   (input node-msgs g/Any :array)
+  (input node-rt-msgs g/Any :array)
   (input font-msgs g/Any :array)
   (input texture-msgs g/Any :array)
   (input layer-msgs g/Any :array)
@@ -977,6 +1020,7 @@
                                               (geom/aabb-incorporate w h 0))]
                              (reduce geom/aabb-union scene-aabb (map :aabb child-scenes)))))
   (output pb-msg g/Any :cached produce-pb-msg)
+  (output rt-pb-msg g/Any :cached produce-rt-pb-msg)
   (output save-data g/Any :cached produce-save-data)
   (output build-targets g/Any :cached produce-build-targets)
   (output scene g/Any :cached produce-scene)
