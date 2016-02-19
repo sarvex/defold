@@ -876,8 +876,8 @@
 (defn default-node-serializer
   [basis node]
   (let [node-id (gt/node-id node)
-        property-labels (keys (gt/property-types node basis))
-        all-node-properties (reduce (fn [props label] (assoc props label (gt/get-property node basis label))) {} property-labels)
+        all-node-properties (into {} (map (fn [[key value]] [key (:value value)])
+                                          (:properties (node-value node-id :_declared-properties))))
         properties-without-fns (util/filterm (comp not fn? val) all-node-properties)]
     {:node-type  (node-type basis node)
      :properties properties-without-fns}))

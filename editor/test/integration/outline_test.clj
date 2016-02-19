@@ -199,6 +199,24 @@
           (drop! project root [0])
           (is (= second-id (get (outline root [0 1]) :label))))))))
 
+(deftest dnd-gui-template
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/gui/scene.gui")
+          tmpl-path [0 1]
+          new-pos [-100.0 0.0 0.0]]
+      (is (= "sub_scene" (get (outline root tmpl-path) :label)))
+      (is (not (nil? (outline root (conj tmpl-path 0)))))
+      (let [sub-id (:node-id (outline root (conj tmpl-path 0)))]
+        (g/transact (g/set-property sub-id :position new-pos)))
+      (drag! root tmpl-path)
+      (drop! project root [0 0])
+      (let [tmpl-path [0 0 1]]
+        (is (= "sub_scene" (get (outline root tmpl-path) :label)))
+        (is (not (nil? (outline root (conj tmpl-path 0)))))
+        (let [sub-id (:node-id (outline root (conj tmpl-path 0)))]
+          (is (= new-pos (get-in (g/node-value sub-id :_properties) [:properties :position :value]))))))))
+
 (deftest outline-shows-missing-parts
   (with-clean-system
     (let [[workspace project] (log/without-logging (setup world "resources/missing_project"))]  ; no logging as purposely partially broken project
