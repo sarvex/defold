@@ -383,13 +383,15 @@
     (g/connect gui-node :node-ids self :node-ids)
     (g/connect gui-node :_declared-properties self :node-properties)
     (g/connect self :layer-ids gui-node :layer-ids)
-    (g/connect self :textures gui-node :textures)
     (g/connect self :super-id gui-node :super-id)
     (case type
-      (:type-box :type-pie) (concat
-                              (g/connect self :textures gui-node :textures)
-                              (g/connect self :material-shader gui-node :material-shader))
+      (:type-box :type-pie) (for [[from to] [[:texture-ids :texture-ids]
+                                             [:material-shader :material-shader]]]
+                              (g/connect self from gui-node to))
       :type-text (g/connect self :font-ids gui-node :font-ids)
+      :type-template (for [[from to] [[:texture-ids :texture-ids]
+                                      [:font-ids :font-ids]]]
+                       (g/connect self from gui-node to))
       [])))
 
 (def GuiSceneNode nil)
@@ -496,7 +498,9 @@
                                                                                [:rt-pb-msg :scene-rt-pb-msg]
                                                                                [:node-properties :template-node-properties]]]
                                                                 (g/connect or-scene from self to))
-                                                              (for [[from to] [[:layer-ids :layer-ids]]]
+                                                              (for [[from to] [[:layer-ids :layer-ids]
+                                                                               [:texture-ids :texture-ids]
+                                                                               [:font-ids :font-ids]]]
                                                                 (g/connect self from or-scene to))
                                                               (for [[id data] (:overrides new-value)
                                                                     :let [node-id (node-mapping id)]
@@ -546,12 +550,12 @@
                                   :precision 0.01})))
 
   (property texture g/Str
-            (dynamic edit-type (g/fnk [textures] (properties/->choicebox (cons "" (keys textures)))))
+            (dynamic edit-type (g/fnk [texture-ids] (properties/->choicebox (cons "" (keys texture-ids)))))
             (dynamic visible box-pie?)
             (value (g/fnk [texture-input animation]
                      (str texture-input (if (and animation (not (empty? animation))) (str "/" animation) ""))))
             (set (fn [basis self _ ^String new-value]
-                   (let [textures (g/node-value self :textures :basis basis)
+                   (let [textures (g/node-value self :texture-ids :basis basis)
                          animation (let [sep (.indexOf new-value "/")]
                                      (if (>= sep 0) (subs new-value (inc sep)) ""))]
                      (concat
@@ -627,7 +631,10 @@
   (input gpu-texture g/Any)
   (input anim-data g/Any)
   (input textures {g/Str g/NodeID})
+  (input texture-ids {g/Str g/NodeID})
+  (output texture-ids {g/Str g/NodeID} (g/fnk [texture-ids] texture-ids))
   (input font-ids {g/Str g/NodeID})
+  (output font-ids {g/Str g/NodeID} (g/fnk [font-ids] font-ids))
   (input material-shader ShaderLifecycle)
   (input child-scenes g/Any :array)
   (input child-indices g/Int :array)
@@ -744,8 +751,8 @@
   (output pb-msg g/Any (g/fnk [name texture-resource]
                          {:name name
                           :texture (proj-path texture-resource)}))
-  (output texture-data g/Any (g/fnk [_node-id anim-data]
-                               [_node-id (keys anim-data)]))
+  (output texture-id {g/Str g/NodeID} (g/fnk [_node-id anim-data]
+                                             (into {} (map vector (keys anim-data) (repeat _node-id)))))
   (output gpu-texture g/Any :cached (g/fnk [_node-id image samplers]
                                            (let [params (material/sampler->tex-params (first samplers))]
                                              (texture/set-params (texture/image-texture _node-id image) params)))))
@@ -1016,7 +1023,7 @@
   (input layer-names g/Str :array)
   (input layout-names g/Str :array)
 
-  (input texture-data g/Any :array)
+  (input texture-ids {g/Str g/NodeID} :array)
   (input font-ids {g/Str g/NodeID} :array)
   (input layer-ids {g/Str g/NodeID} :array)
 
@@ -1043,8 +1050,7 @@
                                                 h (get project-settings ["display" "height"])]
                                             {:width w :height h})))
   (output layers [g/Str] :cached (g/fnk [layers] layers))
-  (output textures {g/Str g/NodeID} :cached (g/fnk [texture-data]
-                                              (into {} (mapcat (fn [[_node-id anims]] (map #(vector % _node-id) anims)) texture-data))))
+  (output texture-ids {g/Str g/NodeID} :cached (g/fnk [texture-ids] (into {} texture-ids)))
   (output node-ids {g/Str g/NodeID} :cached (g/fnk [node-ids] (into {} node-ids)))
   (output font-ids {g/Str g/NodeID} :cached (g/fnk [font-ids] (into {} font-ids)))
   (output layer-ids {g/Str g/NodeID} :cached (g/fnk [layer-ids] (into {} layer-ids)))
@@ -1075,7 +1081,7 @@
 (defn- attach-texture [self textures-node texture]
   (concat
     (g/connect texture :_node-id self :nodes)
-    (g/connect texture :texture-data self :texture-data)
+    (g/connect texture :texture-id self :texture-ids)
     (g/connect texture :dep-build-targets self :dep-build-targets)
     (g/connect texture :pb-msg self :texture-msgs)
     (g/connect texture :name self :texture-names)

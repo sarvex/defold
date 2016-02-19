@@ -1124,15 +1124,16 @@
             (= :_properties output)) (let [f (output-fn type output)
                                            props (f this evaluation-context)
                                            orig-props (:properties (f original evaluation-context))
-                                           dynamic-props (without (set (keys properties)) (set (gt/property-types this basis)))]
-                                       (reduce (fn [props [k v]] (cond-> props
-                                                                   (and (= :_properties output)
-                                                                        (dynamic-props k))
-                                                                   (assoc-in [:properties k :value] v)
+                                           dynamic-props (without (set (keys properties)) (set (keys (gt/property-types this basis))))]
+                                       (reduce (fn [props [k v]]
+                                                 (cond-> props
+                                                   (and (= :_properties output)
+                                                        (dynamic-props k))
+                                                   (assoc-in [:properties k :value] v)
 
-                                                                   (contains? orig-props k)
-                                                                   (assoc-in [:properties k :original-value]
-                                                                             (get-in orig-props [k :value]))))
+                                                   (contains? orig-props k)
+                                                   (assoc-in [:properties k :original-value]
+                                                             (get-in orig-props [k :value]))))
                                                props properties))
         (or ((gt/passthroughs type) output)
             ((gt/transforms type) output)

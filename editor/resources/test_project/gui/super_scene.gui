@@ -1,10 +1,10 @@
 script: ""
 fonts {
-  name: "system_font"
+  name: "system_font_super"
   font: "/builtins/fonts/system_font.font"
 }
 textures {
-  name: "main"
+  name: "main_super"
   texture: "/gui/gui.atlas"
 }
 background_color {

@@ -25,6 +25,9 @@
                    (into {}))]
     (id->node id)))
 
+(defn- gui-layer [scene id]
+  (get (g/node-value scene :layer-ids) id))
+
 (deftest load-gui
   (with-clean-system
     (let [workspace (test-util/setup-workspace! world)
@@ -217,3 +220,22 @@
       (is (= 1 (count (g/overrides sub-node))))
       (g/transact (g/set-property tmpl-node :template {:resource (workspace/find-resource workspace "/gui/layers.gui") :overrides {}}))
       (is (= 0 (count (g/overrides sub-node)))))))
+
+(defn- options [node-id prop]
+  (vec (vals (get-in (g/node-value node-id :_properties) [:properties prop :edit-type :options]))))
+
+(deftest gui-template-dynamics
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          app-view (test-util/setup-app-view!)
+          node-id (test-util/resource-node project "/gui/super_scene.gui")
+          box (gui-node node-id "scene/box")
+          text (gui-node node-id "scene/text")]
+      (is (= ["" "main_super/particle_blob"] (options box :texture)))
+      (is (= ["" "layer"] (options text :layer)))
+      (is (= ["" "system_font_super"] (options text :font)))
+      (g/transact (g/set-property text :layer "layer"))
+      (let [l (gui-layer node-id "layer")]
+        (g/transact (g/set-property l :name "new-name"))
+        (is (= "new-name" (prop text :layer)))))))
