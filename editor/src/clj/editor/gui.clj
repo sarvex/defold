@@ -496,8 +496,11 @@
                                                                                [:rt-pb-msg :scene-rt-pb-msg]
                                                                                [:node-properties :template-node-properties]]]
                                                                 (g/connect or-scene from self to))
+                                                              (for [[from to] [[:layer-ids :layer-ids]]]
+                                                                (g/connect self from or-scene to))
                                                               (for [[id data] (:overrides new-value)
                                                                     :let [node-id (node-mapping id)]
+                                                                    :when node-id
                                                                     [label value] data]
                                                                 (g/set-property node-id label value))))))
                          []))))))
@@ -614,6 +617,7 @@
 
   (input parent g/Str)
   (input layer-ids {g/Str g/NodeID})
+  (output layer-ids {g/Str g/NodeID} (g/fnk [layer-ids] layer-ids))
   (input layer-input g/Str)
   (input layer-index g/Int)
   (input texture-input g/Str)
