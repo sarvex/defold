@@ -240,7 +240,7 @@
                :transform transform
                :children (if template-scene (:children template-scene) child-scenes)}]
     (if (= type :type-template)
-      scene
+      (assoc scene :renderable {:user-data {:color color :inherit-alpha inherit-alpha}})
       (let [renderable (let [min (types/min-p aabb)
                              max (types/max-p aabb)
                              size (if (= type :type-text) [(- (.x max) (.x min)) (- (.y max) (.y min))] size)
@@ -882,10 +882,12 @@
 
 (defn- apply-alpha [parent-alpha scene]
   (let [scene-alpha (get-in scene [:renderable :user-data :color 3] 1.0)]
-    (if (get-in scene [:renderable :user-data :inherit-alpha])
+    (if (get-in scene [:renderable :user-data :inherit-alpha] true)
       (let [alpha (* parent-alpha scene-alpha)]
         (-> scene
-          (assoc-in [:renderable :user-data :color 3] alpha)
+          (cond->
+            (get-in scene [:renderable :user-data :inherit-alpha] false)
+            (assoc-in [:renderable :user-data :color 3] alpha))
           (update :children #(mapv (partial apply-alpha alpha) %))))
       (update scene :children #(mapv (partial apply-alpha scene-alpha) %)))))
 

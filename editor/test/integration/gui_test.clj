@@ -239,3 +239,27 @@
       (let [l (gui-layer node-id "layer")]
         (g/transact (g/set-property l :name "new-name"))
         (is (= "new-name" (prop text :layer)))))))
+
+(defn- strip-scene [scene]
+  (-> scene
+    (select-keys [:node-id :children :renderable])
+    (update :children (fn [c] (mapv #(strip-scene %) c)))
+    (update-in [:renderable :user-data] select-keys [:color])
+    (update :renderable select-keys [:user-data])))
+
+(defn- scene-by-nid [root-id node-id]
+  (let [scene (g/node-value root-id :scene)
+        scenes (into {} (map (fn [s] [(:node-id s) s]) (tree-seq (constantly true) :children (strip-scene scene))))]
+    (scenes node-id)))
+
+(deftest gui-template-alpha
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project   (test-util/setup-project! workspace)
+          node-id   (test-util/resource-node project "/gui/super_scene.gui")
+          scene-fn (comp (partial scene-by-nid node-id) (partial gui-node node-id))]
+      (is (= 1.0 (get-in (scene-fn "scene/box") [:renderable :user-data :color 3])))
+      (g/transact
+        (concat
+          (g/set-property (gui-node node-id "scene") :alpha 0.5)))
+      (is (= 0.5 (get-in (scene-fn "scene/box") [:renderable :user-data :color 3]))))))
