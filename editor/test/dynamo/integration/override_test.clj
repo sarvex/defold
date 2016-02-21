@@ -1,8 +1,9 @@
-(ns dynamo.override-test
+(ns dynamo.integration.override-test
   (:require [clojure.test :refer :all]
             [dynamo.graph :as g]
             [support.test-support :refer :all]
-            [internal.util :refer :all])
+            [internal.util :refer :all]
+            [dynamo.integration.override-test-support :as support])
   (:import  [javax.vecmath Vector3d]))
 
 (g/defnode BaseNode
@@ -518,3 +519,13 @@
                                                         (g/connect parent :id or-node :super-id)))))]
       (is (= (g/node-value sub :id)
              (get-in (g/node-value sub :_declared-properties) [:properties :id :value]))))))
+
+;; Reload supported for overrides
+(deftest reload-overrides
+  (with-clean-system
+     (let [[node or-node] (tx-nodes (g/make-nodes world [node [support/ReloadNode :my-value "reload-test"]]
+                                                  (:tx-data (g/override node))))]
+       (g/transact (g/set-property or-node :my-value "new-value"))
+       (is (= "new-value" (get-in (g/node-value or-node :_properties) [:properties :my-value :value])))
+       (use 'dynamo.integration.override-test-support :reload)
+       (is (= "new-value" (get-in (g/node-value or-node :_properties) [:properties :my-value :value]))))))

@@ -316,7 +316,7 @@
              basis#          (is/basis @*the-system*)
              all-graphs#     (util/map-vals deref (is/graphs @*the-system*))
              to-be-replaced# (when (and all-graphs# replacing#)
-                               (filterv #(= replacing# (node-type basis# %)) (mapcat ig/node-values (vals all-graphs#))))
+                               (filterv #(and (= replacing# (node-type basis# %)) (nil? (gt/original %))) (mapcat ig/node-values (vals all-graphs#))))
              ctor#           (fn [args#] (~ctor-name (merge (in/defaults ~symb) args#)))]
          (def ~symb (in/make-node-type (assoc description# :dynamo.graph/ctor ctor#)))
          (in/declare-node-value-function-names '~symb ~symb)
