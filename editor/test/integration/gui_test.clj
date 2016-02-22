@@ -263,3 +263,17 @@
         (concat
           (g/set-property (gui-node node-id "scene") :alpha 0.5)))
       (is (= 0.5 (get-in (scene-fn "scene/box") [:renderable :user-data :color 3]))))))
+
+(deftest gui-template-reload
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          node-id (test-util/resource-node project "/gui/super_scene.gui")
+          template (gui-node node-id "scene")
+          box (gui-node node-id "scene/box")]
+      (g/transact (g/set-property box :position [-100.0 0.0 0.0]))
+      (is (= -100.0 (get-in (g/node-value template :_properties) [:properties :template :value :overrides "box" :position 0])))
+      (use 'editor.gui :reload)
+      (is (= -100.0 (get-in (g/node-value template :_properties) [:properties :template :value :overrides "box" :position 0]))))))
+
+(gui-template-reload)

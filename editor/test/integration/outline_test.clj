@@ -199,6 +199,16 @@
           (drop! project root [0])
           (is (= second-id (get (outline root [0 1]) :label))))))))
 
+(deftest copy-paste-gui-template
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/gui/super_scene.gui")
+          tmpl-path [0 0]]
+      (g/transact (g/set-property (:node-id (outline root (conj tmpl-path 0))) :position [-100.0 0.0 0.0]))
+      (copy-paste! project root tmpl-path)
+      (let [p (g/node-value (:node-id (outline root [0 1])) :_properties)]
+        (is (= -100.0 (get-in p [:properties :template :value :overrides "box" :position 0])))))))
+
 (deftest dnd-gui-template
   (with-clean-system
     (let [[workspace project] (setup world)
@@ -212,6 +222,9 @@
       (drag! root tmpl-path)
       (drop! project root [0 0])
       (let [tmpl-path [0 0 1]]
+        (let [props (g/node-value (:node-id (outline root tmpl-path)) :_properties)]
+          (is (= -100.0 (get-in props [:properties :template :value :overrides "sub_box" :position 0])))
+          (is (not (nil? props))))
         (is (= "sub_scene" (get (outline root tmpl-path) :label)))
         (is (not (nil? (outline root (conj tmpl-path 0)))))
         (let [sub-id (:node-id (outline root (conj tmpl-path 0)))]
