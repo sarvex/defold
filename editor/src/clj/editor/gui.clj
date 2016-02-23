@@ -1279,8 +1279,8 @@
         template-data (into {} (map (fn [r] [r (into {} (map (fn [[id tmpl]] [(subs id (inc (count r))) (:data tmpl)]) (rest (tree-seq (constantly true) (comp tmpl-children first) [r nil]))))]) tmpl-roots))
         template-resources (map (comp resolve-fn :template) (filter #(= :type-template (:type %)) node-descs))
         texture-resources (map (comp resolve-fn :texture) (:textures scene))
-        scene-load-data (project/load-resource-nodes project (map #(project/get-resource-node project %) (concat template-resources
-                                                                                                                 texture-resources)))]
+        scene-load-data (project/load-resource-nodes project (filter (complement nil?) (map #(project/get-resource-node project %) (concat template-resources
+                                                                                                                                          texture-resources))))]
     (concat
       scene-load-data
       (g/set-property self :script (workspace/resolve-resource resource (:script scene)))
