@@ -730,12 +730,14 @@
             (set (project/gen-resource-setter [[:resource :texture-resource]
                                                [:packed-image :image]
                                                [:anim-data :anim-data]
+                                               [:anim-ids :anim-ids]
                                                [:build-targets :dep-build-targets]]))
             (validate (validation/validate-resource texture)))
 
   (input texture-resource (g/protocol resource/Resource))
   (input image BufferedImage)
   (input anim-data g/Any)
+  (input anim-ids g/Any)
   (input image-texture g/NodeID :cascade-delete)
   (input samplers [{g/Keyword g/Any}])
 
@@ -751,8 +753,11 @@
   (output pb-msg g/Any (g/fnk [name texture-resource]
                          {:name name
                           :texture (proj-path texture-resource)}))
-  (output texture-id {g/Str g/NodeID} (g/fnk [_node-id anim-data]
-                                             (into {} (map vector (keys anim-data) (repeat _node-id)))))
+  (output texture-id {g/Str g/NodeID} :cached (g/fnk [_node-id anim-ids name]
+                                                     (let [texture-ids (if anim-ids
+                                                                         (map #(format "%s/%s" name %) anim-ids)
+                                                                         [name])]
+                                                       (zipmap texture-ids (repeat _node-id)))))
   (output gpu-texture g/Any :cached (g/fnk [_node-id image samplers]
                                            (let [params (material/sampler->tex-params (first samplers))]
                                              (texture/set-params (texture/image-texture _node-id image) params)))))

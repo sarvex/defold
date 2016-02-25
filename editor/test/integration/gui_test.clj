@@ -275,5 +275,3 @@
       (is (= -100.0 (get-in (g/node-value template :_properties) [:properties :template :value :overrides "box" :position 0])))
       (use 'editor.gui :reload)
       (is (= -100.0 (get-in (g/node-value template :_properties) [:properties :template :value :overrides "box" :position 0]))))))
-
-(gui-template-reload)
