@@ -1,6 +1,7 @@
 (ns dynamo.integration.override-test
   (:require [clojure.test :refer :all]
             [dynamo.graph :as g]
+            [internal.graph.types :as gt]
             [support.test-support :refer :all]
             [internal.util :refer :all]
             [dynamo.integration.override-test-support :as support])
@@ -521,6 +522,7 @@
              (get-in (g/node-value sub :_declared-properties) [:properties :id :value]))))))
 
 ;; Reload supported for overrides
+
 (deftest reload-overrides
   (with-clean-system
      (let [[node or-node] (tx-nodes (g/make-nodes world [node [support/ReloadNode :my-value "reload-test"]]
@@ -529,3 +531,68 @@
        (is (= "new-value" (get-in (g/node-value or-node :_properties) [:properties :my-value :value])))
        (use 'dynamo.integration.override-test-support :reload)
        (is (= "new-value" (get-in (g/node-value or-node :_properties) [:properties :my-value :value]))))))
+
+;; Dependency rules
+
+(defn- outs [nodes output]
+  (for [n nodes]
+    [n :virt-property]))
+
+(defn- conn? [[src src-label tgt tgt-label]]
+  (let [basis (g/now)]
+    (and (g/connected? basis src src-label tgt tgt-label)
+         (contains? (into #{} (gt/sources basis tgt tgt-label)) [src src-label])
+         (contains? (into #{} (gt/targets basis src src-label)) [tgt tgt-label]))))
+
+(defn- deps [tgts]
+  (->> tgts
+    (g/dependencies (g/now))
+    set))
+
+(g/defnode TargetNode
+  (input in-value g/Str)
+  (output out-value g/Str (g/fnk [in-value] in-value)))
+
+(deftest dep-rules
+  (with-clean-system
+     (let [all (setup world 2)
+           [[main-0 sub-0]
+            [main-1 sub-1]
+            [main-2 sub-2]] all
+           mains (mapv first all)
+           subs (mapv second all)]
+       (testing "value fnk"
+                (is (every? (deps [[main-0 :a-property]]) (outs mains :virt-property))))
+       (testing "output"
+                (is (every? (deps [[main-0 :a-property]]) (outs mains :cached-output))))
+       (testing "connections"
+                (is (every? conn? (for [[m s] all]
+                                    [s :_node-id m :sub-nodes])))
+                (is (not-any? conn? (for [mi (range 3)
+                                          si (range 3)
+                                          :when (not= mi si)
+                                          :let [m (nth mains mi)
+                                                s (nth subs si)]]
+                                      [s :_node-id m :sub-nodes]))))))
+  (with-clean-system
+    (let [[src tgt src-1] (tx-nodes (g/make-nodes world [src [MainNode :a-property "reload-test"]
+                                                         tgt TargetNode]
+                                                  (g/connect src :a-property tgt :in-value)
+                                                  (:tx-data (g/override src))))]
+      (testing "regular dep"
+               (is (every? (deps [[src :a-property]]) [[tgt :out-value]])))
+      (testing "no override deps"
+               (is (not-any? (deps [[src-1 :a-property]]) [[tgt :out-value]])))
+      (testing "connections"
+               (is (conn? [src :a-property tgt :in-value]))
+               (is (not (conn? [src-1 :a-property tgt :in-value]))))))
+  (with-clean-system
+    (let [[src tgt tgt-1] (tx-nodes (g/make-nodes world [src [MainNode :a-property "reload-test"]
+                                                         tgt TargetNode]
+                                                  (g/connect src :a-property tgt :in-value)
+                                                  (:tx-data (g/override tgt))))]
+      (testing "regular dep"
+               (is (every? (deps [[src :a-property]]) [[tgt :out-value] [tgt-1 :out-value]])))
+      (testing "connections"
+               (is (conn? [src :a-property tgt :in-value]))
+               (is (conn? [src :a-property tgt-1 :in-value]))))))

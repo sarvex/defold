@@ -270,7 +270,8 @@
         all-outputs (-> original (gt/node-type basis) gt/output-labels)]
     (-> ctx
       (update :basis gt/override-node original-id override-id)
-      (update :successors-changed into (map vector (repeat original-id) all-outputs)))))
+      (update :successors-changed into (concat (map vector (repeat original-id) all-outputs)
+                                               (gt/sources basis original-id))))))
 
 (defmethod perform :override-node
   [ctx {:keys [original-node-id override-node-id]}]

@@ -88,16 +88,6 @@
     (assert (not (nil? to)) (str "Attempt to connect " (pr-str source source-label target target-label)))
     (update-in g [:tarcs target] conjv (arc source target source-label target-label))))
 
-(defn source-connected?
-  [g source source-label target target-label]
-  (not
-   (empty?
-    (filter (fn [^ArcBase arc]
-              (and (= source-label (.sourceLabel arc))
-                   (= target-label (.targetLabel arc))
-                   (= target       (.target arc))))
-            (get-in g [:sarcs source])))))
-
 (defn disconnect-source
   [g source source-label target target-label]
   (update-in g [:sarcs source]
@@ -260,6 +250,24 @@
 (defn- group-arcs-by-target [arcs]
   (group-by :targetLabel arcs))
 
+(defn- explicit-arcs-by-source
+  ([basis src-id]
+    (get-in basis [:graphs (gt/node-id->graph-id src-id) :sarcs src-id]))
+  ([basis src-id src-label]
+    (filterv (fn [^ArcBase a] (= src-label (.sourceLabel a))) (get-in basis [:graphs (gt/node-id->graph-id src-id) :sarcs src-id]))))
+
+(defn- explicit-arcs-by-target
+  ([basis tgt-id]
+    (get-in basis [:graphs (gt/node-id->graph-id tgt-id) :tarcs tgt-id]))
+  ([basis tgt-id tgt-label]
+    (filterv (fn [^ArcBase a] (= tgt-label (.targetLabel a))) (get-in basis [:graphs (gt/node-id->graph-id tgt-id) :tarcs tgt-id]))))
+
+(defn- implicit-overrides [basis node-id label arc-fn override-filter-fn]
+  (let [overrides (filterv #(or (override-filter-fn (gt/override-id (node-by-id-at basis %)))
+                                (empty? (arc-fn basis % label)))
+                           (overrides basis node-id))]
+    (mapcat #(cons % (implicit-overrides basis % label arc-fn override-filter-fn)) overrides)))
+
 (defrecord MultigraphBasis [graphs]
   gt/IBasis
   (node-by-property
@@ -272,18 +280,37 @@
 
   (arcs-by-head
     [this node-id]
-    (find-arcs this node-id :sarcs group-arcs-by-source :source :target false))
+    (let [explicit (explicit-arcs-by-source this node-id)
+          implicit-targets (mapcat (fn [^ArcBase a]
+                                     (let [override-ids (into #{} (map #(gt/override-id (node-by-id-at this %))
+                                                                       (implicit-overrides this (.source a) (.sourceLabel a) explicit-arcs-by-source (constantly true))))]
+                                       (map (fn [nid] (assoc a :target nid))
+                                            (implicit-overrides this (.target a) (.targetLabel a) explicit-arcs-by-target (complement override-ids)))))
+                                   explicit)
+          node (node-by-id-at this node-id)
+          implicit (when-let [override-ids (and node #{(gt/override-id node)})]
+                     (loop [original (gt/original node)
+                            arcs (transient [])]
+                       (if original
+                         (let [explicit (explicit-arcs-by-source this original)
+                               implicit (mapcat (fn [^ArcBase a]
+                                                  (map (fn [nid] (assoc a :target nid))
+                                                       (implicit-overrides this (.target a) (.targetLabel a) explicit-arcs-by-target override-ids)))
+                                            explicit)]
+                           (recur (gt/original (node-by-id-at this original)) (reduce conj! arcs implicit)))
+                         (persistent! arcs))))]
+      (concat explicit implicit-targets implicit)))
 
   (sources
     [this node-id]
-    (map gt/head
+    (mapv gt/head
          (filter (fn [^ArcBase arc]
                    (node-by-id-at this (.source arc)))
                  (gt/arcs-by-tail this node-id))))
 
   (sources
     [this node-id label]
-    (map gt/head
+    (mapv gt/head
          (filter (fn [^ArcBase arc]
                    (and (= label (.targetLabel arc))
                         (node-by-id-at this (.source arc))))
@@ -291,14 +318,14 @@
 
   (targets
     [this node-id]
-    (map gt/tail
+    (mapv gt/tail
          (filter (fn [^ArcBase arc]
                    (node-by-id-at this (.target arc)))
                  (gt/arcs-by-head this node-id))))
 
   (targets
     [this node-id label]
-    (map gt/tail
+    (mapv gt/tail
          (filter (fn [^ArcBase arc]
                    (and (= label (.sourceLabel arc))
                         (node-by-id-at this (.target arc))))
@@ -377,8 +404,9 @@
 
   (connected?
     [this src-id src-label tgt-id tgt-label]
-    (let [src-graph (node-id->graph graphs src-id)]
-      (source-connected? src-graph src-id src-label tgt-id tgt-label)))
+    (let [src-graph (node-id->graph graphs src-id)
+          targets (gt/targets this src-id src-label)]
+      (some #{[tgt-id tgt-label]} targets)))
 
   (dependencies
     [this to-be-marked]
@@ -437,8 +465,8 @@
                                        or-deps (for [[_ label] deps
                                                      override overrides]
                                                  [override label])
-                                       target-inputs (mapcat (fn [[_ [id label]]] (mapv vector (repeat id) (get (input-deps id) label))) (get out-arcs label))
-                                       deps (set (concat deps or-deps target-inputs))]
+                                       target-deps (mapcat (fn [[_ [id label]]] (mapv vector (repeat id) (get (input-deps id) label))) (get out-arcs label))
+                                       deps (set (concat deps or-deps target-deps))]
                                    (recur (next changes) (assoc all-deps change deps)))
                                  [changes all-deps])))
             successors (let [s (transient (get-in basis [:graphs gid :successors] {}))]
