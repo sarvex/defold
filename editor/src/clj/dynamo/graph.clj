@@ -144,7 +144,7 @@
 
   It returns the transaction result, (tx-result),  which is a map containing keys about the transaction.
   Transaction result-keys:
-  `[:status :basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :properties-modified :label :sequence-label]`
+  `[:status :basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :label :sequence-label]`
   "
   [txs]
   (when *tps-debug*

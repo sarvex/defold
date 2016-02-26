@@ -293,10 +293,7 @@
           (mark-activated node-id property)
           (cond->
             (not (nil? setter-fn))
-            (apply-tx (setter-fn (:basis ctx) node-id old-value new-value))
-
-            (nil? setter-fn)
-            (update-in [:properties-modified node-id] conj property)))))))
+            (apply-tx (setter-fn (:basis ctx) node-id old-value new-value))))))))
 
 (defn apply-defaults [ctx node]
   (let [node-id (gt/node-id node)]
@@ -348,7 +345,6 @@
         (-> ctx
           (mark-activated node-id property)
           (update :basis replace-node node-id (gt/clear-property node basis property))
-          (update-in [:properties-modified node-id] conj property)
           (ctx-set-property-to-nil node-id node property)))
       ctx)))
 
@@ -496,7 +492,7 @@
     label
     (update-in [:basis :graphs] map-vals-bargs #(assoc % :tx-label label))))
 
-(def tx-report-keys [:basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :properties-modified :label :sequence-label])
+(def tx-report-keys [:basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :label :sequence-label])
 
 (defn- finalize-update
   "Makes the transacted graph the new value of the world-state graph."
@@ -515,7 +511,6 @@
    :nodes-deleted       {}
    :outputs-modified    []
    :graphs-modified     #{}
-   :properties-modified {}
    :successors-changed  #{}
    :node-id-generators node-id-generators
    :completed           []
