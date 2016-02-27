@@ -990,14 +990,15 @@
   ([basis root-id {:keys [traverse?] :or {traverse? (constantly true)}}]
     (let [graph-id (node-id->graph-id root-id)
           preds [traverse-cascade-delete traverse?]
-          node-ids (ig/pre-traverse basis [root-id] (partial predecessors preds))
+          traverse-fn (partial predecessors preds)
+          node-ids (ig/pre-traverse basis [root-id] traverse-fn)
           override-id (is/next-override-id @*the-system* graph-id)
           overrides (mapv (partial make-override-node graph-id override-id) node-ids)
           new-node-ids (map gt/node-id overrides)
           orig->new (zipmap node-ids new-node-ids)
           new-tx-data (map it/new-node overrides)
           override-tx-data (concat
-                             (it/new-override override-id root-id traverse?)
+                             (it/new-override override-id root-id traverse-fn)
                              (map (fn [node-id new-id] (it/override-node node-id new-id)) node-ids new-node-ids))]
       {:id-mapping orig->new
        :tx-data (concat new-tx-data override-tx-data)})))

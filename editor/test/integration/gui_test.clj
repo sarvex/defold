@@ -196,7 +196,10 @@
       (is (not= nil sub-node))
       (let [template (gui-node node-id "scene/sub_scene")
             resource (workspace/find-resource workspace "/gui/sub_scene.gui")]
-        (is (= resource (get-in (g/node-value template :_properties) [:properties :template :value :resource])))))))
+        (is (= resource (get-in (g/node-value template :_properties) [:properties :template :value :resource]))))
+      (let [template (gui-node node-id "scene")
+            overrides (get-in (g/node-value template :_properties) [:properties :template :value :overrides])]
+        (is (contains? overrides "sub_scene/sub_box"))))))
 
 (deftest gui-template-selection
   (with-clean-system

@@ -199,7 +199,22 @@
           (drop! project root [0])
           (is (= second-id (get (outline root [0 1]) :label))))))))
 
+(defn- prop [root path property]
+  (let [p (g/node-value (:node-id (outline root path)) :_properties)]
+    (get-in p [:properties property :value])))
+
 (deftest copy-paste-gui-template
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/gui/scene.gui")
+          path [0 1]
+          orig-sub-id (prop root (conj path 0) :id)]
+      (copy-paste! project root path)
+      (is (= orig-sub-id (prop root (conj path 0) :id)))
+      (let [copy-path [0 2]
+            copy-sub-id (prop root (conj copy-path 0) :id)]
+        (is (not (nil? copy-sub-id)))
+        (is (not= copy-sub-id orig-sub-id)))))
   (with-clean-system
     (let [[workspace project] (setup world)
           root (test-util/resource-node project "/gui/super_scene.gui")
@@ -214,7 +229,10 @@
     (let [[workspace project] (setup world)
           root (test-util/resource-node project "/gui/scene.gui")
           tmpl-path [0 1]
-          new-pos [-100.0 0.0 0.0]]
+          new-pos [-100.0 0.0 0.0]
+          super-root (test-util/resource-node project "/gui/super_scene.gui")
+          super-tmpl-path [0 0]]
+      (is (contains? (:overrides (prop super-root super-tmpl-path :template)) "sub_scene/sub_box"))
       (is (= "sub_scene" (get (outline root tmpl-path) :label)))
       (is (not (nil? (outline root (conj tmpl-path 0)))))
       (let [sub-id (:node-id (outline root (conj tmpl-path 0)))]
@@ -222,13 +240,11 @@
       (drag! root tmpl-path)
       (drop! project root [0 0])
       (let [tmpl-path [0 0 1]]
-        (let [props (g/node-value (:node-id (outline root tmpl-path)) :_properties)]
-          (is (= -100.0 (get-in props [:properties :template :value :overrides "sub_box" :position 0])))
-          (is (not (nil? props))))
+        (is (= -100.0 (get-in (prop root tmpl-path :template) [:overrides "sub_box" :position 0])))
         (is (= "sub_scene" (get (outline root tmpl-path) :label)))
         (is (not (nil? (outline root (conj tmpl-path 0)))))
-        (let [sub-id (:node-id (outline root (conj tmpl-path 0)))]
-          (is (= new-pos (get-in (g/node-value sub-id :_properties) [:properties :position :value]))))))))
+        (is (= new-pos (prop root (conj tmpl-path 0) :position))))
+      (is (contains? (:overrides (prop super-root super-tmpl-path :template)) "sub_scene/sub_box")))))
 
 (deftest outline-shows-missing-parts
   (with-clean-system

@@ -421,6 +421,18 @@
         (g/transact (g/set-property sub-scene :resource (->PathResource "sub-scene2")))
         (is (= "sub-scene2" (get-in (g/node-value tmp :template) [:resource :path])))))))
 
+(deftest delete-middle
+  (with-clean-system
+    (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
+          [scene] (make-scene! world "scene" [[Template {:id "template" :template {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :template {:path "scene" :overrides {}}}]])
+          middle (node-by-id scene "template")
+          super-middle (node-by-id super-scene "super-template/template")]
+      (is (has-node? super-scene "super-template/template"))
+      (g/transact (g/delete-node middle))
+      (is (not (has-node? super-scene "super-template/template")))
+      (is (nil? (g/node-by-id super-middle))))))
+
 ;; Bug occurring in properties in overloads
 
 (deftest scene-paths

@@ -381,9 +381,9 @@
     (g/connect gui-node :pb-msgs self :node-msgs)
     (g/connect gui-node :rt-pb-msgs self :node-rt-msgs)
     (g/connect gui-node :node-ids self :node-ids)
-    (g/connect gui-node :_declared-properties self :node-properties)
+    (g/connect gui-node :node-overrides self :node-overrides)
     (g/connect self :layer-ids gui-node :layer-ids)
-    (g/connect self :super-id gui-node :super-id)
+    (g/connect self :id-prefix gui-node :id-prefix)
     (case type
       (:type-box :type-pie) (for [[from to] [[:texture-ids :texture-ids]
                                              [:material-shader :material-shader]]]
@@ -439,9 +439,9 @@
   (property type g/Keyword (dynamic visible (g/always false)))
   (property animation g/Str (dynamic visible (g/always false)) (default ""))
 
-  (input super-id g/Str)
+  (input id-prefix g/Str)
   (property id g/Str (default "")
-            (value (g/fnk [_node-id id super-id type] (if super-id (str super-id "/" id) id))))
+            (value (g/fnk [id id-prefix] (str id-prefix id))))
   (property size types/Vec3 (dynamic visible box-pie-text?) (default [0 0 0]))
   (property color types/Color (dynamic visible box-pie-text?) (default [1 1 1 1]))
   (property alpha g/Num (default 1.0)
@@ -461,12 +461,8 @@
                                           :ext "gui"
                                           :to-type (fn [v] (:resource v))
                                           :from-type (fn [r] {:resource r :overrides {}})}))
-            (value (g/fnk [template-resource template-node-properties id]
-                          (let [overrides (into {} (map (fn [{:keys [properties]}]
-                                                          (let [id (subs (get-in properties [:id :value]) (inc (count id)))]
-                                                            [id (into {} (map (fn [[k v]] [k (:value v)])
-                                                                              (filter (fn [[k v]] (contains? v :original-value)) properties)))]))
-                                                        template-node-properties))]
+            (value (g/fnk [_node-id id template-resource template-overrides]
+                          (let [overrides (into {} (map (fn [[k v]] [(subs k (inc (count id))) v]) template-overrides))]
                             {:resource template-resource :overrides overrides})))
             (set (fn [basis self old-value new-value]
                    (let [project (project/get-project self)
@@ -489,14 +485,14 @@
                                                                 node-mapping (comp id-mapping (g/node-value scene-node :node-ids :basis basis))]
                                                             (concat
                                                               (:tx-data override)
-                                                              (g/connect self :id or-scene :super-id)
+                                                              (g/connect self :template-prefix or-scene :id-prefix)
                                                               (for [[from to] [[:node-ids :node-ids]
                                                                                [:node-outline :template-outline]
                                                                                [:scene :template-scene]
                                                                                [:resource :template-resource]
                                                                                [:pb-msg :scene-pb-msg]
                                                                                [:rt-pb-msg :scene-rt-pb-msg]
-                                                                               [:node-properties :template-node-properties]]]
+                                                                               [:node-overrides :template-overrides]]]
                                                                 (g/connect or-scene from self to))
                                                               (for [[from to] [[:layer-ids :layer-ids]
                                                                                [:texture-ids :texture-ids]
@@ -512,7 +508,8 @@
   (input template-resource (g/protocol resource/Resource) :cascade-delete)
   (input template-outline outline/OutlineData)
   (input template-scene g/Any)
-  (input template-node-properties g/Any)
+  (input template-overrides g/Any)
+  (output template-prefix g/Str (g/fnk [id] (str id "/")))
 
   ; Text
   (property text g/Str (dynamic visible text?))
@@ -710,7 +707,11 @@
   (input node-ids IDMap)
   (input scene-pb-msg g/Any)
   (input scene-rt-pb-msg g/Any)
-  (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids))))
+  (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids)))
+  (output node-overrides g/Any :cached
+          (g/fnk [id _properties template-overrides _node-id]
+                 (let [overrides {id (into {} (map (fn [[k v]] [k (:value v)]) (filter (fn [[_ v]] (contains? v :original-value)) (:properties _properties))))}]
+                   (merge overrides template-overrides)))))
 
 (g/defnode ImageTextureNode
   (input image BufferedImage)
@@ -1017,8 +1018,8 @@
   (input project-settings g/Any)
   (input node-msgs g/Any :array)
   (input node-rt-msgs g/Any :array)
-  (input node-properties g/Any :array)
-  (output node-properties g/Any (g/fnk [node-properties] node-properties))
+  (input node-overrides g/Any :array)
+  (output node-overrides g/Any (g/fnk [node-overrides] (into {} node-overrides)))
   (input font-msgs g/Any :array)
   (input texture-msgs g/Any :array)
   (input layer-msgs g/Any :array)
@@ -1061,8 +1062,8 @@
   (output node-ids {g/Str g/NodeID} :cached (g/fnk [node-ids] (into {} node-ids)))
   (output font-ids {g/Str g/NodeID} :cached (g/fnk [font-ids] (into {} font-ids)))
   (output layer-ids {g/Str g/NodeID} :cached (g/fnk [layer-ids] (into {} layer-ids)))
-  (input super-id g/Str)
-  (output super-id g/Str (g/fnk [super-id resource] super-id)))
+  (input id-prefix g/Str)
+  (output id-prefix g/Str (g/fnk [id-prefix] id-prefix)))
 
 (defn- tx-create-node? [tx-entry]
   (= :create-node (:type tx-entry)))

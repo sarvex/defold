@@ -366,14 +366,16 @@
                 or-node (ig/node-by-id-at basis or)
                 override-id (gt/override-id or-node)
                 traverse-fn (ig/override-traverse-fn basis override-id)]
-            (if (traverse-fn basis [source-id source-label target-id target-label])
-              (let [gid (gt/node-id->graph-id or)
-                   new-sub-id (next-node-id ctx gid)
-                   new-sub-node (in/make-override-node override-id new-sub-id source-id {})]
-               (recur (rest overrides)
-                      (-> ctx
-                        (ctx-add-node new-sub-node)
-                        (ctx-override-node source-id new-sub-id))))
+            (if (traverse-fn basis target-id)
+              (let [gid (gt/node-id->graph-id or)]
+                (recur (rest overrides)
+                       (reduce (fn [ctx node-id]
+                                 (let [new-sub-id (next-node-id ctx gid)
+                                       new-sub-node (in/make-override-node override-id new-sub-id node-id {})]
+                                   (-> ctx
+                                     (ctx-add-node new-sub-node)
+                                     (ctx-override-node node-id new-sub-id))))
+                               ctx (ig/pre-traverse basis [source-id] traverse-fn))))
               ctx))
           ctx))
       ctx)))
