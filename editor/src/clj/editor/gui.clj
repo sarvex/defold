@@ -1127,7 +1127,7 @@
 (defn- resource->id [resource]
   (FilenameUtils/getBaseName ^String (resource/resource-name resource)))
 
-(defn- add-gui-node-handler [project {:keys [scene parent node-type]}]
+(defn add-gui-node! [project scene parent node-type]
   (let [index (inc (reduce max 0 (g/node-value parent :child-indices)))
         id (outline/resolve-id (subs (name node-type) 5) (keys (g/node-value scene :node-ids)))]
     (g/transact
@@ -1139,6 +1139,9 @@
             (g/set-property gui-node :text "<text>" :font "")
             [])
           (project/select project [gui-node]))))))
+
+(defn- add-gui-node-handler [project {:keys [scene parent node-type]}]
+  (add-gui-node! project scene parent node-type))
 
 (defn- add-texture-handler [project {:keys [scene parent node-type]}]
   (when-let [resource (browse project ["atlas" "tilesource"])]

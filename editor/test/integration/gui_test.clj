@@ -1,7 +1,7 @@
 (ns integration.gui-test
   (:require [clojure.test :refer :all]
             [dynamo.graph :as g]
-            [support.test-support :refer [with-clean-system]]
+            [support.test-support :refer [with-clean-system tx-nodes]]
             [integration.test-util :as test-util]
             [editor.workspace :as workspace]
             [editor.defold-project :as project]
@@ -12,10 +12,10 @@
            [org.apache.commons.io FilenameUtils FileUtils]))
 
 (defn- prop [node-id label]
-  (get-in (g/node-value node-id :_properties) [:properties label :value]))
+  (test-util/prop node-id label))
 
 (defn- prop! [node-id label val]
-  (g/transact (g/set-property node-id label val)))
+  (test-util/prop! node-id label val))
 
 (defn- gui-node [scene id]
   (let [id->node (->> (get-in (g/node-value scene :node-outline) [:children 0])
@@ -278,3 +278,17 @@
       (is (= -100.0 (get-in (g/node-value template :_properties) [:properties :template :value :overrides "box" :position 0])))
       (use 'editor.gui :reload)
       (is (= -100.0 (get-in (g/node-value template :_properties) [:properties :template :value :overrides "box" :position 0]))))))
+
+(deftest gui-template-add
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          node-id (test-util/resource-node project "/gui/scene.gui")
+          super (test-util/resource-node project "/gui/super_scene.gui")
+          parent (:node-id (test-util/outline node-id [0]))
+          [new-tmpl] (g/tx-nodes-added (gui/add-gui-node! project node-id parent :type-template))
+          super-template (gui-node super "scene")]
+      (is (= new-tmpl (gui-node node-id "template")))
+      (is (not (contains? (:overrides (prop super-template :template)) "template/sub_box")))
+      (prop! new-tmpl :template {:resource (workspace/resolve-workspace-resource workspace "/gui/sub_scene.gui") :overrides {}})
+      (is (contains? (:overrides (prop super-template :template)) "template/sub_box")))))

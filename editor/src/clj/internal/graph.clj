@@ -217,32 +217,12 @@
   [basis start traverse?]
   (pre-traverse basis start (partial successors-sources traverse?)))
 
-(defn- override-of [basis node-id override-id inherit?]
-  (let [overrides (tree-seq (constantly true) (partial overrides basis) node-id)]
-    (or (first (filter #(= override-id (gt/override-id (node-by-id-at basis %))) overrides))
-       (when inherit? node-id))))
-
-(defn- find-arcs [basis node-id graph-field group-fn primary secondary inherit?]
-  (let [graphs (:graphs basis)
-        arcs (get-in (node-id->graph graphs node-id) [graph-field node-id])]
-    (if-let [original (gt/original-node basis node-id)]
-      (let [node (node-by-id-at basis node-id)
-            override-id (gt/override-id node)
-            arcs (loop [arcs (group-fn arcs)
-                        original original]
-                   (if original
-                     (recur (merge (->> (get-in (node-id->graph graphs original) [graph-field original])
-                                     (map (fn [arc]
-                                            (-> arc
-                                              (assoc secondary (override-of basis (get arc secondary) override-id inherit?))
-                                              (assoc primary node-id))))
-                                     (filter secondary)
-                                     group-fn)
-                                   arcs)
-                            (gt/original-node basis original))
-                     arcs))]
-        (mapcat second arcs))
-      arcs)))
+(defn- override-of [basis node-id or-path]
+  (if-let [or-id (first or-path)]
+    (if-let [or-node-id (first (filter #(= or-id (gt/override-id (node-by-id-at basis %))) (overrides basis node-id)))]
+      (override-of basis or-node-id (next or-path))
+      node-id)
+    node-id))
 
 (defn- group-arcs-by-source [arcs]
   (group-by :sourceLabel arcs))
@@ -273,10 +253,32 @@
   (node-by-property
     [_ label value]
     (filter #(= value (get % label)) (mapcat vals graphs)))
-
   (arcs-by-tail
     [this node-id]
-    (find-arcs this node-id :tarcs group-arcs-by-target :target :source true))
+    (let [graphs (:graphs this)
+          arcs (get-in (node-id->graph graphs node-id) [:tarcs node-id])]
+      (if-let [original (gt/original-node this node-id)]
+        (let [node (node-by-id-at this node-id)
+              override-id (gt/override-id node)
+              arcs (loop [arcs (group-arcs-by-target arcs)
+                          original original
+                          or-path [override-id]]
+                     (if original
+                       (recur (merge (->> (get-in (node-id->graph graphs original) [:tarcs original])
+                                       (map (fn [arc]
+                                              (-> arc
+                                                (assoc :source (override-of this (get arc :source) or-path))
+                                                (assoc :target node-id))))
+                                       (filter :source)
+                                       group-arcs-by-target)
+                                     arcs)
+                              (gt/original-node this original)
+                              (if-let [or-id (gt/override-id (node-by-id-at this original))]
+                                (cons or-id or-path)
+                                or-path))
+                      arcs))]
+          (mapcat second arcs))
+        arcs)))
 
   (arcs-by-head
     [this node-id]

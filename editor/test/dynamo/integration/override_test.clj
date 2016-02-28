@@ -299,11 +299,18 @@
   Resource
   (path [this] path))
 
+(defn- properties->overrides [id properties]
+  {id (->> (:properties properties)
+        (filter (fn [[k v]] (:original-value v)))
+        (map (fn [[k v]] [k (:value v)]))
+        (into {}))})
+
 (g/defnode Node
-  (property id g/Str)
+  (property id g/Str
+            (value (g/fnk [id id-prefix] (str id-prefix id))))
   (input id-prefix g/Str)
-  (output id g/Str (g/fnk [id id-prefix] (str id-prefix id)))
-  (output node-ids IDMap (g/fnk [_node-id id] {id _node-id})))
+  (output node-ids IDMap (g/fnk [_node-id id] {id _node-id}))
+  (output node-overrides g/Any (g/fnk [id _properties] (properties->overrides id _properties))))
 
 (g/defnode VisualNode
   (inherits Node)
@@ -316,14 +323,12 @@
   (inherits SceneResourceNode)
   (input nodes g/NodeID :array :cascade-delete)
   (input node-ids IDMap :array)
-  (input node-properties g/Properties :array)
+  (input node-overrides g/Any :array)
   (input id-prefix g/Str)
   (output id-prefix g/Str (g/fnk [id-prefix] id-prefix))
   (output node-ids IDMap (g/fnk [node-ids] (reduce into {} node-ids)))
-  (output node-overrides g/Any :cached (g/fnk [node-ids node-properties]
-                                              (let [node-ids (clojure.set/map-invert node-ids)
-                                                    properties (group-by (comp node-ids :node-id second) (filter (comp :original-value second) (mapcat :properties node-properties)))]
-                                                (into {} (map (fn [[nid props]] [nid (into {} (map (fn [[key value]] [key (:value value)]) props))]) properties))))))
+  (output node-overrides g/Any :cached (g/fnk [node-overrides]
+                                              (reduce into {} node-overrides))))
 
 (defn- scene-by-path
   ([graph path]
@@ -369,11 +374,13 @@
   (input instance g/NodeID)
   (input node-overrides g/Any)
   (output template-path g/Str (g/fnk [id] (str id "/")))
+  (output node-overrides g/Any :cached (g/fnk [id _properties node-overrides]
+                                              (merge (properties->overrides id _properties) node-overrides)))
   (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids))))
 
 (def ^:private scene-inputs [[:_node-id :nodes]
                              [:node-ids :node-ids]
-                             [:_properties :node-properties]])
+                             [:node-overrides :node-overrides]])
 
 (def ^:private scene-outputs [[:id-prefix :id-prefix]])
 
@@ -432,6 +439,17 @@
       (g/transact (g/delete-node middle))
       (is (not (has-node? super-scene "super-template/template")))
       (is (nil? (g/node-by-id super-middle))))))
+
+(deftest sibling-templates
+  (with-clean-system
+    (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
+          [scene] (make-scene! world "scene" [[Template {:id "template" :template {:path "sub-scene" :overrides {}}}]
+                                              [Template {:id "template1" :template {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :template {:path "scene" :overrides {}}}]])]
+      (is (has-node? scene "template/my-node"))
+      (is (has-node? scene "template1/my-node"))
+      (is (has-node? super-scene "super-template/template/my-node"))
+      (is (has-node? super-scene "super-template/template1/my-node")))))
 
 ;; Bug occurring in properties in overloads
 
