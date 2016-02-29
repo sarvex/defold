@@ -55,6 +55,7 @@
     (paste! project node []))
   ([project node path]
     (let [it (->iterator node path)]
+      (assert (outline/paste? (project/graph project) it *clipboard*))
       (outline/paste! (project/graph project) it *clipboard* (partial project/select project)))))
 
 (defn- copy-paste! [project node path]
@@ -209,12 +210,15 @@
           root (test-util/resource-node project "/gui/scene.gui")
           path [0 1]
           orig-sub-id (prop root (conj path 0) :id)]
+      (is (= "sub_scene/sub_box" (:label (outline root [0 1 0]))))
       (copy-paste! project root path)
       (is (= orig-sub-id (prop root (conj path 0) :id)))
       (let [copy-path [0 2]
             copy-sub-id (prop root (conj copy-path 0) :id)]
         (is (not (nil? copy-sub-id)))
-        (is (not= copy-sub-id orig-sub-id)))))
+        (is (not= copy-sub-id orig-sub-id))
+        (is (= "sub_scene/sub_box" (:label (outline root [0 1 0]))))
+        (is (= "sub_scene1/sub_box" (:label (outline root [0 2 0])))))))
   (with-clean-system
     (let [[workspace project] (setup world)
           root (test-util/resource-node project "/gui/super_scene.gui")
@@ -223,6 +227,17 @@
       (copy-paste! project root tmpl-path)
       (let [p (g/node-value (:node-id (outline root [0 1])) :_properties)]
         (is (= -100.0 (get-in p [:properties :template :value :overrides "box" :position 0])))))))
+
+(deftest copy-paste-gui-template-delete-repeat
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/gui/scene.gui")
+          path [0 1]
+          orig-sub-id (prop root (conj path 0) :id)]
+      (dotimes [i 5]
+        (let [[new-tmpl] (g/tx-nodes-added (copy-paste! project root path))]
+          (g/node-value new-tmpl :_properties)
+          (g/transact (g/delete-node new-tmpl)))))))
 
 (deftest dnd-gui-template
   (with-clean-system

@@ -359,7 +359,7 @@
   (let [basis (:basis ctx)
         target-id (gt/node-id target)]
     (if ((gt/cascade-deletes (gt/node-type target basis)) target-label)
-      (loop [overrides (ig/overrides basis (gt/node-id target))
+      (loop [overrides (ig/overrides basis target-id)
              ctx ctx]
         (if-let [or (first overrides)]
           (let [basis (:basis ctx)

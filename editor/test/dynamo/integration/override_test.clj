@@ -384,17 +384,20 @@
 
 (def ^:private scene-outputs [[:id-prefix :id-prefix]])
 
+(defn- add-node [graph scene node-type props]
+  (g/make-nodes graph [n [node-type props]]
+                (for [[output input] scene-inputs]
+                  (g/connect n output scene input))
+                (for [[output input] scene-outputs]
+                  (g/connect scene output n input))))
+
 (defn- make-scene! [graph path nodes]
   (let [resources (or (g/graph-value graph :resources) {})
         resource (->PathResource path)]
     (tx-nodes (g/make-nodes graph [scene [Scene :resource resource]]
                             (-> (g/set-graph-value graph :resources (assoc resources resource scene))
                               ((partial reduce (fn [tx [node-type props]]
-                                                 (into tx (g/make-nodes graph [n [node-type props]]
-                                                                        (for [[output input] scene-inputs]
-                                                                          (g/connect n output scene input))
-                                                                        (for [[output input] scene-outputs]
-                                                                          (g/connect scene output n input))))))
+                                                 (into tx (add-node graph scene node-type props))))
                                 nodes))))))
 
 (deftest scene-loading
@@ -450,6 +453,16 @@
       (is (has-node? scene "template1/my-node"))
       (is (has-node? super-scene "super-template/template/my-node"))
       (is (has-node? super-scene "super-template/template1/my-node")))))
+
+(deftest new-sibling-delete-repeat
+  (with-clean-system
+    (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
+          [scene] (make-scene! world "scene" [[Template {:id "template" :template {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :template {:path "scene" :overrides {}}}]])]
+      (dotimes [i 5]
+        (let [[new-tmpl] (tx-nodes (add-node world scene Template {:id "new-template" :template {:path "sub-scene" :overrides {}}}))]
+          (is (contains? (g/node-value (node-by-id scene "new-template") :node-overrides) "new-template/my-node"))
+          (g/transact (g/delete-node new-tmpl)))))))
 
 ;; Bug occurring in properties in overloads
 
@@ -585,25 +598,25 @@
 
 (deftest dep-rules
   (with-clean-system
-     (let [all (setup world 2)
-           [[main-0 sub-0]
-            [main-1 sub-1]
-            [main-2 sub-2]] all
-           mains (mapv first all)
-           subs (mapv second all)]
-       (testing "value fnk"
-                (is (every? (deps [[main-0 :a-property]]) (outs mains :virt-property))))
-       (testing "output"
-                (is (every? (deps [[main-0 :a-property]]) (outs mains :cached-output))))
-       (testing "connections"
-                (is (every? conn? (for [[m s] all]
-                                    [s :_node-id m :sub-nodes])))
-                (is (not-any? conn? (for [mi (range 3)
-                                          si (range 3)
-                                          :when (not= mi si)
-                                          :let [m (nth mains mi)
-                                                s (nth subs si)]]
-                                      [s :_node-id m :sub-nodes]))))))
+    (let [all (setup world 2)
+          [[main-0 sub-0]
+           [main-1 sub-1]
+           [main-2 sub-2]] all
+          mains (mapv first all)
+          subs (mapv second all)]
+      (testing "value fnk"
+               (is (every? (deps [[main-0 :a-property]]) (outs mains :virt-property))))
+      (testing "output"
+               (is (every? (deps [[main-0 :a-property]]) (outs mains :cached-output))))
+      (testing "connections"
+               (is (every? conn? (for [[m s] all]
+                                   [s :_node-id m :sub-nodes])))
+               (is (not-any? conn? (for [mi (range 3)
+                                         si (range 3)
+                                         :when (not= mi si)
+                                         :let [m (nth mains mi)
+                                               s (nth subs si)]]
+                                     [s :_node-id m :sub-nodes]))))))
   (with-clean-system
     (let [[src tgt src-1] (tx-nodes (g/make-nodes world [src [MainNode :a-property "reload-test"]
                                                          tgt TargetNode]
@@ -625,4 +638,13 @@
                (is (every? (deps [[src :a-property]]) [[tgt :out-value] [tgt-1 :out-value]])))
       (testing "connections"
                (is (conn? [src :a-property tgt :in-value]))
-               (is (conn? [src :a-property tgt-1 :in-value]))))))
+               (is (conn? [src :a-property tgt-1 :in-value])))))
+  (with-clean-system
+    (let [[sub-scene] (make-scene! world "sub-scene" [[VisualNode {:id "my-node" :value ""}]])
+          [scene] (make-scene! world "scene" [[Template {:id "template" :template {:path "sub-scene" :overrides {}}}]
+                                              [Template {:id "template1" :template {:path "sub-scene" :overrides {}}}]])
+          [super-scene] (make-scene! world "super-scene" [[Template {:id "super-template" :template {:path "scene" :overrides {}}}]])
+          [tmpl-scene tmpl1-scene] (g/overrides sub-scene)
+          [tmpl-sub tmpl1-sub] (mapv #(node-by-id scene %) ["template/my-node" "template1/my-node"])]
+      (is (conn? [tmpl-sub :node-overrides tmpl-scene :node-overrides]))
+      (is (conn? [tmpl1-sub :node-overrides tmpl1-scene :node-overrides])))))
