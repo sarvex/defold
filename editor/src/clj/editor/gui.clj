@@ -720,8 +720,8 @@
                                                                     (filter (fn [[_ v]] (contains? v :original-value))
                                                                             (:properties _properties))))}
                                                 (merge template-overrides))))
-  (output aabb g/Any (g/fnk [template-scene] (:aabb template-scene)))
-  (output scene-children g/Any (g/fnk [template-scene] (:children template-scene)))
+  (output aabb g/Any (g/fnk [template-scene] (:aabb template-scene (geom/null-aabb))))
+  (output scene-children g/Any (g/fnk [template-scene] (:children template-scene [])))
   (output scene-renderable g/Any :cached (g/fnk [color inherit-alpha]
                                                 {:user-data {:color color :inherit-alpha inherit-alpha}})))
 
