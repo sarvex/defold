@@ -723,7 +723,8 @@
   (output aabb g/Any (g/fnk [template-scene] (:aabb template-scene (geom/null-aabb))))
   (output scene-children g/Any (g/fnk [template-scene] (:children template-scene [])))
   (output scene-renderable g/Any :cached (g/fnk [color inherit-alpha]
-                                                {:user-data {:color color :inherit-alpha inherit-alpha}})))
+                                                {:passes [pass/selection]
+                                                 :user-data {:color color :inherit-alpha inherit-alpha}})))
 
 (g/defnode ImageTextureNode
   (input image BufferedImage)
