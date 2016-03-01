@@ -594,7 +594,7 @@
                                         (geom/aabb-incorporate min-x min-y 0)
                                         (geom/aabb-incorporate max-x max-y 0)))))
   (output scene-children g/Any (g/fnk [child-scenes] child-scenes))
-  (output scene-renderable g/Any produce-node-renderable)
+  (output scene-renderable g/Any :cached produce-node-renderable)
   (output scene g/Any :cached (g/fnk [_node-id aabb transform scene-children scene-renderable]
                                      {:node-id _node-id
                                       :aabb aabb
