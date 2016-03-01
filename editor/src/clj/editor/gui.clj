@@ -234,103 +234,96 @@
 (defn- pairs [v]
   (filter (fn [[v0 v1]] (> (Math/abs (double (- v1 v0))) 0)) (partition 2 1 v)))
 
-(g/defnk produce-node-scene [_node-id type index layer-index aabb transform pivot size color blend-mode slice9 pie-data text-data inherit-alpha texture gpu-texture anim-data material-shader child-scenes template-scene]
-  (let [scene {:node-id _node-id
-               :aabb aabb
-               :transform transform
-               :children (if template-scene (:children template-scene) child-scenes)}]
-    (if (= type :type-template)
-      (assoc scene :renderable {:user-data {:color color :inherit-alpha inherit-alpha}})
-      (let [renderable (let [min (types/min-p aabb)
-                             max (types/max-p aabb)
-                             size (if (= type :type-text) [(- (.x max) (.x min)) (- (.y max) (.y min))] size)
-                             [w h _] size
-                             offset (pivot-offset pivot size)
-                             userdata (if (= type :type-text)
-                                        (let [lines (mapv conj (apply concat (take 4 (partition 2 1 (cycle (geom/transl offset [[0 0] [w 0] [w h] [0 h]]))))) (repeat 0))]
-                                          (when-let [font-data (get text-data :font-data)]
-                                            {:text-data (assoc text-data :offset (let [[x y] offset]
-                                                                                   [x (+ y (- h (get-in font-data [:font-map :max-ascent])))]))
-                                             :line-data lines
-                                             :color color}))
-                                        (let [[geom-data uv-data line-data] (case type
-                                                                              :type-box (let [order [0 1 3 3 1 2]
-                                                                                              x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
-                                                                                              y-vals (pairs [0 (get slice9 3) (- h (get slice9 1)) h])
-                                                                                              corners (for [[x0 x1] x-vals
-                                                                                                            [y0 y1] y-vals]
-                                                                                                        (geom/transl offset [[x0 y0 0] [x0 y1 0] [x1 y1 0] [x1 y0 0]]))
-                                                                                              vs (vec (mapcat #(map (partial nth %) order) corners))
-                                                                                              tex (get anim-data texture)
-                                                                                              tex-w (:width tex 1)
-                                                                                              tex-h (:height tex 1)
-                                                                                              u-vals (pairs [0 (/ (get slice9 0) tex-w) (- 1 (/ (get slice9 2) tex-w)) 1])
-                                                                                              v-vals (pairs [1 (- 1 (/ (get slice9 3) tex-h)) (/ (get slice9 1) tex-h) 0])
-                                                                                              uv-trans (get-in tex [:uv-transforms 0])
-                                                                                              uvs (for [[u0 u1] u-vals
-                                                                                                        [v0 v1] v-vals]
-                                                                                                    (geom/uv-trans uv-trans [[u0 v0] [u0 v1] [u1 v1] [u1 v0]]))
-                                                                                              uvs (vec (mapcat #(map (partial nth %) order) uvs))
-                                                                                              lines (vec (mapcat #(interleave % (drop 1 (cycle %))) corners))]
-                                                                                          [vs uvs lines])
-                                                                              :type-pie (let [offset (mapv + offset [(* 0.5 w) (* 0.5 h) 0])
-                                                                                              {:keys [outer-bounds inner-radius perimeter-vertices pie-fill-angle]} pie-data
-                                                                                              outer-rect? (= :piebounds-rectangle outer-bounds)
-                                                                                              cut-off? (< pie-fill-angle 360)
-                                                                                              hole? (> inner-radius 0)
-                                                                                              vs (pie-circling perimeter-vertices pie-fill-angle outer-rect? [[1 0 0]])
-                                                                                              vs-outer (if outer-rect?
-                                                                                                         (mapv (fn [[x y z]]
-                                                                                                                 (let [abs-x (Math/abs (double x))
-                                                                                                                       abs-y (Math/abs (double y))]
-                                                                                                                   (if (< abs-x abs-y)
-                                                                                                                     [(/ x abs-y) (/ y abs-y) z]
-                                                                                                                     [(/ x abs-x) (/ y abs-x) z]))) vs)
-                                                                                                         vs)
-                                                                                              vs-inner (if (> inner-radius 0)
-                                                                                                         (let [xs (/ inner-radius w)
-                                                                                                               ys (* xs (/ h w))]
-                                                                                                           (geom/scale [xs ys 1] vs))
-                                                                                                         [[0 0 0]])
-                                                                                              lines (->> (cond-> (vec (apply concat (partition 2 1 vs-outer)))
-                                                                                                           hole? (into (apply concat (partition 2 1 vs-inner)))
-                                                                                                           cut-off? (into [(first vs-outer) (first vs-inner) (last vs-outer) (last vs-inner)]))
-                                                                                                      (geom/scale [(* 0.5 w) (* 0.5 h) 1])
-                                                                                                      (geom/transl offset))
-                                                                                              vs (if hole?
-                                                                                                   (reduce into []
-                                                                                                           (concat
-                                                                                                             (map #(do [%1 (second %2) (first %2)]) vs-outer (partition 2 1 vs-inner))
-                                                                                                             (map #(do [%1 (first %2) (second %2)]) (drop 1 (cycle vs-inner)) (partition 2 1 vs-outer))))
-                                                                                                   (vec (mapcat into (repeat vs-inner) (partition 2 1 vs-outer))))
-                                                                                              uvs (->> vs
-                                                                                                    (map #(subvec % 0 2))
-                                                                                                    (geom/transl [1 1])
-                                                                                                    (geom/scale [0.5 -0.5])
-                                                                                                    (geom/transl [0 1])
-                                                                                                    (geom/uv-trans (get-in anim-data [texture :uv-transforms 0])))
-                                                                                              vs (->> vs
-                                                                                                   (geom/scale [(* 0.5 w) (* 0.5 h) 1])
-                                                                                                   (geom/transl offset))]
-                                                                                          [vs uvs lines])
-                                                                              [[] [] []])]
-                                          {:geom-data geom-data
-                                           :line-data line-data
-                                           :uv-data uv-data
-                                           :color color}))
-                             userdata (assoc userdata
-                                             :gpu-texture gpu-texture
-                                             :inherit-alpha inherit-alpha
-                                             :material-shader material-shader
-                                             :blend-mode blend-mode)]
-                         {:render-fn render-nodes
-                          :passes [pass/transparent pass/selection pass/outline]
-                          :user-data userdata
-                          :batch-key [gpu-texture blend-mode]
-                          :select-batch-key _node-id
-                          :index index
-                          :layer-index (if layer-index (inc layer-index) 0)})]
-        (assoc scene :renderable renderable)))))
+(g/defnk produce-node-renderable [_node-id type index layer-index aabb pivot size color blend-mode slice9 pie-data text-data inherit-alpha texture gpu-texture anim-data material-shader]
+  (let [min (types/min-p aabb)
+        max (types/max-p aabb)
+        size (if (= type :type-text) [(- (.x max) (.x min)) (- (.y max) (.y min))] size)
+        [w h _] size
+        offset (pivot-offset pivot size)
+        userdata (if (= type :type-text)
+                   (let [lines (mapv conj (apply concat (take 4 (partition 2 1 (cycle (geom/transl offset [[0 0] [w 0] [w h] [0 h]]))))) (repeat 0))]
+                     (when-let [font-data (get text-data :font-data)]
+                       {:text-data (assoc text-data :offset (let [[x y] offset]
+                                                              [x (+ y (- h (get-in font-data [:font-map :max-ascent])))]))
+                        :line-data lines
+                        :color color}))
+                   (let [[geom-data uv-data line-data] (case type
+                                                         :type-box (let [order [0 1 3 3 1 2]
+                                                                         x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
+                                                                         y-vals (pairs [0 (get slice9 3) (- h (get slice9 1)) h])
+                                                                         corners (for [[x0 x1] x-vals
+                                                                                       [y0 y1] y-vals]
+                                                                                   (geom/transl offset [[x0 y0 0] [x0 y1 0] [x1 y1 0] [x1 y0 0]]))
+                                                                         vs (vec (mapcat #(map (partial nth %) order) corners))
+                                                                         tex (get anim-data texture)
+                                                                         tex-w (:width tex 1)
+                                                                         tex-h (:height tex 1)
+                                                                         u-vals (pairs [0 (/ (get slice9 0) tex-w) (- 1 (/ (get slice9 2) tex-w)) 1])
+                                                                         v-vals (pairs [1 (- 1 (/ (get slice9 3) tex-h)) (/ (get slice9 1) tex-h) 0])
+                                                                         uv-trans (get-in tex [:uv-transforms 0])
+                                                                         uvs (for [[u0 u1] u-vals
+                                                                                   [v0 v1] v-vals]
+                                                                               (geom/uv-trans uv-trans [[u0 v0] [u0 v1] [u1 v1] [u1 v0]]))
+                                                                         uvs (vec (mapcat #(map (partial nth %) order) uvs))
+                                                                         lines (vec (mapcat #(interleave % (drop 1 (cycle %))) corners))]
+                                                                     [vs uvs lines])
+                                                         :type-pie (let [offset (mapv + offset [(* 0.5 w) (* 0.5 h) 0])
+                                                                         {:keys [outer-bounds inner-radius perimeter-vertices pie-fill-angle]} pie-data
+                                                                         outer-rect? (= :piebounds-rectangle outer-bounds)
+                                                                         cut-off? (< pie-fill-angle 360)
+                                                                         hole? (> inner-radius 0)
+                                                                         vs (pie-circling perimeter-vertices pie-fill-angle outer-rect? [[1 0 0]])
+                                                                         vs-outer (if outer-rect?
+                                                                                    (mapv (fn [[x y z]]
+                                                                                            (let [abs-x (Math/abs (double x))
+                                                                                                  abs-y (Math/abs (double y))]
+                                                                                              (if (< abs-x abs-y)
+                                                                                                [(/ x abs-y) (/ y abs-y) z]
+                                                                                                [(/ x abs-x) (/ y abs-x) z]))) vs)
+                                                                                    vs)
+                                                                         vs-inner (if (> inner-radius 0)
+                                                                                    (let [xs (/ inner-radius w)
+                                                                                          ys (* xs (/ h w))]
+                                                                                      (geom/scale [xs ys 1] vs))
+                                                                                    [[0 0 0]])
+                                                                         lines (->> (cond-> (vec (apply concat (partition 2 1 vs-outer)))
+                                                                                      hole? (into (apply concat (partition 2 1 vs-inner)))
+                                                                                      cut-off? (into [(first vs-outer) (first vs-inner) (last vs-outer) (last vs-inner)]))
+                                                                                 (geom/scale [(* 0.5 w) (* 0.5 h) 1])
+                                                                                 (geom/transl offset))
+                                                                         vs (if hole?
+                                                                              (reduce into []
+                                                                                      (concat
+                                                                                        (map #(do [%1 (second %2) (first %2)]) vs-outer (partition 2 1 vs-inner))
+                                                                                        (map #(do [%1 (first %2) (second %2)]) (drop 1 (cycle vs-inner)) (partition 2 1 vs-outer))))
+                                                                              (vec (mapcat into (repeat vs-inner) (partition 2 1 vs-outer))))
+                                                                         uvs (->> vs
+                                                                               (map #(subvec % 0 2))
+                                                                               (geom/transl [1 1])
+                                                                               (geom/scale [0.5 -0.5])
+                                                                               (geom/transl [0 1])
+                                                                               (geom/uv-trans (get-in anim-data [texture :uv-transforms 0])))
+                                                                         vs (->> vs
+                                                                              (geom/scale [(* 0.5 w) (* 0.5 h) 1])
+                                                                              (geom/transl offset))]
+                                                                     [vs uvs lines])
+                                                         [[] [] []])]
+                     {:geom-data geom-data
+                      :line-data line-data
+                      :uv-data uv-data
+                      :color color}))
+        userdata (assoc userdata
+                        :gpu-texture gpu-texture
+                        :inherit-alpha inherit-alpha
+                        :material-shader material-shader
+                        :blend-mode blend-mode)]
+    {:render-fn render-nodes
+     :passes [pass/transparent pass/selection pass/outline]
+     :user-data userdata
+     :batch-key [gpu-texture blend-mode]
+     :select-batch-key _node-id
+     :index index
+     :layer-index (if layer-index (inc layer-index) 0)}))
 
 (defn- proj-path [resource]
   (if resource
@@ -413,21 +406,6 @@
 (def ^:private IDMap {g/Str g/NodeID})
 (def ^:private TemplateData {:resource (g/maybe (g/protocol resource/Resource)) :overrides {}})
 
-(defn- trans-position [pos parent-p ^Quat4d parent-q parent-s]
-  (let [[x y z] (mapv * pos parent-s)]
-    (conj (->>
-           (math/rotate parent-q (Vector3d. x y z))
-           (math/vecmath->clj)
-           (mapv + parent-p))
-          1.0)))
-
-(defn- trans-rotation [rot ^Quat4d parent-q]
-  (let [q (math/euler->quat rot)]
-    (-> q
-      (doto (.mul parent-q q))
-      (math/quat->euler)
-      (conj 1.0))))
-
 (def GuiNode)
 (def NodesNode)
 
@@ -454,62 +432,7 @@
                                           :min 0.0
                                           :max 1.0
                                           :precision 0.01})))
-  ; Template
-  (property template TemplateData
-            (dynamic visible template?)
-            (dynamic edit-type (g/always {:type (g/protocol resource/Resource)
-                                          :ext "gui"
-                                          :to-type (fn [v] (:resource v))
-                                          :from-type (fn [r] {:resource r :overrides {}})}))
-            (value (g/fnk [_node-id id template-resource template-overrides]
-                          (let [overrides (into {} (map (fn [[k v]] [(subs k (inc (count id))) v]) template-overrides))]
-                            {:resource template-resource :overrides overrides})))
-            (set (fn [basis self old-value new-value]
-                   (let [project (project/get-project self)
-                         current-scene (g/node-feeding-into basis self :template-resource)]
-                     (concat
-                       (if current-scene
-                         (g/delete-node current-scene)
-                         [])
-                       (if (and new-value (:resource new-value))
-                         (project/connect-resource-node project (:resource new-value) self []
-                                                        (fn [scene-node]
-                                                          (let [override (g/override basis scene-node {:traverse? (fn [basis [src src-label tgt tgt-label]]
-                                                                                                                    (if (not= src current-scene)
-                                                                                                                      (or (g/node-instance? basis GuiNode src)
-                                                                                                                          (g/node-instance? basis NodesNode src)
-                                                                                                                          (g/node-instance? basis GuiSceneNode src))
-                                                                                                                      false))})
-                                                                id-mapping (:id-mapping override)
-                                                                or-scene (get id-mapping scene-node)
-                                                                node-mapping (comp id-mapping (g/node-value scene-node :node-ids :basis basis))]
-                                                            (concat
-                                                              (:tx-data override)
-                                                              (g/connect self :template-prefix or-scene :id-prefix)
-                                                              (for [[from to] [[:node-ids :node-ids]
-                                                                               [:node-outline :template-outline]
-                                                                               [:scene :template-scene]
-                                                                               [:resource :template-resource]
-                                                                               [:pb-msg :scene-pb-msg]
-                                                                               [:rt-pb-msg :scene-rt-pb-msg]
-                                                                               [:node-overrides :template-overrides]]]
-                                                                (g/connect or-scene from self to))
-                                                              (for [[from to] [[:layer-ids :layer-ids]
-                                                                               [:texture-ids :texture-ids]
-                                                                               [:font-ids :font-ids]]]
-                                                                (g/connect self from or-scene to))
-                                                              (for [[id data] (:overrides new-value)
-                                                                    :let [node-id (node-mapping id)]
-                                                                    :when node-id
-                                                                    [label value] data]
-                                                                (g/set-property node-id label value))))))
-                         []))))))
   (property inherit-alpha g/Bool (default true))
-  (input template-resource (g/protocol resource/Resource) :cascade-delete)
-  (input template-outline outline/OutlineData)
-  (input template-scene g/Any)
-  (input template-overrides g/Any)
-  (output template-prefix g/Str (g/fnk [id] (str id "/")))
 
   ; Text
   (property text g/Str (dynamic visible text?))
@@ -635,69 +558,49 @@
   (input material-shader ShaderLifecycle)
   (input child-scenes g/Any :array)
   (input child-indices g/Int :array)
+  (output node-outline-children [outline/OutlineData] :cached (g/fnk [child-outlines]
+                                                                     (vec (sort-by :index child-outlines))))
+  (output node-outline-reqs g/Any :cached
+          (g/fnk [] [{:node-type GuiNode
+                      :tx-attach-fn (fn [target source]
+                                      (let [scene (node->gui-scene target)
+                                            type (g/node-value source :type)]
+                                        (concat
+                                          (g/update-property source :id outline/resolve-id (keys (g/node-value scene :node-ids)))
+                                          (attach-gui-node scene target source type))))}]))
   (output node-outline outline/OutlineData :cached
-    (g/fnk [_node-id id index child-outlines type template-outline]
-      (let [reqs (if (= type :type-template)
-                   []
-                   [{:node-type GuiNode
-                     :tx-attach-fn (fn [target source]
-                                     (let [scene (node->gui-scene target)
-                                           type (g/node-value source :type)]
-                                       (concat
-                                         (g/update-property source :id outline/resolve-id (keys (g/node-value scene :node-ids)))
-                                         (attach-gui-node scene target source type))))}])]
-        {:node-id _node-id
-         :label id
-         :index index
-         :icon (case type
-                 :type-box box-icon
-                 :type-text text-icon
-                 :type-pie pie-icon
-                 :type-template template-icon)
-         :child-reqs reqs
-         :copy-include-fn (fn [node]
-                            (let [node-id (g/node-id node)]
-                              (and (g/node-instance? GuiNode node-id)
-                                (not= node-id (g/node-value node-id :parent)))))
-         :children (if template-outline
-                     (get-in template-outline [:children 0 :children])
-                     (vec (sort-by :index child-outlines)))})))
+          (g/fnk [_node-id id index node-outline-children node-outline-reqs type]
+                 {:node-id _node-id
+                  :label id
+                  :index index
+                  :icon (node-icons type)
+                  :child-reqs node-outline-reqs
+                  :copy-include-fn (fn [node]
+                                     (let [node-id (g/node-id node)]
+                                       (and (g/node-instance? GuiNode node-id)
+                                            (not= node-id (g/node-value node-id :parent)))))
+                  :children node-outline-children}))
   (output pb-msg g/Any :cached produce-node-msg)
-  (output pb-msgs g/Any :cached (g/fnk [id type pb-msg scene-pb-msg]
-                                       (if (= type :type-template)
-                                         (into [pb-msg] (map #(cond-> % (empty? (:parent %)) (assoc :parent id)) (:nodes scene-pb-msg)))
-                                         [pb-msg])))
-  (output rt-pb-msgs g/Any :cached (g/fnk [type scene-rt-pb-msg pb-msg]
-                                          (if (= type :type-template)
-                                            (let [parent-q (math/euler->quat (:rotation pb-msg))]
-                                              (into [] (map #(-> %
-                                                               (assoc :index (:index pb-msg))
-                                                               (cond->
-                                                                 (empty? (:layer %)) (assoc :layer (:layer pb-msg))
-                                                                 (:inherit-alpha %) (->
-                                                                                      (update :alpha * (:alpha pb-msg))
-                                                                                      (assoc :inherit-alpha (:inherit-alpha pb-msg)))
-                                                                 (empty? (:parent %)) (->
-                                                                                        (assoc :parent (:parent pb-msg))
-                                                                                        ;; In fact incorrect, but only possibility to retain rotation/scale separation
-                                                                                        (update :scale (partial mapv * (:scale pb-msg)))
-                                                                                        (update :position trans-position (:position pb-msg) parent-q (:scale pb-msg))
-                                                                                        (update :rotation trans-rotation parent-q))))
-                                                           (:nodes scene-rt-pb-msg))))
-                                            [pb-msg])))
-  (output aabb g/Any (g/fnk [pivot size type font-map text line-break template-scene]
-                            (if template-scene
-                              (:aabb template-scene)
-                              (let [size (if (= type :type-text)
-                                           (font/measure font-map text line-break (first size))
-                                           size)
-                                    offset-fn (partial mapv + (pivot-offset pivot size))
-                                    [min-x min-y _] (offset-fn [0 0 0])
-                                    [max-x max-y _] (offset-fn size)]
-                                (-> (geom/null-aabb)
-                                  (geom/aabb-incorporate min-x min-y 0)
-                                  (geom/aabb-incorporate max-x max-y 0))))))
-  (output scene g/Any :cached produce-node-scene)
+  (output pb-msgs g/Any :cached (g/fnk [pb-msg] [pb-msg]))
+  (output rt-pb-msgs g/Any (g/fnk [pb-msgs] pb-msgs))
+  (output aabb g/Any :cached (g/fnk [pivot size type font-map text line-break]
+                                    (let [size (if (= type :type-text)
+                                                 (font/measure font-map text line-break (first size))
+                                                 size)
+                                          offset-fn (partial mapv + (pivot-offset pivot size))
+                                          [min-x min-y _] (offset-fn [0 0 0])
+                                          [max-x max-y _] (offset-fn size)]
+                                      (-> (geom/null-aabb)
+                                        (geom/aabb-incorporate min-x min-y 0)
+                                        (geom/aabb-incorporate max-x max-y 0)))))
+  (output scene-children g/Any (g/fnk [child-scenes] child-scenes))
+  (output scene-renderable g/Any produce-node-renderable)
+  (output scene g/Any :cached (g/fnk [_node-id aabb transform scene-children scene-renderable]
+                                     {:node-id _node-id
+                                      :aabb aabb
+                                      :transform transform
+                                      :children scene-children
+                                      :renderable scene-renderable}))
   (output pie-data {g/Keyword g/Any} (g/fnk [outer-bounds inner-radius perimeter-vertices pie-fill-angle]
                                        {:outer-bounds outer-bounds :inner-radius inner-radius
                                         :perimeter-vertices perimeter-vertices :pie-fill-angle pie-fill-angle}))
@@ -705,13 +608,122 @@
                                         {:text text :font-data font-data
                                          :line-break line-break :outline outline :shadow shadow :max-width (first size)}))
   (input node-ids IDMap)
+  (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids)))
+  (output node-overrides g/Any :cached (g/fnk [id _properties]
+                                             {id (into {} (map (fn [[k v]] [k (:value v)])
+                                                               (filter (fn [[_ v]] (contains? v :original-value))
+                                                                       (:properties _properties))))})))
+
+;; Template nodes
+
+(defn- trans-position [pos parent-p ^Quat4d parent-q parent-s]
+  (let [[x y z] (mapv * pos parent-s)]
+    (conj (->>
+           (math/rotate parent-q (Vector3d. x y z))
+           (math/vecmath->clj)
+           (mapv + parent-p))
+          1.0)))
+
+(defn- trans-rotation [rot ^Quat4d parent-q]
+  (let [q (math/euler->quat rot)]
+    (-> q
+      (doto (.mul parent-q q))
+      (math/quat->euler)
+      (conj 1.0))))
+
+(g/defnode TemplateNode
+  (inherits GuiNode)
+
+  (property template TemplateData
+            (dynamic visible template?)
+            (dynamic edit-type (g/always {:type (g/protocol resource/Resource)
+                                          :ext "gui"
+                                          :to-type (fn [v] (:resource v))
+                                          :from-type (fn [r] {:resource r :overrides {}})}))
+            (value (g/fnk [_node-id id template-resource template-overrides]
+                          (let [overrides (into {} (map (fn [[k v]] [(subs k (inc (count id))) v]) template-overrides))]
+                            {:resource template-resource :overrides overrides})))
+            (set (fn [basis self old-value new-value]
+                   (let [project (project/get-project self)
+                         current-scene (g/node-feeding-into basis self :template-resource)]
+                     (concat
+                       (if current-scene
+                         (g/delete-node current-scene)
+                         [])
+                       (if (and new-value (:resource new-value))
+                         (project/connect-resource-node project (:resource new-value) self []
+                                                        (fn [scene-node]
+                                                          (let [override (g/override basis scene-node {:traverse? (fn [basis [src src-label tgt tgt-label]]
+                                                                                                                    (if (not= src current-scene)
+                                                                                                                      (or (g/node-instance? basis GuiNode src)
+                                                                                                                          (g/node-instance? basis NodesNode src)
+                                                                                                                          (g/node-instance? basis GuiSceneNode src))
+                                                                                                                      false))})
+                                                                id-mapping (:id-mapping override)
+                                                                or-scene (get id-mapping scene-node)
+                                                                node-mapping (comp id-mapping (g/node-value scene-node :node-ids :basis basis))]
+                                                            (concat
+                                                              (:tx-data override)
+                                                              (g/connect self :template-prefix or-scene :id-prefix)
+                                                              (for [[from to] [[:node-ids :node-ids]
+                                                                               [:node-outline :template-outline]
+                                                                               [:scene :template-scene]
+                                                                               [:resource :template-resource]
+                                                                               [:pb-msg :scene-pb-msg]
+                                                                               [:rt-pb-msg :scene-rt-pb-msg]
+                                                                               [:node-overrides :template-overrides]]]
+                                                                (g/connect or-scene from self to))
+                                                              (for [[from to] [[:layer-ids :layer-ids]
+                                                                               [:texture-ids :texture-ids]
+                                                                               [:font-ids :font-ids]]]
+                                                                (g/connect self from or-scene to))
+                                                              (for [[id data] (:overrides new-value)
+                                                                    :let [node-id (node-mapping id)]
+                                                                    :when node-id
+                                                                    [label value] data]
+                                                                (g/set-property node-id label value))))))
+                         []))))))
+
   (input scene-pb-msg g/Any)
   (input scene-rt-pb-msg g/Any)
-  (output node-ids IDMap (g/fnk [_node-id id node-ids] (into {id _node-id} node-ids)))
-  (output node-overrides g/Any :cached
-          (g/fnk [id _properties template-overrides _node-id]
-                 (let [overrides {id (into {} (map (fn [[k v]] [k (:value v)]) (filter (fn [[_ v]] (contains? v :original-value)) (:properties _properties))))}]
-                   (merge overrides template-overrides)))))
+
+  (input template-resource (g/protocol resource/Resource) :cascade-delete)
+  (input template-outline outline/OutlineData)
+  (input template-scene g/Any)
+  (input template-overrides g/Any)
+  (output template-prefix g/Str (g/fnk [id] (str id "/")))
+
+  ; Overloaded outputs
+  (output node-outline-children [outline/OutlineData] :cached (g/fnk [template-outline]
+                                                                     (get-in template-outline [:children 0 :children])))
+  (output node-outline-reqs g/Any :cached (g/always []))
+  (output pb-msgs g/Any :cached (g/fnk [id pb-msg scene-pb-msg]
+                                       (into [pb-msg] (map #(cond-> % (empty? (:parent %)) (assoc :parent id)) (:nodes scene-pb-msg)))))
+  (output rt-pb-msgs g/Any :cached (g/fnk [scene-rt-pb-msg pb-msg]
+                                          (let [parent-q (math/euler->quat (:rotation pb-msg))]
+                                            (into [] (map #(-> %
+                                                             (assoc :index (:index pb-msg))
+                                                             (cond->
+                                                               (empty? (:layer %)) (assoc :layer (:layer pb-msg))
+                                                               (:inherit-alpha %) (->
+                                                                                    (update :alpha * (:alpha pb-msg))
+                                                                                    (assoc :inherit-alpha (:inherit-alpha pb-msg)))
+                                                               (empty? (:parent %)) (->
+                                                                                      (assoc :parent (:parent pb-msg))
+                                                                                      ;; In fact incorrect, but only possibility to retain rotation/scale separation
+                                                                                      (update :scale (partial mapv * (:scale pb-msg)))
+                                                                                      (update :position trans-position (:position pb-msg) parent-q (:scale pb-msg))
+                                                                                      (update :rotation trans-rotation parent-q))))
+                                                         (:nodes scene-rt-pb-msg))))))
+  (output node-overrides g/Any :cached (g/fnk [id _properties template-overrides]
+                                              (-> {id (into {} (map (fn [[k v]] [k (:value v)])
+                                                                    (filter (fn [[_ v]] (contains? v :original-value))
+                                                                            (:properties _properties))))}
+                                                (merge template-overrides))))
+  (output aabb g/Any (g/fnk [template-scene] (:aabb template-scene)))
+  (output scene-children g/Any (g/fnk [template-scene] (:children template-scene)))
+  (output scene-renderable g/Any :cached (g/fnk [color inherit-alpha]
+                                                {:user-data {:color color :inherit-alpha inherit-alpha}})))
 
 (g/defnode ImageTextureNode
   (input image BufferedImage)
@@ -1129,11 +1141,14 @@
 
 (defn add-gui-node! [project scene parent node-type]
   (let [index (inc (reduce max 0 (g/node-value parent :child-indices)))
-        id (outline/resolve-id (subs (name node-type) 5) (keys (g/node-value scene :node-ids)))]
+        id (outline/resolve-id (subs (name node-type) 5) (keys (g/node-value scene :node-ids)))
+        def-node-type (case node-type
+                        :type-template TemplateNode
+                        GuiNode)]
     (g/transact
       (concat
         (g/operation-label "Add Gui Node")
-        (g/make-nodes (g/node-id->graph-id scene) [gui-node [GuiNode :id id :index index :type node-type :size [200.0 100.0 0.0]]]
+        (g/make-nodes (g/node-id->graph-id scene) [gui-node [def-node-type :id id :index index :type node-type :size [200.0 100.0 0.0]]]
           (attach-gui-node scene parent gui-node node-type)
           (if (= node-type :type-text)
             (g/set-property gui-node :text "<text>" :font "")
@@ -1367,35 +1382,14 @@
                all-tx-data []
                index 0]
           (if-let [node-desc (first node-descs)]
-            (let [tx-data (g/make-nodes graph-id [gui-node [GuiNode
-                                                            :index index
-                                                            :type (:type node-desc)
-                                                            :id (:id node-desc)
-                                                            :position (:position node-desc)
-                                                            :rotation (:rotation node-desc)
-                                                            :scale (:scale node-desc)
-                                                            :size (:size node-desc)
-                                                            :color (:color node-desc)
-                                                            :blend-mode (:blend-mode node-desc)
-                                                            :text (:text node-desc)
-                                                            :x-anchor (:x-anchor node-desc)
-                                                            :y-anchor (:y-anchor node-desc)
-                                                            :pivot (:pivot node-desc)
-                                                            :outline (:outline node-desc)
-                                                            :shadow (:shadow node-desc)
-                                                            :adjust-mode (:adjust-mode node-desc)
-                                                            :line-break (:line-break node-desc)
-                                                            :alpha (:alpha node-desc)
-                                                            :inherit-alpha (:inherit-alpha node-desc)
-                                                            :slice9 (:slice9 node-desc)
-                                                            :outer-bounds (:outer-bounds node-desc)
-                                                            :inner-radius (:inner-radius node-desc)
-                                                            :perimeter-vertices (:perimeter-vertices node-desc)
-                                                            :pie-fill-angle (:pie-fill-angle node-desc)
-                                                            :clipping-mode (:clipping-mode node-desc)
-                                                            :clipping-visible (:clipping-visible node-desc)
-                                                            :clipping-inverted (:clipping-inverted node-desc)
-                                                            :alpha (:alpha node-desc)]]
+            (let [node-type (case (:type node-desc)
+                              :type-template TemplateNode
+                              GuiNode)
+                  props (-> node-desc
+                          (assoc :index index)
+                          (select-keys (filter (complement #{:template :texture :font :layer})
+                                               (keys (g/public-properties node-type)))))
+                  tx-data (g/make-nodes graph-id [gui-node [node-type props]]
                                         (if (= :type-template (:type node-desc))
                                           (g/set-property gui-node :template {:resource (workspace/resolve-resource resource (:template node-desc))
                                                                               :overrides (get template-data (:id node-desc) {})})
@@ -1407,8 +1401,8 @@
                                                         :texture (:texture node-desc)
                                                         :font (:font node-desc)
                                                         :layer (:layer node-desc)))
-                  node-id (first (map tx-node-id (filter tx-create-node? tx-data)))]
-              (recur (rest node-descs) (assoc id->node (:id node-desc) node-id) (into all-tx-data tx-data) (inc index)))
+                 node-id (first (map tx-node-id (filter tx-create-node? tx-data)))]
+             (recur (rest node-descs) (assoc id->node (:id node-desc) node-id) (into all-tx-data tx-data) (inc index)))
             all-tx-data))))))
 
 (defn- register [workspace def]
