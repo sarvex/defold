@@ -242,11 +242,11 @@
         offset (pivot-offset pivot size)
         userdata (if (= type :type-text)
                    (let [lines (mapv conj (apply concat (take 4 (partition 2 1 (cycle (geom/transl offset [[0 0] [w 0] [w h] [0 h]]))))) (repeat 0))]
-                     (when-let [font-data (get text-data :font-data)]
-                       {:text-data (assoc text-data :offset (let [[x y] offset]
-                                                              [x (+ y (- h (get-in font-data [:font-map :max-ascent])))]))
-                        :line-data lines
-                        :color color}))
+                     {:line-data lines
+                      :color color
+                      :text-data (when-let [font-data (get text-data :font-data)]
+                                   (assoc text-data :offset (let [[x y] offset]
+                                                              [x (+ y (- h (get-in font-data [:font-map :max-ascent])))])))})
                    (let [[geom-data uv-data line-data] (case type
                                                          :type-box (let [order [0 1 3 3 1 2]
                                                                          x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
@@ -849,6 +849,7 @@
                                                            :label "Nodes"
                                                            :icon virtual-icon
                                                            :order 0
+                                                           :read-only true
                                                            :child-reqs [{:node-type GuiNode
                                                                          :tx-attach-fn (fn [target source]
                                                                                          (let [scene (node->gui-scene target)
@@ -869,6 +870,7 @@
                                                            :label "Textures"
                                                            :icon virtual-icon
                                                            :order 1
+                                                           :read-only true
                                                            :children child-outlines})))
 
 (g/defnode FontsNode
@@ -878,6 +880,7 @@
                                                            :label "Fonts"
                                                            :icon virtual-icon
                                                            :order 2
+                                                           :read-only true
                                                            :children child-outlines})))
 
 (g/defnode LayersNode
@@ -888,6 +891,7 @@
                                                            :label "Layers"
                                                            :icon virtual-icon
                                                            :order 3
+                                                           :read-only true
                                                            :children (vec (sort-by :index child-outlines))})))
 
 (g/defnode LayoutsNode
@@ -897,16 +901,19 @@
                                                            :label "Layouts"
                                                            :icon virtual-icon
                                                            :order 4
+                                                           :read-only true
                                                            :children child-outlines})))
 
 (defn- apply-alpha [parent-alpha scene]
   (let [scene-alpha (get-in scene [:renderable :user-data :color 3] 1.0)]
     (if (get-in scene [:renderable :user-data :inherit-alpha] true)
-      (let [alpha (* parent-alpha scene-alpha)]
-        (-> scene
-          (cond->
-            (get-in scene [:renderable :user-data :inherit-alpha] false)
-            (assoc-in [:renderable :user-data :color 3] alpha))
+      (let [alpha (* parent-alpha scene-alpha)
+            inherit? (get-in scene [:renderable :user-data :inherit-alpha] false)]
+        (cond-> scene
+          inherit?
+          (assoc-in [:renderable :user-data :color 3] alpha)
+
+          true
           (update :children #(mapv (partial apply-alpha alpha) %))))
       (update scene :children #(mapv (partial apply-alpha scene-alpha) %)))))
 

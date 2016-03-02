@@ -69,15 +69,34 @@
           fragment (g/copy root-ids {:traverse? traverse?})]
       (serialize fragment))))
 
+(defn- read-only? [item-it]
+  (:read-only (value item-it) false))
+
+(defn- root? [item-iterator]
+  (nil? (parent item-iterator)))
+
+(defn- override? [item-it]
+  (-> item-it
+    value
+    :node-id
+    g/override-original
+    some?))
+
+(defn delete? [item-iterators]
+  (and (not-any? read-only? item-iterators)
+       (not-any? root? item-iterators)
+       (not-any? override? item-iterators)))
+
 (defn cut? [src-item-iterators]
-  (loop [src-item-iterators src-item-iterators]
-    (if-let [item-it (first src-item-iterators)]
-      (let [root-nodes [(g/node-by-id (:node-id (value item-it)))]
-            parent (parent item-it)]
-        (if (find-target-item parent root-nodes)
-          (recur (rest src-item-iterators))
-          false))
-      true)))
+  (and (delete? src-item-iterators)
+    (loop [src-item-iterators src-item-iterators]
+     (if-let [item-it (first src-item-iterators)]
+       (let [root-nodes [(g/node-by-id (:node-id (value item-it)))]
+             parent (parent item-it)]
+         (if (find-target-item parent root-nodes)
+           (recur (rest src-item-iterators))
+           false))
+       true))))
 
 (defn cut! [src-item-iterators]
   (let [data     (copy src-item-iterators)
@@ -129,11 +148,8 @@
       ; TODO - ignore
       false)))
 
-(defn- root? [item-iterator]
-  (nil? (parent item-iterator)))
-
 (defn drag? [graph item-iterators]
-  (not-any? root? item-iterators))
+  (delete? item-iterators))
 
 (defn- descendant? [src-item item-iterator]
   (if item-iterator

@@ -39,6 +39,9 @@
 (defn- ->iterator [root-node path]
   (TestItemIterator. root-node path))
 
+(defn- delete? [node path]
+  (outline/delete? [(->iterator node path)]))
+
 (defn- copy! [node path]
   (let [data (outline/copy [(->iterator node path)])]
     (alter-var-root #'*clipboard* (constantly data))))
@@ -61,6 +64,9 @@
 (defn- copy-paste! [project node path]
   (copy! node path)
   (paste! project node (butlast path)))
+
+(defn- drag? [node path]
+  (outline/drag? (g/node-id->graph-id node) [(->iterator node path)]))
 
 (defn- drag! [node path]
   (let [src-item-iterators [(->iterator node path)]
@@ -187,6 +193,18 @@
           (is (= 2 (child-count root)))
           (is (= second-id (get (outline root [1]) :label))))))))
 
+(defn- read-only? [root path]
+  (and (not (delete? root path))
+       (not (cut? root path))
+       (not (drag? root path))))
+
+(deftest read-only-items
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/logic/main.gui")]
+      (doseq [path [[] [0] [1] [2] [3]]]
+        (is (read-only? root path))))))
+
 (deftest dnd-gui
   (with-clean-system
     (let [[workspace project] (setup world)
@@ -260,6 +278,13 @@
         (is (not (nil? (outline root (conj tmpl-path 0)))))
         (is (= new-pos (prop root (conj tmpl-path 0) :position))))
       (is (contains? (:overrides (prop super-root super-tmpl-path :template)) "sub_scene/sub_box")))))
+
+(deftest read-only-gui-template-sub-items
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/gui/scene.gui")
+          sub-path [0 1 0]]
+      (is (read-only? root sub-path)))))
 
 (deftest outline-shows-missing-parts
   (with-clean-system
