@@ -382,9 +382,12 @@
                                              [:material-shader :material-shader]]]
                               (g/connect self from gui-node to))
       :type-text (g/connect self :font-ids gui-node :font-ids)
-      :type-template (for [[from to] [[:texture-ids :texture-ids]
-                                      [:font-ids :font-ids]]]
-                       (g/connect self from gui-node to))
+      :type-template (concat
+                       (for [[from to] [[:texture-ids :texture-ids]
+                                        [:font-ids :font-ids]]]
+                         (g/connect self from gui-node to))
+                       (for [[from to] [[:scene-build-targets :template-build-targets]]]
+                         (g/connect gui-node from self to)))
       [])))
 
 (def GuiSceneNode nil)
@@ -668,6 +671,7 @@
                                                               (for [[from to] [[:node-ids :node-ids]
                                                                                [:node-outline :template-outline]
                                                                                [:scene :template-scene]
+                                                                               [:build-targets :scene-build-targets]
                                                                                [:resource :template-resource]
                                                                                [:pb-msg :scene-pb-msg]
                                                                                [:rt-pb-msg :scene-rt-pb-msg]
@@ -686,6 +690,8 @@
 
   (input scene-pb-msg g/Any)
   (input scene-rt-pb-msg g/Any)
+  (input scene-build-targets g/Any)
+  (output scene-build-targets g/Any (g/fnk [scene-build-targets] scene-build-targets))
 
   (input template-resource (g/protocol resource/Resource) :cascade-delete)
   (input template-outline outline/OutlineData)
@@ -983,9 +989,24 @@
                             (:dep-resources user-data)))]
     {:resource resource :content (protobuf/map->bytes (:pb-class user-data) pb)}))
 
-(g/defnk produce-build-targets [_node-id project-id resource rt-pb-msg dep-build-targets]
+(defn- merge-rt-pb-msg [rt-pb-msg template-build-targets]
+  (let [merge-fn! (fn [coll msg kw] (reduce conj! coll (map #(do [(:name %) %]) (get msg kw))))
+        [textures fonts] (loop [textures (transient {})
+                                fonts (transient {})
+                                msgs (conj (mapv #(get-in % [:user-data :pb]) template-build-targets) rt-pb-msg)]
+                           (if-let [msg (first msgs)]
+                             (recur
+                               (merge-fn! textures msg :textures)
+                               (merge-fn! fonts msg :fonts)
+                               (next msgs))
+                             [(persistent! textures) (persistent! fonts)]))]
+    (assoc rt-pb-msg :textures (mapv second textures) :fonts (mapv second fonts))))
+
+(g/defnk produce-build-targets [_node-id project-id resource rt-pb-msg dep-build-targets template-build-targets]
   (let [def pb-def
-        dep-build-targets (flatten dep-build-targets)
+        template-build-targets (flatten template-build-targets)
+        rt-pb-msg (merge-rt-pb-msg rt-pb-msg template-build-targets)
+        dep-build-targets (concat (flatten dep-build-targets) (mapcat :deps (flatten template-build-targets)))
         deps-by-source (into {} (map #(let [res (:resource %)] [(proj-path (:resource res)) res]) dep-build-targets))
         resource-fields (mapcat (fn [field] (if (vector? field) (mapv (fn [i] (into [(first field) i] (rest field))) (range (count (get rt-pb-msg (first field))))) [field])) (:resource-fields def))
         dep-resources (map (fn [label] [label (get deps-by-source (if (vector? label) (get-in rt-pb-msg label) (get rt-pb-msg label)))]) resource-fields)]
@@ -1070,6 +1091,7 @@
   (output pb-msg g/Any :cached produce-pb-msg)
   (output rt-pb-msg g/Any :cached produce-rt-pb-msg)
   (output save-data g/Any :cached produce-save-data)
+  (input template-build-targets g/Any :array)
   (output build-targets g/Any :cached produce-build-targets)
   (output scene g/Any :cached produce-scene)
   (output node-outline outline/OutlineData :cached produce-outline)

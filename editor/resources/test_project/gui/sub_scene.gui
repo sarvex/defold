@@ -1,5 +1,21 @@
 script: ""
 adjust_reference: ADJUST_REFERENCE_PARENT
+fonts {
+  name: "system_font"
+  font: "/fonts/big_score.font"
+}
+fonts {
+  name: "sub_font"
+  font: "/fonts/big_score.font"
+}
+textures {
+  name: "sub_main"
+  texture: "/graphics/atlas.atlas"
+}
+textures {
+  name: "main"
+  texture: "/graphics/atlas.atlas"
+}
 nodes {
   position {
     x: 500.0

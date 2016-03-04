@@ -387,4 +387,12 @@
           (is (= 0.5 (:alpha sub)))
           (is (= [1.0 1.0 1.0 1.0] (:scale sub)))
           (is (= [0.0 0.0 0.0 1.0] (:rotation sub)))
-          (is (= [1100.0 640.0 0.0 1.0] (:position sub))))))))
+          (is (= [1100.0 640.0 0.0 1.0] (:position sub))))
+        (is (contains? content-by-source "/graphics/atlas.atlas"))
+        (is (contains? content-by-source "/fonts/big_score.font"))
+        (let [textures (zipmap (map :name (:textures desc)) (map :texture (:textures desc)))]
+          (is (= "/gui/gui.texturesetc" (get textures "main")))
+          (is (= "/graphics/atlas.texturesetc" (get textures "sub_main"))))
+        (let [fonts (zipmap (map :name (:fonts desc)) (map :font (:fonts desc)))]
+          (is (= "/builtins/fonts/system_font.fontc" (get fonts "system_font")))
+          (is (= "/fonts/big_score.fontc" (get fonts "sub_font"))))))))
