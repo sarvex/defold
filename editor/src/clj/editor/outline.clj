@@ -47,12 +47,17 @@
                   :icon g/Str
                   (g/optional-key :children) [(g/recursive #'OutlineData)]
                   (g/optional-key :child-reqs) [g/Any]
+                  (g/optional-key :outline-overridden?) g/Bool
                   g/Keyword g/Any})
 
 (g/defnode OutlineNode
   (input source-outline OutlineData)
   (input child-outlines OutlineData :array)
-  (output node-outline OutlineData :abstract))
+  (output node-outline OutlineData :abstract)
+  (output outline-overridden? g/Bool :cached (g/fnk [_properties child-outlines]
+                                                    (boolean
+                                                      (or (some :outline-overridden child-outlines)
+                                                          (some (fn [[k v]] (contains? v :original-value)) (:properties _properties)))))))
 
 (defn- default-copy-traverse [basis [src-node src-label tgt-node tgt-label]]
   (and (g/node-instance? OutlineNode tgt-node)

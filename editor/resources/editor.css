@@ -117,6 +117,7 @@ Defold Orange       #fd6623             Guides etc
 .overridden {
 	-fx-text-inner-color: -defold-light-blue;
 	-fx-text-color-base: -defold-light-blue;
+	-fx-text-fill: -defold-light-blue;
 }
 
 .overridden .color-picker-label .text {

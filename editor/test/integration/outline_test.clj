@@ -279,6 +279,17 @@
         (is (= new-pos (prop root (conj tmpl-path 0) :position))))
       (is (contains? (:overrides (prop super-root super-tmpl-path :template)) "sub_scene/sub_box")))))
 
+(deftest gui-template-overrides
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/gui/scene.gui")
+          paths [[0 1] [0 1 0]]
+          new-pos [-100.0 0.0 0.0]
+          sub-box (:node-id (outline root [0 1 0]))]
+      (g/transact (g/set-property sub-box :position new-pos))
+      (doseq [path paths]
+        (is (true? (:outline-overridden? (outline root path))))))))
+
 (deftest read-only-gui-template-sub-items
   (with-clean-system
     (let [[workspace project] (setup world)

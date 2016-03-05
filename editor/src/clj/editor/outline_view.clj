@@ -351,9 +351,12 @@
                                                                       (proxy-super setText nil)
                                                                       (proxy-super setGraphic nil)
                                                                       (proxy-super setContextMenu nil))
-                                                                    (let [{:keys [label icon]} item]
+                                                                    (let [{:keys [label icon outline-overridden?]} item]
                                                                       (proxy-super setText label)
-                                                                      (proxy-super setGraphic (jfx/get-image-view icon 16)))))))]
+                                                                      (proxy-super setGraphic (jfx/get-image-view icon 16))
+                                                                      (if outline-overridden?
+                                                                        (ui/add-style! this "overridden")
+                                                                        (ui/remove-style! this "overridden")))))))]
                                                    (doto cell
                                                      (.setOnDragEntered drag-entered-handler)
                                                      (.setOnDragExited drag-exited-handler))))))))

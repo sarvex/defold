@@ -575,7 +575,7 @@
                                           (g/update-property source :id outline/resolve-id (keys (g/node-value scene :node-ids)))
                                           (attach-gui-node scene target source type))))}]))
   (output node-outline outline/OutlineData :cached
-          (g/fnk [_node-id id index node-outline-children node-outline-reqs type]
+          (g/fnk [_node-id id index node-outline-children node-outline-reqs type outline-overridden?]
                  {:node-id _node-id
                   :label id
                   :index index
@@ -585,7 +585,8 @@
                                      (let [node-id (g/node-id node)]
                                        (and (g/node-instance? GuiNode node-id)
                                             (not= node-id (g/node-value node-id :parent)))))
-                  :children node-outline-children}))
+                  :children node-outline-children
+                  :outline-overridden? outline-overridden?}))
   (output pb-msg g/Any :cached produce-node-msg)
   (output pb-msgs g/Any :cached (g/fnk [pb-msg] [pb-msg]))
   (output rt-pb-msgs g/Any (g/fnk [pb-msgs] pb-msgs))
@@ -705,6 +706,9 @@
   ; Overloaded outputs
   (output node-outline-children [outline/OutlineData] :cached (g/fnk [template-outline]
                                                                      (get-in template-outline [:children 0 :children])))
+  (output outline-overridden? g/Bool :cached (g/fnk [template-outline]
+                                                    (let [children (get-in template-outline [:children 0 :children])]
+                                                      (boolean (some :outline-overridden? children)))))
   (output node-outline-reqs g/Any :cached (g/always []))
   (output pb-msgs g/Any :cached (g/fnk [id pb-msg scene-pb-msg]
                                        (into [pb-msg] (map #(cond-> % (empty? (:parent %)) (assoc :parent id)) (:nodes scene-pb-msg)))))
