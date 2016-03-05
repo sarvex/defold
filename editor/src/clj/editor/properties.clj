@@ -245,7 +245,8 @@
                                               :values (mapv :value v)
                                               :validation-problems (mapv :validation-problems v)
                                               :edit-type (property-edit-type (first v))
-                                              :label (:label (first v))}
+                                              :label (:label (first v))
+                                              :read-only? (reduce (fn [res read-only] (or res read-only)) false (map #(get % :read-only? false) v))}
                                         default-vals (mapv :original-value (filter #(contains? % :original-value) v))
                                         prop (if (empty? default-vals) prop (assoc prop :original-values default-vals))]
                                     [k prop]))
@@ -281,15 +282,19 @@
          camel/->Camel_Snake_Case_String
          (clojure.string/replace "_" " ")))))
 
+(defn read-only? [property]
+  (:read-only? property))
+
 (defn set-values!
   ([property values]
     (set-values! property values (gensym)))
   ([property values op-seq]
-    (g/transact
-      (concat
-        (g/operation-label (str "Set " (label property)))
-        (g/operation-sequence op-seq)
-        (set-values property values)))))
+    (when (not (read-only? property))
+      (g/transact
+        (concat
+          (g/operation-label (str "Set " (label property)))
+          (g/operation-sequence op-seq)
+          (set-values property values))))))
 
 (defn- dissoc-in
   "Dissociates an entry from a nested associative structure returning a new

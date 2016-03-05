@@ -3,7 +3,7 @@
             [dynamo.graph :as g]
             [editor.types :as t]
             [editor.properties :as properties]
-            [support.test-support :refer [with-clean-system]]))
+            [support.test-support :refer [with-clean-system tx-nodes]]))
 
 (g/defnode NumProp
   (property my-prop g/Num))
@@ -16,6 +16,10 @@
 
 (g/defnode StrProp
   (property my-prop g/Str))
+
+(g/defnode StrPropReadOnly
+  (property my-prop g/Str
+            (dynamic read-only? (g/always true))))
 
 (g/defnode LinkedProps
   (property multi-properties g/Any
@@ -190,3 +194,14 @@
                                                              (g/connect user-node :user-properties linked-node :user-properties-input)))))]
       (is (= [:a :b ["Linked" :my-prop] ["Overridden" [:overridden-properties-cat :int]] :my-prop [:overridden-properties :int]]
              (display-order [link-node]))))))
+
+(deftest read-only
+  (with-clean-system
+    (let [nodes (tx-nodes
+                  (g/make-nodes world [str-node [StrProp :my-prop "1.0"]
+                                       str-node-ro [StrPropReadOnly :my-prop "1.0"]]))
+          read-only-fn (fn [ns]
+                         (properties/read-only? (get (coalesce-nodes ns) :my-prop)))]
+      (is (false? (read-only-fn [(first nodes)])))
+      (is (true? (read-only-fn [(second nodes)])))
+      (is (true? (read-only-fn nodes))))))
