@@ -412,6 +412,8 @@
 (def GuiNode)
 (def NodesNode)
 
+(g/defnk override? [_node-id basis] (some? (g/override-original basis _node-id)))
+
 (g/defnode GuiNode
   (inherits scene/ScalableSceneNode)
   (inherits outline/OutlineNode)
@@ -422,7 +424,8 @@
 
   (input id-prefix g/Str)
   (property id g/Str (default "")
-            (value (g/fnk [id id-prefix] (str id-prefix id))))
+            (value (g/fnk [id id-prefix] (str id-prefix id)))
+            (dynamic read-only? override?))
   (property size types/Vec3 (dynamic visible box-pie-text?) (default [0 0 0]))
   (property color types/Color (dynamic visible box-pie-text?) (default [1 1 1 1]))
   (property alpha g/Num (default 1.0)
@@ -638,7 +641,7 @@
   (inherits GuiNode)
 
   (property template TemplateData
-            (dynamic visible template?)
+            (dynamic read-only? override?)
             (dynamic edit-type (g/always {:type (g/protocol resource/Resource)
                                           :ext "gui"
                                           :to-type (fn [v] (:resource v))

@@ -165,10 +165,13 @@
       (g/transact (g/set-property tmpl-node :id "sub_scene2"))
       (is (not (nil? (gui-node node-id new-name))))
       (is (nil? (gui-node node-id old-name)))
-      (let [sub-node (gui-node node-id new-name)]
+      (is (false? (get-in (g/node-value tmpl-node :_declared-properties) [:properties :id :read-only?])))
+      (let [sub-node (gui-node node-id new-name)
+            props (get (g/node-value sub-node :_declared-properties) :properties)]
         (is (= new-name (prop sub-node :id)))
         (is (= (g/node-value sub-node :id)
-               (get-in (g/node-value sub-node :_declared-properties) [:properties :id :value])))))))
+               (get-in props [:id :value])))
+        (is (true? (get-in props [:id :read-only?])))))))
 
 (deftest gui-templates-complex-property
  (with-clean-system
@@ -196,10 +199,12 @@
       (is (not= nil sub-node))
       (let [template (gui-node node-id "scene/sub_scene")
             resource (workspace/find-resource workspace "/gui/sub_scene.gui")]
-        (is (= resource (get-in (g/node-value template :_properties) [:properties :template :value :resource]))))
+        (is (= resource (get-in (g/node-value template :_properties) [:properties :template :value :resource])))
+        (is (true? (get-in (g/node-value template :_properties) [:properties :template :read-only?]))))
       (let [template (gui-node node-id "scene")
             overrides (get-in (g/node-value template :_properties) [:properties :template :value :overrides])]
-        (is (contains? overrides "sub_scene/sub_box"))))))
+        (is (contains? overrides "sub_scene/sub_box"))
+        (is (false? (get-in (g/node-value template :_properties) [:properties :template :read-only?])))))))
 
 (deftest gui-template-selection
   (with-clean-system

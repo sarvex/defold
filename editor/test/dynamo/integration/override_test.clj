@@ -16,6 +16,9 @@
   (property b-property g/Str)
   (property virt-property g/Str
             (value (g/fnk [a-property] a-property)))
+  (property dyn-property g/Str
+            (value (g/fnk [_node-id basis] (some? (g/override-original basis _node-id))))
+            (dynamic override? (g/fnk [_node-id basis] (some? (g/override-original basis _node-id)))))
   (input sub-nodes g/NodeID :array :cascade-delete)
   (output sub-nodes [g/NodeID] (g/fnk [sub-nodes] sub-nodes))
   (output cached-output g/Str :cached (g/fnk [a-property] a-property))
@@ -56,11 +59,21 @@
                (is (= [or-sub] (g/node-value or-main :sub-nodes)))
                (is (= or-main (g/node-value or-main :_node-id))))
        (testing "Using base values"
-                (doseq [label [:a-property :b-property :virt-property :cached-output]]
-                  (is (= "main" (g/node-value or-main label)))))
+               (doseq [label [:a-property :b-property :virt-property :cached-output]]
+                 (is (= "main" (g/node-value or-main label)))))
        (testing "Base node invalidates cache"
                 (g/transact (g/set-property main :a-property "new main"))
                 (is (= "new main" (g/node-value or-main :cached-output)))))))
+
+(deftest property-dynamics
+   (with-clean-system
+     (let [[[main sub] [or-main or-sub]] (setup world 1)]
+       (testing "Property dynamics"
+                (let [f (fn [n]
+                          (let [p (g/node-value n :_declared-properties)]
+                            (get-in p [:properties :dyn-property :override?])))]
+                  (is (false? (f main)))
+                  (is (true? (f or-main))))))))
 
 (deftest delete
   (with-clean-system
