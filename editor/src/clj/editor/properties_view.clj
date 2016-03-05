@@ -56,7 +56,7 @@
 
 (declare update-field-message)
 
-(defn update-text-fn [^TextInputControl text values message read-only?]
+(defn- update-text-fn [^TextInputControl text values message read-only?]
   (ui/text! text (str (properties/unify-values values)))
   (update-field-message [text] message)
   (ui/editable! text (not read-only?)))
@@ -77,9 +77,11 @@
         update-ui-fn (partial update-text-fn text)
         update-fn    (fn [_]
                        (if-let [v (to-int (.getText text))]
-                         (properties/set-values! (property-fn) (repeat v))
-                         (update-ui-fn (properties/values (property-fn))
-                                       (properties/validation-message (property-fn)))))]
+                         (let [property (property-fn)]
+                           (properties/set-values! property (repeat v))
+                           (update-ui-fn (properties/values property)
+                                         (properties/validation-message property)
+                                         (properties/read-only? property)))))]
     (ui/on-action! text update-fn)
     (ui/on-focus! text (fn [got-focus] (and (not got-focus) (update-fn _))))
     [text update-ui-fn]))
@@ -364,10 +366,14 @@
                                      (properties/clear-override! (property-fn key))
                                      (.requestFocus control))))
         update-ui-fn (fn [property]
-                       (.setVisible reset-btn (properties/overridden? property))
-                       (update-ctrl-fn (properties/values property)
-                                       (properties/validation-message property)
-                                       (properties/read-only? property)))]
+                       (let [overridden? (properties/overridden? property)]
+                         (if overridden?
+                           (ui/add-style! control "overridden")
+                           (ui/remove-style! control "overridden"))
+                         (.setVisible reset-btn overridden?)
+                         (update-ctrl-fn (properties/values property)
+                                         (properties/validation-message property)
+                                         (properties/read-only? property))))]
 
     (update-ui-fn property)
 
