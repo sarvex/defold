@@ -1009,7 +1009,7 @@
                              [(persistent! textures) (persistent! fonts)]))]
     (assoc rt-pb-msg :textures (mapv second textures) :fonts (mapv second fonts))))
 
-(g/defnk produce-build-targets [_node-id project-id resource rt-pb-msg dep-build-targets template-build-targets]
+(g/defnk produce-build-targets [_node-id resource rt-pb-msg dep-build-targets template-build-targets]
   (let [def pb-def
         template-build-targets (flatten template-build-targets)
         rt-pb-msg (merge-rt-pb-msg rt-pb-msg template-build-targets)

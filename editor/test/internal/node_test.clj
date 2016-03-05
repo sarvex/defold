@@ -71,7 +71,7 @@
 (g/defnk depends-on-self [this] this)
 (g/defnk depends-on-input [an-input] an-input)
 (g/defnk depends-on-property [a-property] a-property)
-(g/defnk depends-on-several [this project g an-input a-property] [this project g an-input a-property])
+(g/defnk depends-on-several [this an-input a-property] [this an-input a-property])
 
 (g/defnode DependencyTestNode
   (input an-input String)
@@ -89,10 +89,8 @@
            (let [deps (g/input-dependencies DependencyTestNode)]
              (are [input affected-outputs] (and (contains? deps input) (= affected-outputs (get deps input)))
                   :an-input           #{:depends-on-input :depends-on-several}
-                  :a-property         #{:depends-on-property :depends-on-several :a-property :_properties :_declared-properties}
-                  :project            #{:depends-on-several})
+                  :a-property         #{:depends-on-property :depends-on-several :a-property :_properties :_declared-properties})
              (is (not (contains? deps :this)))
-             (is (not (contains? deps :g)))
              (is (not (contains? deps :unused-input))))))
 
 (g/defnode EmptyNode)

@@ -16,12 +16,16 @@
   (input sub-in g/Str)
   (output sub-out g/Str (g/fnk [sub-prop] sub-prop)))
 
-(deftest type-fns []
+(deftest type-fns
   (is (= #{:super-out :sub-out :_properties :_declared-properties} (set (keys (g/declared-outputs SubType)))))
   (is (= #{:super-in :sub-in} (set (keys (g/declared-inputs SubType)))))
   (is (= #{:super-prop :sub-prop :_output-jammers :_node-id} (set (keys (g/declared-properties SubType))))))
 
-(deftest input-prop-collision []
+(deftest input-prop-collision
   (is (thrown? AssertionError (g/defnode InputPropertyCollision
                                 (input value g/Str)
                                 (property value g/Str)))))
+
+(deftest output-arg-missing
+  (is (thrown? AssertionError (g/defnode OutputArgMissing
+                                (output out-value g/Str (g/fnk [missing-arg] nil))))))

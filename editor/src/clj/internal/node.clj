@@ -198,8 +198,8 @@
 (defn attach-properties-output
   [node-type-description]
   (let [properties      (util/filterm (comp not #{:_node-id :_output-jammers} key) (:declared-properties node-type-description))
-        argument-names  (into (util/key-set properties) (mapcat (comp ip/property-dependencies val) properties))
-        argument-schema (zipmap argument-names (repeat s/Any)) ]
+        argument-names  (into (util/key-set properties) (mapcat (comp ip/property-dependencies) properties))
+        argument-schema (zipmap argument-names (repeat s/Any))]
     (attach-output
      node-type-description
       :_declared-properties gt/Properties #{} #{}
@@ -208,7 +208,7 @@
 (defn inputs-for
   [pfn]
   (if (gt/pfnk? pfn)
-    (disj (util/fnk-arguments pfn) :this :g :basis)
+    (disj (util/fnk-arguments pfn) :this :basis)
     #{}))
 
 (defn- warn-missing-arguments
@@ -228,6 +228,13 @@
     (:inputs node-type-description)
     (:declared-properties node-type-description))))
 
+(defn- all-inputs-and-properties-and-outputs
+  [node-type-description]
+  (set/union
+    (all-inputs-and-properties node-type-description)
+    (util/key-set
+      (:outputs node-type-description))))
+
 (defn missing-inputs-for-dynamic
   [node-type-description dynamic]
   (let [fnk           (second dynamic)
@@ -241,6 +248,19 @@
           dynamic  (gt/dynamic-attributes (second property))
           :let     [missing-args (missing-inputs-for-dynamic node-type-description dynamic)]]
     (assert-no-missing-args node-type-description property dynamic missing-args))
+  node-type-description)
+
+(defn verify-inputs-for-outputs
+  [node-type-description]
+  (doseq [[output fnk] #_(select-keys (:transforms node-type-description)
+                                     (keys (:outputs node-type-description)))
+          (:transforms node-type-description)
+          :let [required-args (inputs-for fnk)
+                missing-args (set/difference required-args
+                                             (all-inputs-and-properties-and-outputs node-type-description))]]
+    (assert (empty? missing-args)
+            (str "Node " (:name node-type-description) " must have inputs, properties or outputs for the label(s) "
+                 missing-args ", because they are needed by the output '" (name output) "'.")))
   node-type-description)
 
 (defn verify-labels
@@ -322,6 +342,7 @@
       attach-input-dependencies
       verify-labels
       verify-inputs-for-dynamics
+      verify-inputs-for-outputs
       map->NodeTypeImpl))
 
 (def ^:private inputs-properties (juxt :inputs :declared-properties))
@@ -669,6 +690,9 @@
   (cond
     (= :this argument)
     'this
+
+    (= :basis argument)
+    `(:basis ~ctx-name)
 
     (property-overloads-output? node-type argument output)
     (collect-property-value self-name ctx-name node-type-name node-type propmap-sym argument)

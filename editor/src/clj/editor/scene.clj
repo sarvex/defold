@@ -278,6 +278,7 @@
   (input camera Camera)
   (input aux-renderables pass/RenderData :array)
 
+  (output viewport Region :abstract)
   (output render-data g/Any :cached (g/fnk [scene selection aux-renderables camera viewport] (produce-render-data scene selection aux-renderables camera viewport)))
   (output renderables pass/RenderData :cached (g/fnk [render-data] (:renderables render-data)))
   (output selected-renderables g/Any :cached (g/fnk [render-data] (:selected-renderables render-data)))

@@ -525,7 +525,7 @@
 
 (def ^:private resource-fields [[:emitters :tile-source] [:emitters :material]])
 
-(g/defnk produce-build-targets [_node-id project-id resource rt-pb-data dep-build-targets]
+(g/defnk produce-build-targets [_node-id resource rt-pb-data dep-build-targets]
   (let [dep-build-targets (flatten dep-build-targets)
         deps-by-source (into {} (map #(let [res (:resource %)] [(resource/proj-path (:resource res)) res]) dep-build-targets))
         resource-fields (mapcat (fn [field]

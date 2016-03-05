@@ -79,8 +79,8 @@
 (defn setter-for [property] (get property ::setter))
 
 (defn property-dependencies
-  [property]
-  (concat (or (util/fnk-arguments (getter-for property)) #{(keyword (:name property))})
+  [[key property]]
+  (concat (or (util/fnk-arguments (getter-for property)) #{key})
           (util/fnk-arguments (validation property))
           (mapcat util/fnk-arguments (vals (gt/dynamic-attributes property)))))
 
