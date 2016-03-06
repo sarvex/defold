@@ -16,6 +16,9 @@
   (input sub-in g/Str)
   (output sub-out g/Str (g/fnk [sub-prop] sub-prop)))
 
+(g/defnode SubSubType
+  (inherits SubType))
+
 (deftest type-fns
   (is (= #{:super-out :sub-out :_properties :_declared-properties} (set (keys (g/declared-outputs SubType)))))
   (is (= #{:super-in :sub-in} (set (keys (g/declared-inputs SubType)))))
@@ -29,3 +32,8 @@
 (deftest output-arg-missing
   (is (thrown? AssertionError (g/defnode OutputArgMissing
                                 (output out-value g/Str (g/fnk [missing-arg] nil))))))
+
+(deftest deep-inheritance
+  (with-clean-system
+    (let [[n] (tx-nodes (g/make-node world SubSubType))]
+      (is (g/node-instance? SuperType n)))))

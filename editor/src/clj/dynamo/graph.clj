@@ -757,7 +757,7 @@
     (node-instance*? (now) type node))
   ([basis type node]
     (let [node-ty    (node-type basis node)
-          supertypes (supertypes node-ty)
+          supertypes (tree-seq (constantly true) supertypes node-ty)
           all-types  (into #{node-ty} supertypes)]
       (all-types type))))
 
