@@ -236,19 +236,6 @@
 (defn- pairs [v]
   (filter (fn [[v0 v1]] (> (Math/abs (double (- v1 v0))) 0)) (partition 2 1 v)))
 
-(g/defnk produce-node-renderable [_node-id index layer-index blend-mode inherit-alpha gpu-texture material-shader scene-renderable-user-data]
-  {:render-fn render-nodes
-   :passes [pass/transparent pass/selection pass/outline]
-   :user-data (assoc scene-renderable-user-data
-                     :gpu-texture gpu-texture
-                     :inherit-alpha inherit-alpha
-                     :material-shader material-shader
-                     :blend-mode blend-mode)
-   :batch-key [gpu-texture blend-mode]
-   :select-batch-key _node-id
-   :index index
-   :layer-index (if layer-index (inc layer-index) 0)})
-
 (defn- proj-path [resource]
   (if resource
     (resource/proj-path resource)
@@ -329,9 +316,9 @@
 (def GuiNode)
 (def NodesNode)
 
-(g/defnk box-pie-text? [type] (not= type :type-template))
-(g/defnk box-pie? [type] (or (= :type-box type) (= :type-pie type)))
 (g/defnk override? [_node-id basis] (some? (g/override-original basis _node-id)))
+
+;; Base nodes
 
 (g/defnode GuiNode
   (inherits scene/ScalableSceneNode)
@@ -345,8 +332,8 @@
   (property id g/Str (default "")
             (value (g/fnk [id id-prefix] (str id-prefix id)))
             (dynamic read-only? override?))
-  (property size types/Vec3 (dynamic visible box-pie-text?) (default [0 0 0]))
-  (property color types/Color (dynamic visible box-pie-text?) (default [1 1 1 1]))
+  (property size types/Vec3 (dynamic visible (g/fnk [type] (not= type :type-template))) (default [0 0 0]))
+  (property color types/Color (dynamic visible (g/fnk [type] (not= type :type-template))) (default [1 1 1 1]))
   (property alpha g/Num (default 1.0)
             (value (g/fnk [color] (get color 3)))
             (set (fn [basis self _ new-value]
@@ -358,27 +345,6 @@
                                           :max 1.0
                                           :precision 0.01})))
   (property inherit-alpha g/Bool (default true))
-
-  (property texture g/Str
-            (dynamic edit-type (g/fnk [texture-ids] (properties/->choicebox (cons "" (keys texture-ids)))))
-            (dynamic visible box-pie?)
-            (value (g/fnk [texture-input animation]
-                     (str texture-input (if (and animation (not (empty? animation))) (str "/" animation) ""))))
-            (set (fn [basis self _ ^String new-value]
-                   (let [textures (g/node-value self :texture-ids :basis basis)
-                         animation (let [sep (.indexOf new-value "/")]
-                                     (if (>= sep 0) (subs new-value (inc sep)) ""))]
-                     (concat
-                       (g/set-property self :animation animation)
-                       (for [label [:texture-input :gpu-texture :anim-data]]
-                         (g/disconnect-sources self label))
-                       (if (contains? textures new-value)
-                         (let [tex-node (textures new-value)]
-                           (concat
-                             (g/connect tex-node :name self :texture-input)
-                             (g/connect tex-node :gpu-texture self :gpu-texture)
-                             (g/connect tex-node :anim-data self :anim-data)))
-                         []))))))
 
   (property layer g/Str
             (dynamic edit-type (g/fnk [layer-ids] (properties/->choicebox (cons "" (map first layer-ids)))))
@@ -393,30 +359,6 @@
                            (for [[from to] layer-connections]
                              (g/connect layer-node from self to)))
                          []))))))
-  (property blend-mode g/Keyword (default :blend-mode-alpha)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$BlendMode)))
-            (dynamic visible box-pie-text?))
-
-  ; Box/Pie/Text
-  (property adjust-mode g/Keyword (default :adjust-mode-fit)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$AdjustMode)))
-            (dynamic visible box-pie-text?))
-  (property pivot g/Keyword (default :pivot-center)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$Pivot)))
-            (dynamic visible box-pie-text?))
-  (property x-anchor g/Keyword (default :xanchor-none)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$XAnchor)))
-            (dynamic visible box-pie-text?))
-  (property y-anchor g/Keyword (default :yanchor-none)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$YAnchor)))
-            (dynamic visible box-pie-text?))
-
-  ; Box/Pie
-  (property clipping-mode g/Keyword (default :clipping-mode-none)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$ClippingMode)))
-            (dynamic visible box-pie?))
-  (property clipping-visible g/Bool (dynamic visible box-pie?) (default true))
-  (property clipping-inverted g/Bool (dynamic visible box-pie?) (default false))
 
   (display-order [:id scene/ScalableSceneNode])
 
@@ -425,12 +367,6 @@
   (output layer-ids {g/Str g/NodeID} (g/fnk [layer-ids] layer-ids))
   (input layer-input g/Str)
   (input layer-index g/Int)
-  (input texture-input g/Str)
-  (input gpu-texture g/Any)
-  (input anim-data g/Any)
-  (input textures {g/Str g/NodeID})
-  (input texture-ids {g/Str g/NodeID})
-  (input material-shader ShaderLifecycle)
   (input child-scenes g/Any :array)
   (input child-indices g/Int :array)
   (output node-outline-children [outline/OutlineData] :cached (g/fnk [child-outlines]
@@ -459,17 +395,9 @@
   (output pb-msg g/Any :cached produce-node-msg)
   (output pb-msgs g/Any :cached (g/fnk [pb-msg] [pb-msg]))
   (output rt-pb-msgs g/Any (g/fnk [pb-msgs] pb-msgs))
-  (output aabb-size g/Any (g/fnk [size] size))
-  (output aabb g/Any :cached (g/fnk [pivot aabb-size]
-                                    (let [offset-fn (partial mapv + (pivot-offset pivot aabb-size))
-                                          [min-x min-y _] (offset-fn [0 0 0])
-                                          [max-x max-y _] (offset-fn aabb-size)]
-                                      (-> (geom/null-aabb)
-                                        (geom/aabb-incorporate min-x min-y 0)
-                                        (geom/aabb-incorporate max-x max-y 0)))))
+  (output aabb g/Any :abstract)
   (output scene-children g/Any (g/fnk [child-scenes] child-scenes))
-  (output scene-renderable-user-data g/Any :abstract)
-  (output scene-renderable g/Any :cached produce-node-renderable)
+  (output scene-renderable g/Any :abstract)
   (output scene g/Any :cached (g/fnk [_node-id aabb transform scene-children scene-renderable]
                                      {:node-id _node-id
                                       :aabb aabb
@@ -484,10 +412,83 @@
                                                                (filter (fn [[_ v]] (contains? v :original-value))
                                                                        (:properties _properties))))})))
 
+(g/defnode VisualNode
+  (inherits GuiNode)
+
+  (property blend-mode g/Keyword (default :blend-mode-alpha)
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$BlendMode))))
+  (property adjust-mode g/Keyword (default :adjust-mode-fit)
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$AdjustMode))))
+  (property pivot g/Keyword (default :pivot-center)
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$Pivot))))
+  (property x-anchor g/Keyword (default :xanchor-none)
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$XAnchor))))
+  (property y-anchor g/Keyword (default :yanchor-none)
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$YAnchor))))
+
+  (input material-shader ShaderLifecycle)
+  (input gpu-texture g/Any)
+
+  (output aabb-size g/Any (g/fnk [size] size))
+  (output aabb g/Any :cached (g/fnk [pivot aabb-size]
+                                    (let [offset-fn (partial mapv + (pivot-offset pivot aabb-size))
+                                          [min-x min-y _] (offset-fn [0 0 0])
+                                          [max-x max-y _] (offset-fn aabb-size)]
+                                      (-> (geom/null-aabb)
+                                        (geom/aabb-incorporate min-x min-y 0)
+                                        (geom/aabb-incorporate max-x max-y 0)))))
+  (output scene-renderable-user-data g/Any :abstract)
+  (output scene-renderable g/Any :cached
+          (g/fnk [_node-id index layer-index blend-mode inherit-alpha gpu-texture material-shader scene-renderable-user-data]
+                 {:render-fn render-nodes
+                  :passes [pass/transparent pass/selection pass/outline]
+                  :user-data (assoc scene-renderable-user-data
+                                    :gpu-texture gpu-texture
+                                    :inherit-alpha inherit-alpha
+                                    :material-shader material-shader
+                                    :blend-mode blend-mode)
+                  :batch-key [gpu-texture blend-mode]
+                  :select-batch-key _node-id
+                  :index index
+                  :layer-index (if layer-index (inc layer-index) 0)})))
+
+(g/defnode ShapeNode
+  (inherits VisualNode)
+
+  (property texture g/Str
+            (dynamic edit-type (g/fnk [texture-ids] (properties/->choicebox (cons "" (keys texture-ids)))))
+            (value (g/fnk [texture-input animation]
+                     (str texture-input (if (and animation (not (empty? animation))) (str "/" animation) ""))))
+            (set (fn [basis self _ ^String new-value]
+                   (let [textures (g/node-value self :texture-ids :basis basis)
+                         animation (let [sep (.indexOf new-value "/")]
+                                     (if (>= sep 0) (subs new-value (inc sep)) ""))]
+                     (concat
+                       (g/set-property self :animation animation)
+                       (for [label [:texture-input :gpu-texture :anim-data]]
+                         (g/disconnect-sources self label))
+                       (if (contains? textures new-value)
+                         (let [tex-node (textures new-value)]
+                           (concat
+                             (g/connect tex-node :name self :texture-input)
+                             (g/connect tex-node :gpu-texture self :gpu-texture)
+                             (g/connect tex-node :anim-data self :anim-data)))
+                         []))))))
+
+  (property clipping-mode g/Keyword (default :clipping-mode-none)
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$ClippingMode))))
+  (property clipping-visible g/Bool (default true))
+  (property clipping-inverted g/Bool (default false))
+
+  (input texture-input g/Str)
+  (input anim-data g/Any)
+  (input textures {g/Str g/NodeID})
+  (input texture-ids {g/Str g/NodeID}))
+
 ;; Box nodes
 
 (g/defnode BoxNode
-  (inherits GuiNode)
+  (inherits ShapeNode)
 
   (property slice9 types/Vec4 (default [0 0 0 0]))
 
@@ -522,7 +523,7 @@
 ;; Pie nodes
 
 (g/defnode PieNode
-  (inherits GuiNode)
+  (inherits ShapeNode)
 
   (property outer-bounds g/Keyword (default :piebounds-ellipse)
             (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$PieBounds))))
@@ -585,7 +586,7 @@
 ;; Text nodes
 
 (g/defnode TextNode
-  (inherits GuiNode)
+  (inherits VisualNode)
 
   ; Text
   (property text g/Str)
@@ -1472,10 +1473,9 @@
                                         (let [parent (if (empty? (:parent node-desc)) nodes-node (id->node (:parent node-desc)))]
                                           (attach-gui-node self parent gui-node (:type node-desc)))
                                         ; Needs to be done after attaching so textures etc can be fetched
-                                        (g/set-property gui-node
-                                                        :texture (:texture node-desc)
-                                                        :layer (:layer node-desc))
+                                        (g/set-property gui-node :layer (:layer node-desc))
                                         (case (:type node-desc)
+                                          (:type-box :type-pie) (g/set-property gui-node :texture (:texture node-desc))
                                           :type-text (g/set-property gui-node :font (:font node-desc))
                                           []))
                  node-id (first (map tx-node-id (filter tx-create-node? tx-data)))]
