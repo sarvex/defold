@@ -236,32 +236,6 @@
 (defn- pairs [v]
   (filter (fn [[v0 v1]] (> (Math/abs (double (- v1 v0))) 0)) (partition 2 1 v)))
 
-(g/defnk produce-node-renderable-user-data [pivot size color slice9 texture anim-data]
-  (let [[w h _] size
-        offset (pivot-offset pivot size)
-        order [0 1 3 3 1 2]
-        x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
-        y-vals (pairs [0 (get slice9 3) (- h (get slice9 1)) h])
-        corners (for [[x0 x1] x-vals
-                      [y0 y1] y-vals]
-                  (geom/transl offset [[x0 y0 0] [x0 y1 0] [x1 y1 0] [x1 y0 0]]))
-        vs (vec (mapcat #(map (partial nth %) order) corners))
-        tex (get anim-data texture)
-        tex-w (:width tex 1)
-        tex-h (:height tex 1)
-        u-vals (pairs [0 (/ (get slice9 0) tex-w) (- 1 (/ (get slice9 2) tex-w)) 1])
-        v-vals (pairs [1 (- 1 (/ (get slice9 3) tex-h)) (/ (get slice9 1) tex-h) 0])
-        uv-trans (get-in tex [:uv-transforms 0])
-        uvs (for [[u0 u1] u-vals
-                  [v0 v1] v-vals]
-              (geom/uv-trans uv-trans [[u0 v0] [u0 v1] [u1 v1] [u1 v0]]))
-        uvs (vec (mapcat #(map (partial nth %) order) uvs))
-        lines (vec (mapcat #(interleave % (drop 1 (cycle %))) corners))]
-    {:geom-data vs
-     :line-data lines
-     :uv-data uvs
-     :color color}))
-
 (g/defnk produce-node-renderable [_node-id index layer-index blend-mode inherit-alpha gpu-texture material-shader scene-renderable-user-data]
   {:render-fn render-nodes
    :passes [pass/transparent pass/selection pass/outline]
@@ -357,8 +331,6 @@
 
 (g/defnk box-pie-text? [type] (not= type :type-template))
 (g/defnk box-pie? [type] (or (= :type-box type) (= :type-pie type)))
-(g/defnk box? [type] (= :type-box type))
-(g/defnk pie? [type] (= :type-pie type))
 (g/defnk override? [_node-id basis] (some? (g/override-original basis _node-id)))
 
 (g/defnode GuiNode
@@ -407,7 +379,6 @@
                              (g/connect tex-node :gpu-texture self :gpu-texture)
                              (g/connect tex-node :anim-data self :anim-data)))
                          []))))))
-  (property slice9 types/Vec4 (dynamic visible box?) (default [0 0 0 0]))
 
   (property layer g/Str
             (dynamic edit-type (g/fnk [layer-ids] (properties/->choicebox (cons "" (map first layer-ids)))))
@@ -497,7 +468,7 @@
                                         (geom/aabb-incorporate min-x min-y 0)
                                         (geom/aabb-incorporate max-x max-y 0)))))
   (output scene-children g/Any (g/fnk [child-scenes] child-scenes))
-  (output scene-renderable-user-data g/Any :cached produce-node-renderable-user-data)
+  (output scene-renderable-user-data g/Any :abstract)
   (output scene-renderable g/Any :cached produce-node-renderable)
   (output scene g/Any :cached (g/fnk [_node-id aabb transform scene-children scene-renderable]
                                      {:node-id _node-id
@@ -513,16 +484,51 @@
                                                                (filter (fn [[_ v]] (contains? v :original-value))
                                                                        (:properties _properties))))})))
 
+;; Box nodes
+
+(g/defnode BoxNode
+  (inherits GuiNode)
+
+  (property slice9 types/Vec4 (default [0 0 0 0]))
+
+  ;; Overloaded outputs
+  (output scene-renderable-user-data g/Any :cached
+          (g/fnk [pivot size color slice9 texture anim-data]
+                 (let [[w h _] size
+                       offset (pivot-offset pivot size)
+                       order [0 1 3 3 1 2]
+                       x-vals (pairs [0 (get slice9 0) (- w (get slice9 2)) w])
+                       y-vals (pairs [0 (get slice9 3) (- h (get slice9 1)) h])
+                       corners (for [[x0 x1] x-vals
+                                     [y0 y1] y-vals]
+                                 (geom/transl offset [[x0 y0 0] [x0 y1 0] [x1 y1 0] [x1 y0 0]]))
+                       vs (vec (mapcat #(map (partial nth %) order) corners))
+                       tex (get anim-data texture)
+                       tex-w (:width tex 1)
+                       tex-h (:height tex 1)
+                       u-vals (pairs [0 (/ (get slice9 0) tex-w) (- 1 (/ (get slice9 2) tex-w)) 1])
+                       v-vals (pairs [1 (- 1 (/ (get slice9 3) tex-h)) (/ (get slice9 1) tex-h) 0])
+                       uv-trans (get-in tex [:uv-transforms 0])
+                       uvs (for [[u0 u1] u-vals
+                                 [v0 v1] v-vals]
+                             (geom/uv-trans uv-trans [[u0 v0] [u0 v1] [u1 v1] [u1 v0]]))
+                       uvs (vec (mapcat #(map (partial nth %) order) uvs))
+                       lines (vec (mapcat #(interleave % (drop 1 (cycle %))) corners))]
+                   {:geom-data vs
+                    :line-data lines
+                    :uv-data uvs
+                    :color color}))))
+
 ;; Pie nodes
+
 (g/defnode PieNode
   (inherits GuiNode)
 
   (property outer-bounds g/Keyword (default :piebounds-ellipse)
-            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$PieBounds)))
-            (dynamic visible pie?))
-  (property inner-radius g/Num (dynamic visible pie?) (default 0.0))
-  (property perimeter-vertices g/Num (dynamic visible pie?) (default 10.0))
-  (property pie-fill-angle g/Num (dynamic visible pie?) (default 360.0))
+            (dynamic edit-type (g/always (properties/->pb-choicebox Gui$NodeDesc$PieBounds))))
+  (property inner-radius g/Num (default 0.0))
+  (property perimeter-vertices g/Num (default 10.0))
+  (property pie-fill-angle g/Num (default 360.0))
 
   (output pie-data {g/Keyword g/Any} (g/fnk [outer-bounds inner-radius perimeter-vertices pie-fill-angle]
                                             {:outer-bounds outer-bounds :inner-radius inner-radius
@@ -1206,8 +1212,9 @@
   (let [index (inc (reduce max 0 (g/node-value parent :child-indices)))
         id (outline/resolve-id (subs (name node-type) 5) (keys (g/node-value scene :node-ids)))
         def-node-type (case node-type
-                        :type-text TextNode
+                        :type-box BoxNode
                         :type-pie PieNode
+                        :type-text TextNode
                         :type-template TemplateNode
                         GuiNode)]
     (g/transact
@@ -1448,8 +1455,9 @@
                index 0]
           (if-let [node-desc (first node-descs)]
             (let [node-type (case (:type node-desc)
-                              :type-text TextNode
+                              :type-box BoxNode
                               :type-pie PieNode
+                              :type-text TextNode
                               :type-template TemplateNode
                               GuiNode)
                   props (-> node-desc
