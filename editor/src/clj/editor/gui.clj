@@ -884,26 +884,34 @@
                  {:name name
                   :nodes nodes})))
 
+(defn- gen-outline-fnk [label order sort-children? child-reqs]
+  (g/fnk [_node-id child-outlines]
+         {:node-id _node-id
+          :label label
+          :icon virtual-icon
+          :order order
+          :read-only true
+          :child-reqs child-reqs
+          :children (if sort-children?
+                      (vec (sort-by :index child-outlines))
+                      child-outlines)}))
+
 (g/defnode NodesNode
   (inherits outline/OutlineNode)
 
   (property id g/Str (default (g/always "")))
   (input child-scenes g/Any :array)
   (input child-indices g/Int :array)
-  (output node-outline outline/OutlineData :cached (g/fnk [_node-id child-outlines]
-                                                          {:node-id _node-id
-                                                           :label "Nodes"
-                                                           :icon virtual-icon
-                                                           :order 0
-                                                           :read-only true
-                                                           :child-reqs [{:node-type GuiNode
-                                                                         :tx-attach-fn (fn [target source]
-                                                                                         (let [scene (node->gui-scene target)
-                                                                                               type (g/node-value source :type)]
-                                                                                           (concat
-                                                                                             (g/update-property source :id outline/resolve-id (keys (g/node-value scene :node-ids)))
-                                                                                             (attach-gui-node scene target source type))))}]
-                                                           :children (vec (sort-by :index child-outlines))}))
+  (output node-outline outline/OutlineData :cached
+          (gen-outline-fnk "Nodes" 0 true
+                           [{:node-type GuiNode
+                             :tx-attach-fn (fn [target source]
+                                             (let [scene (node->gui-scene target)
+                                                   type (g/node-value source :type)]
+                                               (concat
+                                                 (g/update-property source :id outline/resolve-id
+                                                                    (keys (g/node-value scene :node-ids)))
+                                                 (attach-gui-node scene target source type))))}]))
   (output scene g/Any :cached (g/fnk [_node-id child-scenes]
                                      {:node-id _node-id
                                       :aabb (reduce geom/aabb-union (geom/null-aabb) (map :aabb child-scenes))
@@ -911,44 +919,20 @@
 
 (g/defnode TexturesNode
   (inherits outline/OutlineNode)
-  (output node-outline outline/OutlineData :cached (g/fnk [_node-id child-outlines]
-                                                          {:node-id _node-id
-                                                           :label "Textures"
-                                                           :icon virtual-icon
-                                                           :order 1
-                                                           :read-only true
-                                                           :children child-outlines})))
+  (output node-outline outline/OutlineData :cached (gen-outline-fnk "Textures" 1 false [])))
 
 (g/defnode FontsNode
   (inherits outline/OutlineNode)
-  (output node-outline outline/OutlineData :cached (g/fnk [_node-id child-outlines]
-                                                          {:node-id _node-id
-                                                           :label "Fonts"
-                                                           :icon virtual-icon
-                                                           :order 2
-                                                           :read-only true
-                                                           :children child-outlines})))
+  (output node-outline outline/OutlineData :cached (gen-outline-fnk "Fonts" 2 false [])))
 
 (g/defnode LayersNode
   (inherits outline/OutlineNode)
   (input child-indices g/Int :array)
-  (output node-outline outline/OutlineData :cached (g/fnk [_node-id child-outlines]
-                                                          {:node-id _node-id
-                                                           :label "Layers"
-                                                           :icon virtual-icon
-                                                           :order 3
-                                                           :read-only true
-                                                           :children (vec (sort-by :index child-outlines))})))
+  (output node-outline outline/OutlineData :cached (gen-outline-fnk "Layers" 3 true [])))
 
 (g/defnode LayoutsNode
   (inherits outline/OutlineNode)
-  (output node-outline outline/OutlineData :cached (g/fnk [_node-id child-outlines]
-                                                          {:node-id _node-id
-                                                           :label "Layouts"
-                                                           :icon virtual-icon
-                                                           :order 4
-                                                           :read-only true
-                                                           :children child-outlines})))
+  (output node-outline outline/OutlineData :cached (gen-outline-fnk "Layouts" 4 false [])))
 
 (defn- apply-alpha [parent-alpha scene]
   (let [scene-alpha (get-in scene [:renderable :user-data :color 3] 1.0)]
@@ -1270,6 +1254,10 @@
           (attach-layout scene parent node)
           (project/select project [node]))))))
 
+(defn- make-add-handler [scene parent label icon handler-fn user-data]
+  {:label label :icon icon :command :add
+   :user-data (merge {:handler-fn handler-fn :scene scene :parent parent} user-data)})
+
 (defn- add-handler-options [node]
   (let [types (protobuf/enum-values Gui$NodeDesc$Type)
         scene (node->gui-scene node)
@@ -1277,55 +1265,31 @@
                        (let [parent (if (= node scene)
                                       (g/node-value scene :nodes-node)
                                       node)]
-                         (mapv (fn [[type info]] {:label (:display-name info)
-                                                  :icon (get node-icons type)
-                                                  :command :add
-                                                  :user-data {:handler-fn add-gui-node-handler
-                                                              :scene scene
-                                                              :parent parent
-                                                              :node-type type}})
+                         (mapv (fn [[type info]]
+                                 (make-add-handler scene parent (:display-name info) (get node-icons type)
+                                                   add-gui-node-handler {:node-type type}))
                            types))
                        [])
         texture-option (if (some #(g/node-instance? % node) [GuiSceneNode TexturesNode])
                          (let [parent (if (= node scene)
                                         (g/node-value scene :textures-node)
                                         node)]
-                           {:label "Texture"
-                            :icon texture-icon
-                            :command :add
-                            :user-data {:handler-fn add-texture-handler
-                                        :scene scene
-                                        :parent parent}}))
+                           (make-add-handler scene parent "Texture" texture-icon add-texture-handler {})))
         font-option (if (some #(g/node-instance? % node) [GuiSceneNode FontsNode])
                       (let [parent (if (= node scene)
                                      (g/node-value scene :fonts-node)
                                      node)]
-                        {:label "Font"
-                         :icon font-icon
-                         :command :add
-                         :user-data {:handler-fn add-font-handler
-                                     :scene scene
-                                     :parent parent}}))
+                        (make-add-handler scene parent "Font" font-icon add-font-handler {})))
         layer-option (if (some #(g/node-instance? % node) [GuiSceneNode LayersNode])
                        (let [parent (if (= node scene)
                                       (g/node-value scene :layers-node)
                                       node)]
-                         {:label "Layer"
-                          :icon layer-icon
-                          :command :add
-                          :user-data {:handler-fn add-layer-handler
-                                      :scene scene
-                                      :parent parent}}))
+                         (make-add-handler scene parent "Layer" layer-icon add-layer-handler {})))
         layout-option (if (some #(g/node-instance? % node) [GuiSceneNode LayoutsNode])
                         (let [parent (if (= node scene)
                                        (g/node-value scene :layouts-node)
                                        node)]
-                          {:label "Layout"
-                           :icon layout-icon
-                           :command :add
-                           :user-data {:handler-fn add-layout-handler
-                                       :scene scene
-                                       :parent parent}}))]
+                          (make-add-handler scene parent "Layout" layout-icon add-layout-handler {})))]
     (filter some? (conj node-options texture-option font-option layer-option layout-option))))
 
 (handler/defhandler :add :global
