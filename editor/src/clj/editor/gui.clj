@@ -320,6 +320,8 @@
 
 ;; Base nodes
 
+(def base-display-order [:id scene/ScalableSceneNode :size])
+
 (g/defnode GuiNode
   (inherits scene/ScalableSceneNode)
   (inherits outline/OutlineNode)
@@ -359,8 +361,6 @@
                            (for [[from to] layer-connections]
                              (g/connect layer-node from self to)))
                          []))))))
-
-  (display-order [:id scene/ScalableSceneNode])
 
   (input parent g/Str)
   (input layer-ids {g/Str g/NodeID})
@@ -492,6 +492,10 @@
 
   (property slice9 types/Vec4 (default [0 0 0 0]))
 
+  (display-order (into base-display-order
+                       [:texture :slice9 :color :alpha :inherit-alpha :layer :blend-mode :pivot :x-anchor :y-anchor
+                        :adjust-mode :clipping :visible-clipper :inverted-clipper]))
+
   ;; Overloaded outputs
   (output scene-renderable-user-data g/Any :cached
           (g/fnk [pivot size color slice9 texture anim-data]
@@ -530,6 +534,11 @@
   (property inner-radius g/Num (default 0.0))
   (property perimeter-vertices g/Num (default 10.0))
   (property pie-fill-angle g/Num (default 360.0))
+
+  (display-order (into base-display-order
+                       [:texture :inner-radius :outer-bounds :perimeter-vertices :pie-fill-angle
+                        :color :alpha :inherit-alpha :layer :blend-mode :pivot :x-anchor :y-anchor
+                        :adjust-mode :clipping :visible-clipper :inverted-clipper]))
 
   (output pie-data {g/Keyword g/Any} (g/fnk [outer-bounds inner-radius perimeter-vertices pie-fill-angle]
                                             {:outer-bounds outer-bounds :inner-radius inner-radius
@@ -622,6 +631,8 @@
                                   :min 0.0
                                   :max 1.0
                                   :precision 0.01})))
+
+  (display-order (into base-display-order [:text :line-break :font :color :alpha :inherit-alpha :outline :outline-alpha :shadow :shadow-alpha :layer]))
 
   (input font-input g/Str)
   (input font-map g/Any)
@@ -719,6 +730,8 @@
                                                                     [label value] data]
                                                                 (g/set-property node-id label value))))))
                          []))))))
+
+  (display-order (into base-display-order [:template]))
 
   (input scene-pb-msg g/Any)
   (input scene-rt-pb-msg g/Any)
