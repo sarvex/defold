@@ -214,7 +214,7 @@
                        (binding [*programmatic-setting* true]
                          (let [value (properties/unify-values values)]
                            (if (contains? options value)
-                             (.setValue cb value)
+                             (.setValue cb (get options value))
                              (do
                                (.setValue cb nil)
                                (.. cb (getSelectionModel) (clearSelection)))))
