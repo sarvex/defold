@@ -46,7 +46,7 @@
 (def ^:private virtual-icon "icons/32/Icons_01-Folder-closed.png")
 (def ^:private layer-icon "icons/32/Icons_42-Layers.png")
 (def ^:private layout-icon "icons/32/Icons_29-AT-Unkown.png")
-(def ^:private template-icon "icons/32/Icons_29-AT-Unkown.png")
+(def ^:private template-icon gui-icon)
 
 (def ^:private node-icons {:type-box box-icon
                            :type-pie pie-icon
