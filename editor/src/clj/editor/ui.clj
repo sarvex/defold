@@ -123,17 +123,22 @@
 (defn scene [^Node node]
   (.getScene node))
 
-(defn add-style! [^Styleable node ^String class]
-  (let [styles (.getStyleClass node)]
-    (when-not (.contains styles class)
-      (.add styles class))))
-
 (defn add-styles! [^Styleable node classes]
-  (doseq [class classes]
-    (add-style! node class)))
+  (let [styles (.getStyleClass node)
+        existing (into #{} styles)
+        new (filter (complement existing) classes)]
+    (when-not (empty? new)
+      (.addAll styles ^java.util.Collection new))))
+
+(defn add-style! [^Styleable node ^String class]
+  (add-styles! node [class]))
 
 (defn remove-styles! [^Styleable node ^java.util.Collection classes]
-  (.removeAll (.getStyleClass node) classes))
+  (let [styles (.getStyleClass node)
+        existing (into #{} styles)
+        old (filter existing classes)]
+    (when-not (empty? old)
+      (.removeAll styles ^java.util.Collection old))))
 
 (defn remove-style! [^Styleable node ^String class]
   (remove-styles! node [class]))
