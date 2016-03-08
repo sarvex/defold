@@ -13,7 +13,8 @@
             [plumbing.fnk.pfnk :as pf]
             [schema.core :as s])
   (:import [internal.graph.types IBasis]
-           [internal.graph.error_values ErrorValue]))
+           [internal.graph.error_values ErrorValue]
+           [clojure.lang Named]))
 
 (set! *warn-on-reflection* true)
 
@@ -175,7 +176,10 @@
   (cascade-deletes       [_]        cascade-deletes)
   (output-type           [_ output] (get transform-types output))
   (passthroughs          [_] passthroughs)
-  (property-display-order [this] property-display-order))
+  (property-display-order [this] property-display-order)
+  Named
+  (getNamespace [_] (str (:ns (meta (resolve (symbol name))))))
+  (getName [_] (str (:name (meta (resolve (symbol name)))))))
 
 (defmethod print-method NodeTypeImpl
   [^NodeTypeImpl v ^java.io.Writer w]

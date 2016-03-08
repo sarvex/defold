@@ -317,8 +317,11 @@
              all-graphs#     (util/map-vals deref (is/graphs @*the-system*))
              to-be-replaced# (when (and all-graphs# replacing#)
                                (filterv #(and (= replacing# (node-type basis# %)) (nil? (gt/original %))) (mapcat ig/node-values (vals all-graphs#))))
-             ctor#           (fn [args#] (~ctor-name (merge (in/defaults ~symb) args#)))]
-         (def ~symb (in/make-node-type (assoc description# :dynamo.graph/ctor ctor#)))
+             ctor#           (fn [args#] (~ctor-name (merge (in/defaults ~symb) args#)))
+             type# (in/make-node-type (assoc description# :dynamo.graph/ctor ctor#))]
+         (def ~symb type#)
+         (doseq [super-type# (gt/supertypes type#)]
+           (derive type# super-type#))
          (in/declare-node-value-function-names '~symb ~symb)
          (in/define-node-record  '~record-name '~symb ~symb)
          (in/define-node-value-functions '~record-name '~symb ~symb)
@@ -756,10 +759,7 @@
   ([type node]
     (node-instance*? (now) type node))
   ([basis type node]
-    (let [node-ty    (node-type basis node)
-          supertypes (tree-seq (constantly true) supertypes node-ty)
-          all-types  (into #{node-ty} supertypes)]
-      (all-types type))))
+    (isa? (node-type basis node) type)))
 
 (defn node-instance?
   "Returns true if the node is a member of a given type, including

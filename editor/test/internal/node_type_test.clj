@@ -37,3 +37,15 @@
   (with-clean-system
     (let [[n] (tx-nodes (g/make-node world SubSubType))]
       (is (g/node-instance? SuperType n)))))
+
+(g/defnode SimpleNode)
+
+(g/defnode MultiInheritance
+  (inherits SuperType)
+  (inherits SimpleNode))
+
+(deftest isa-node-types
+  (is (isa? SubSubType SubType))
+  (is (isa? SubSubType SuperType))
+  (is (isa? MultiInheritance SimpleNode))
+  (is (isa? MultiInheritance SuperType)))
