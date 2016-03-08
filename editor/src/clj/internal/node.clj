@@ -72,7 +72,7 @@
   [node-or-node-id label evaluation-context]
   (let [cache              (:cache evaluation-context)
         basis              (:basis evaluation-context)
-        node               (if (gt/node? node-or-node-id) node-or-node-id (ig/node-by-id-at basis node-or-node-id))
+        node               (if (gt/node-id? node-or-node-id) (ig/node-by-id-at basis node-or-node-id) node-or-node-id)
         result             (and node (gt/produce-value node label evaluation-context))]
     (when (and node cache)
       (let [local             @(:local evaluation-context)

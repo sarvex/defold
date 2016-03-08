@@ -66,7 +66,7 @@
   (override-id         [this] "Return the ID of the override this node belongs to, if any")
   (original            [this] "Return the ID of the original of this node, if any"))
 
-(defn node? [v] (satisfies? Node v))
+(defn node-id? [v] (integer? v))
 
 (defprotocol IBasis
   (node-by-property [this label value])
