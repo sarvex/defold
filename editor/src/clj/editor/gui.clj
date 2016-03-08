@@ -1097,7 +1097,7 @@
   (input node-msgs g/Any :array)
   (input node-rt-msgs g/Any :array)
   (input node-overrides g/Any :array)
-  (output node-overrides g/Any (g/fnk [node-overrides] (into {} node-overrides)))
+  (output node-overrides g/Any :cached (g/fnk [node-overrides] (into {} node-overrides)))
   (input font-msgs g/Any :array)
   (input texture-msgs g/Any :array)
   (input layer-msgs g/Any :array)
@@ -1118,13 +1118,13 @@
   (output material-shader ShaderLifecycle (g/fnk [material-shader] material-shader))
   (input samplers [{g/Keyword g/Any}])
   (output samplers [{g/Keyword g/Any}] (g/fnk [samplers] samplers))
-  (output aabb AABB (g/fnk [scene-dims child-scenes]
-                           (let [w (:width scene-dims)
-                                 h (:height scene-dims)
-                                 scene-aabb (-> (geom/null-aabb)
-                                              (geom/aabb-incorporate 0 0 0)
-                                              (geom/aabb-incorporate w h 0))]
-                             (reduce geom/aabb-union scene-aabb (map :aabb child-scenes)))))
+  (output aabb AABB :cached (g/fnk [scene-dims child-scenes]
+                                   (let [w (:width scene-dims)
+                                         h (:height scene-dims)
+                                         scene-aabb (-> (geom/null-aabb)
+                                                      (geom/aabb-incorporate 0 0 0)
+                                                      (geom/aabb-incorporate w h 0))]
+                                     (reduce geom/aabb-union scene-aabb (map :aabb child-scenes)))))
   (output pb-msg g/Any :cached produce-pb-msg)
   (output rt-pb-msg g/Any :cached produce-rt-pb-msg)
   (output save-data g/Any :cached produce-save-data)
