@@ -6,7 +6,8 @@
             [internal.graph.types :as gt]
             [internal.node :as in]
             [internal.system :as is]
-            [support.test-support :refer [with-clean-system tx-nodes]]))
+            [support.test-support :refer [with-clean-system tx-nodes]])
+  (:import [clojure.lang ExceptionInfo]))
 
 (def ^:dynamic *calls*)
 
@@ -164,6 +165,12 @@
                (let [[n] (tx-nodes (g/make-nodes world [n [SimpleTestNode params]]))]
                  (is (= "foo" (g/node-value n :foo))))))))
 
+(deftest invalid-property-type
+  (testing "supplying a map to make-nodes"
+           (with-clean-system
+             (binding [in/*suppress-schema-warnings* true]
+               (is (thrown? ExceptionInfo (tx-nodes (g/make-node world SimpleTestNode :foo 1))))))))
+
 (defn- expect-modified
   [node-type properties f]
   (with-clean-system
@@ -310,17 +317,6 @@
   (output keyword-output g/Keyword (g/fnk [keyword-input] keyword-input))
   (input array-keyword-input g/Keyword :array)
   (output array-keyword-output [g/Keyword] (g/fnk [array-keyword-input] array-keyword-input)))
-
-(deftest node-validate-input-production-functions
-  (testing "inputs to production functions are validated to be the same type as expected to the fnk"
-    (binding [in/*suppress-schema-warnings* true]
-     (with-clean-system
-       (let [[source target] (tx-nodes
-                              (g/make-node world AKeywordNode :prop "a-string")
-                              (g/make-node world BOutputNode))
-             _ (g/transact  (g/connect source :prop target :keyword-input))]
-         (is (thrown? Exception (g/node-value target :keyword-output))))))))
-
 
 (g/defnode DependencyNode
   (input in g/Any)

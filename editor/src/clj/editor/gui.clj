@@ -311,7 +311,7 @@
                                   [:index :layer-index]])
 
 (def ^:private IDMap {g/Str g/NodeID})
-(def ^:private TemplateData {:resource (g/maybe (g/protocol resource/Resource)) :overrides {}})
+(def ^:private TemplateData {:resource (g/maybe (g/protocol resource/Resource)) :overrides {g/Str g/Any}})
 
 (def GuiNode)
 (def NodesNode)

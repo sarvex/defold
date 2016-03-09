@@ -17,7 +17,6 @@
   (property virt-property g/Str
             (value (g/fnk [a-property] a-property)))
   (property dyn-property g/Str
-            (value (g/fnk [_node-id basis] (some? (g/override-original basis _node-id))))
             (dynamic override? (g/fnk [_node-id basis] (some? (g/override-original basis _node-id)))))
   (input sub-nodes g/NodeID :array :cascade-delete)
   (output sub-nodes [g/NodeID] (g/fnk [sub-nodes] sub-nodes))

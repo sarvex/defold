@@ -8,7 +8,8 @@
             [internal.graph.error-values :as ie]
             [internal.node :as in]
             [internal.property :as ip]
-            [internal.system :as is]))
+            [internal.system :as is]
+            [schema.core :as s]))
 
 (set! *warn-on-reflection* true)
 
@@ -284,16 +285,30 @@
 
 (defn- invoke-setter
   [ctx node-id node property old-value new-value]
-  (let [setter-fn (in/setter-for (:basis ctx) node property)]
-    (-> ctx
-      (update :basis ip/property-default-setter node-id property old-value new-value)
-      (cond->
-        (not= old-value new-value)
-        (->
-          (mark-activated node-id property)
-          (cond->
-            (not (nil? setter-fn))
-            (apply-tx (setter-fn (:basis ctx) node-id old-value new-value))))))))
+  (let [basis (:basis ctx)
+        value-type (some-> ((gt/property-types node basis) property)
+                     gt/property-value-type
+                     in/allow-nil)]
+   (if-let [validation-error (and value-type (s/check value-type new-value))]
+     (let [node-type (gt/node-type node basis)]
+       (in/warn-output-schema node-id node-type property new-value value-type validation-error)
+       (throw (ex-info "SCHEMA-VALIDATION"
+                   {:node-id          node-id
+                    :type             node-type
+                    :property         property
+                    :expected         value-type
+                    :actual           new-value
+                    :validation-error validation-error})))
+     (let [setter-fn (in/setter-for basis node property)]
+      (-> ctx
+        (update :basis ip/property-default-setter node-id property old-value new-value)
+        (cond->
+          (not= old-value new-value)
+          (->
+            (mark-activated node-id property)
+            (cond->
+              (not (nil? setter-fn))
+              (apply-tx (setter-fn (:basis ctx) node-id old-value new-value))))))))))
 
 (defn apply-defaults [ctx node]
   (let [node-id (gt/node-id node)]

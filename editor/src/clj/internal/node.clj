@@ -801,19 +801,6 @@
              ~tail)
            (assoc (ie/error-aggregate bad-errors#) :_node-id (gt/node-id ~self-name) :_label ~label))))))
 
-(defn schema-check-input [self-name ctx-name node-type node-type-name transform input-sym schema-sym nodeid-sym forms]
-  `(if-let [validation-error# (s/check ~schema-sym ~input-sym)]
-     (do
-       (warn-input-schema ~nodeid-sym ~node-type-name ~transform ~input-sym ~schema-sym validation-error#)
-       (throw (ex-info "SCHEMA-VALIDATION"
-                       {:node-id          ~nodeid-sym
-                        :type             ~node-type-name
-                        :output           ~transform
-                        :expected         ~schema-sym
-                        :actual           ~input-sym
-                        :validation-error validation-error#})))
-     ~forms))
-
 (defn call-production-function [self-name ctx-name node-type node-type-name transform input-sym nodeid-sym output-sym forms]
   `(let [production-function# (get (gt/transforms ~node-type-name) ~transform)
          ~output-sym (production-function# (assoc ~input-sym :_node-id ~nodeid-sym :basis (:basis ~ctx-name)))]
@@ -887,12 +874,11 @@
                     (check-caches ctx-name nodeid-sym node-type transform
                       (gather-inputs input-sym schema-sym self-name ctx-name nodeid-sym propmap-sym record-name node-type-name node-type transform production-function
                         (input-error-check self-name ctx-name node-type transform input-sym
-                          (schema-check-input self-name ctx-name node-type node-type-name transform input-sym schema-sym nodeid-sym
-                            (call-production-function self-name ctx-name node-type node-type-name transform input-sym nodeid-sym output-sym
-                              (schema-check-output self-name ctx-name node-type node-type-name transform nodeid-sym output-sym
-                                (validate-output self-name ctx-name node-type node-type-name transform nodeid-sym propmap-sym output-sym
-                                  (cache-output ctx-name node-type transform nodeid-sym output-sym
-                                    output-sym)))))))))))))))]
+                          (call-production-function self-name ctx-name node-type node-type-name transform input-sym nodeid-sym output-sym
+                            (schema-check-output self-name ctx-name node-type node-type-name transform nodeid-sym output-sym
+                              (validate-output self-name ctx-name node-type node-type-name transform nodeid-sym propmap-sym output-sym
+                                (cache-output ctx-name node-type transform nodeid-sym output-sym
+                                  output-sym))))))))))))))]
     ovf))
 
 (defn node-output-value-function-forms
