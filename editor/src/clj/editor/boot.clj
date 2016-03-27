@@ -41,7 +41,8 @@
             [editor.ui :as ui]
             [editor.workspace :as workspace]
             [editor.progress :as progress]
-            [service.log :as log])
+            [service.log :as log]
+            [editor.display-profiles :as display-profiles])
   (:import [com.defold.editor EditorApplication]
            [com.defold.editor Start]
            [com.jogamp.opengl.util.awt Screenshot]
@@ -173,7 +174,8 @@
       (mesh/register-resource-types workspace)
       (material/register-resource-types workspace)
       (particlefx/register-resource-types workspace)
-      (gui/register-resource-types workspace)))
+      (gui/register-resource-types workspace)
+      (display-profiles/register-resource-types workspace)))
     (workspace/resource-sync! workspace)
     workspace))
 
