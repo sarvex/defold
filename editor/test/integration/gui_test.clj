@@ -9,6 +9,7 @@
             [editor.gl.pass :as pass])
   (:import [java.io File]
            [java.nio.file Files attribute.FileAttribute]
+           [javax.vecmath Point3d]
            [org.apache.commons.io FilenameUtils FileUtils]))
 
 (defn- prop [node-id label]
@@ -297,3 +298,31 @@
       (is (not (contains? (:overrides (prop super-template :template)) "template/sub_box")))
       (prop! new-tmpl :template {:resource (workspace/resolve-workspace-resource workspace "/gui/sub_scene.gui") :overrides {}})
       (is (contains? (:overrides (prop super-template :template)) "template/sub_box")))))
+
+(deftest gui-layout
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          node-id (test-util/resource-node project "/gui/scene.gui")]
+      (is (= ["Landscape"] (map :name (:layouts (g/node-value node-id :pb-msg))))))))
+
+(defn- max-x [scene]
+  (.getX ^Point3d (:max (:aabb scene))))
+
+(deftest gui-layout-active
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          node-id (test-util/resource-node project "/gui/layouts.gui")
+          box (gui-node node-id "box")
+          dims (g/node-value node-id :scene-dims)
+          scene (g/node-value node-id :scene)]
+      (g/transact (g/set-property node-id :active-layout "Landscape"))
+      (let [new-box (gui-node node-id "box")]
+        (is (and new-box (not= box new-box))))
+      (let [new-dims (g/node-value node-id :scene-dims)]
+        (is (and new-dims (not= dims new-dims))))
+      (let [new-scene (g/node-value node-id :scene)]
+        (is (not= (max-x scene) (max-x new-scene)))))))
+
+(gui-layout-active)

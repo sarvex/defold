@@ -46,7 +46,7 @@
 (def ^:private pie-icon "icons/32/Icons_41-GUI-Pie-node.png")
 (def ^:private virtual-icon "icons/32/Icons_01-Folder-closed.png")
 (def ^:private layer-icon "icons/32/Icons_42-Layers.png")
-(def ^:private layout-icon "icons/32/Icons_29-AT-Unkown.png")
+(def ^:private layout-icon "icons/32/Icons_50-Display-profiles.png")
 (def ^:private template-icon gui-icon)
 
 (def ^:private node-icons {:type-box box-icon
@@ -272,8 +272,7 @@
         msg (-> {:parent parent
                  :type type
                  :index index
-                 :overridden-fields (mapv indices overrides)
-                 :template-node-child (not (nil? (g/override-original basis _node-id)))}
+                 :overridden-fields (vec (sort (map indices overrides)))}
               (into (map (fn [[k v]] [k (:value v)])
                          (filter (fn [[k v]] (and (get v :visible true)
                                                   (not (contains? (set (keys pb-renames)) k))))
@@ -334,7 +333,7 @@
 (def GuiNode)
 (def NodesNode)
 
-(g/defnk override? [_node-id basis] (some? (g/override-original basis _node-id)))
+(g/defnk override? [id-prefix] (some? id-prefix))
 
 ;; Base nodes
 
@@ -778,7 +777,9 @@
                                                       (boolean (some :outline-overridden? children)))))
   (output node-outline-reqs g/Any :cached (g/always []))
   (output pb-msgs g/Any :cached (g/fnk [id pb-msg scene-pb-msg]
-                                       (into [pb-msg] (map #(cond-> % (empty? (:parent %)) (assoc :parent id)) (:nodes scene-pb-msg)))))
+                                       (into [pb-msg] (map #(-> %
+                                                              (assoc :template-node-child true)
+                                                              (cond-> (empty? (:parent %)) (assoc :parent id))) (:nodes scene-pb-msg)))))
   (output rt-pb-msgs g/Any :cached (g/fnk [scene-rt-pb-msg pb-msg]
                                           (let [parent-q (math/euler->quat (:rotation pb-msg))]
                                             (into [] (map #(-> %
@@ -905,18 +906,58 @@
                                :index index}))
   (output layer-id {g/Str g/NodeID} (g/fnk [_node-id name] {name _node-id})))
 
+(defn- extract-overrides [node-desc]
+  (select-keys node-desc (map (protobuf/fields-by-indices Gui$NodeDesc) (:overridden-fields node-desc))))
+
+(defn- layout-pb-msg [name node-msgs]
+  (let [node-msgs (filter (comp not-empty :overridden-fields) node-msgs)]
+    (cond-> {:name name}
+      (not-empty node-msgs)
+      (assoc :nodes node-msgs))))
+
 (g/defnode LayoutNode
   (inherits outline/OutlineNode)
   (property name g/Str)
-  (property nodes g/Any)
+  (property nodes g/Any
+            (dynamic visible (g/always false))
+            (value (g/fnk [layout-overrides] layout-overrides))
+            (set (fn [basis self _ new-value]
+                   (let [scene (ffirst (g/targets-of basis self :_node-id))
+                         or-data new-value
+                         override (g/override basis scene {:traverse? (fn [basis [src src-label tgt tgt-label]]
+                                                                        (or (g/node-instance? basis GuiNode src)
+                                                                            (g/node-instance? basis NodesNode src)
+                                                                            (g/node-instance? basis GuiSceneNode src)))})
+                         id-mapping (:id-mapping override)
+                         or-scene (get id-mapping scene)
+                         node-mapping (comp id-mapping (g/node-value scene :node-ids :basis basis))]
+                     (concat
+                       (:tx-data override)
+                       (for [[from to] [[:node-overrides :layout-overrides]
+                                        [:node-msgs :node-msgs]
+                                        [:node-rt-msgs :node-rt-msgs]
+                                        [:default-node-outline :scene-node-outline]
+                                        [:default-scene :scene-scene]]]
+                         (g/connect or-scene from self to))
+                       (for [[id data] or-data
+                             :let [node-id (node-mapping id)]
+                             :when node-id
+                             [label value] data]
+                         (g/set-property node-id label value)))))))
+
+  (input layout-overrides g/Any)
+  (input node-msgs g/Any)
+  (input node-rt-msgs g/Any)
   (output node-outline outline/OutlineData :cached (g/fnk [_node-id name]
                                                           {:node-id _node-id
                                                            :label name
                                                            :icon layout-icon}))
-  (output pb-msg g/Any
-          (g/fnk [name nodes]
-                 {:name name
-                  :nodes nodes})))
+  (output pb-msg g/Any :cached (g/fnk [name node-msgs] (layout-pb-msg name node-msgs)))
+  (output pb-rt-msg g/Any :cached (g/fnk [name node-rt-msgs] (layout-pb-msg name node-rt-msgs)))
+  (input scene-node-outline g/Any)
+  (output layout-node-outline g/Any (g/fnk [name scene-node-outline] [name scene-node-outline]))
+  (input scene-scene g/Any)
+  (output layout-scene g/Any (g/fnk [name scene-scene] [name scene-scene])))
 
 (defn- gen-outline-fnk [label order sort-children? child-reqs]
   (g/fnk [_node-id child-outlines]
@@ -931,9 +972,11 @@
                       child-outlines)}))
 
 (g/defnode NodesNode
+  (property id g/Str (default (g/always ""))
+            (dynamic visible (g/always false)))
+
   (inherits outline/OutlineNode)
 
-  (property id g/Str (default (g/always "")))
   (input child-scenes g/Any :array)
   (input child-indices g/Int :array)
   (output node-outline outline/OutlineData :cached
@@ -1018,8 +1061,8 @@
    :material (proj-path material-resource)
    :adjust-reference adjust-reference
    :background-color background-color
-   :nodes (map #(dissoc % :index) (flatten (sort-by #(get-in % [0 :index]) node-msgs)))
-   :layers (map #(dissoc % :index) (sort-by :index layer-msgs))
+   :nodes node-msgs
+   :layers layer-msgs
    :fonts font-msgs
    :textures texture-msgs
    :layouts layout-msgs})
@@ -1027,8 +1070,8 @@
 (g/defnk produce-pb-msg [script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs]
   (->scene-pb-msg script-resource material-resource adjust-reference background-color node-msgs layer-msgs font-msgs texture-msgs layout-msgs))
 
-(g/defnk produce-rt-pb-msg [script-resource material-resource adjust-reference background-color node-rt-msgs layer-msgs font-msgs texture-msgs layout-msgs]
-  (->scene-pb-msg script-resource material-resource adjust-reference background-color node-rt-msgs layer-msgs font-msgs texture-msgs layout-msgs))
+(g/defnk produce-rt-pb-msg [script-resource material-resource adjust-reference background-color node-rt-msgs layer-msgs font-msgs texture-msgs layout-rt-msgs]
+  (->scene-pb-msg script-resource material-resource adjust-reference background-color node-rt-msgs layer-msgs font-msgs texture-msgs layout-rt-msgs))
 
 (g/defnk produce-save-data [resource pb-msg]
   {:resource resource
@@ -1105,6 +1148,9 @@
   (property pb g/Any (dynamic visible (g/always false)))
   (property def g/Any (dynamic visible (g/always false)))
   (property background-color types/Color (dynamic visible (g/always false)) (default [1 1 1 1]))
+  (property active-layout g/Str (default (g/always ""))
+            (dynamic edit-type (g/fnk [layout-msgs] {:type :choicebox
+                                                     :options (into {"" "Default"} (map (fn [l] [(:name l) (:name l)]) layout-msgs))})))
 
   (input script-resource (g/protocol resource/Resource))
 
@@ -1115,14 +1161,19 @@
   (input layouts-node g/NodeID)
   (input dep-build-targets g/Any :array)
   (input project-settings g/Any)
+  (input display-profiles g/Any)
   (input node-msgs g/Any :array)
+  (output node-msgs g/Any :cached (g/fnk [node-msgs] (map #(dissoc % :index) (flatten (sort-by #(get-in % [0 :index]) node-msgs)))))
   (input node-rt-msgs g/Any :array)
+  (output node-rt-msgs g/Any :cached (g/fnk [node-rt-msgs] (map #(dissoc % :index) (flatten (sort-by #(get-in % [0 :index]) node-rt-msgs)))))
   (input node-overrides g/Any :array)
   (output node-overrides g/Any :cached (g/fnk [node-overrides] (into {} node-overrides)))
   (input font-msgs g/Any :array)
   (input texture-msgs g/Any :array)
   (input layer-msgs g/Any :array)
+  (output layer-msgs g/Any :cached (g/fnk [layer-msgs] (map #(dissoc % :index) (sort-by :index layer-msgs))))
   (input layout-msgs g/Any :array)
+  (input layout-rt-msgs g/Any :array)
   (input child-scenes g/Any :array)
   (input node-ids IDMap :array)
   (input texture-names g/Str :array)
@@ -1151,12 +1202,24 @@
   (output save-data g/Any :cached produce-save-data)
   (input template-build-targets g/Any :array)
   (output build-targets g/Any :cached produce-build-targets)
-  (output scene g/Any :cached produce-scene)
-  (output node-outline outline/OutlineData :cached produce-outline)
-  (output scene-dims g/Any :cached (g/fnk [project-settings]
-                                          (let [w (get project-settings ["display" "width"])
-                                                h (get project-settings ["display" "height"])]
-                                            {:width w :height h})))
+  (input layout-node-outlines g/Any :array)
+  (output default-node-outline g/Any :cached produce-outline)
+  (output node-outline outline/OutlineData :cached (g/fnk [layout-node-outlines default-node-outline active-layout]
+                                                          (let [outline (some #(and (= active-layout (first %)) (second %)) layout-node-outlines)
+                                                                nodes-path [:children 0 :children]]
+                                                            (if outline
+                                                              (assoc-in default-node-outline nodes-path (get-in outline nodes-path))
+                                                              default-node-outline))))
+  (input layout-scenes g/Any :array)
+  (output default-scene g/Any :cached produce-scene)
+  (output scene g/Any :cached (g/fnk [layout-scenes default-scene active-layout]
+                                     (or (some #(and (= active-layout (first %)) (second %)) layout-scenes)
+                                         default-scene)))
+  (output scene-dims g/Any :cached (g/fnk [project-settings active-layout display-profiles]
+                                          (or (some #(and (= active-layout (:name %)) (first (:qualifiers %))) display-profiles)
+                                              (let [w (get project-settings ["display" "width"])
+                                                    h (get project-settings ["display" "height"])]
+                                                {:width w :height h}))))
   (output layers [g/Str] :cached (g/fnk [layers] layers))
   (output texture-ids {g/Str g/NodeID} :cached (g/fnk [texture-ids] (into {} texture-ids)))
   (output node-ids {g/Str g/NodeID} :cached (g/fnk [node-ids] (into {} node-ids)))
@@ -1207,10 +1270,14 @@
 
 (defn- attach-layout [self layouts-node layout]
   (concat
-    (g/connect layout :_node-id self :nodes)
     (g/connect layout :node-outline layouts-node :child-outlines)
-    (g/connect layout :name self :layout-names)
-    (g/connect layout :pb-msg self :layout-msgs)))
+    (for [[from to] [[:_node-id :nodes]
+                     [:name :layout-names]
+                     [:pb-msg :layout-msgs]
+                     [:pb-rt-msg :layout-rt-msgs]
+                     [:layout-node-outline :layout-node-outlines]
+                     [:layout-scene :layout-scenes]]]
+      (g/connect layout from self to))))
 
 (defn- v4->v3 [v4]
   (subvec v4 0 3))
@@ -1339,9 +1406,6 @@
         alpha (if (protobuf/field-set? node-desc alpha-field) (get node-desc alpha-field) (get color 3))]
     (conj (subvec color 0 3) alpha)))
 
-(defn- extract-overrides [node-desc]
-  (select-keys node-desc (map (protobuf/fields-by-indices Gui$NodeDesc) (:overridden-fields node-desc))))
-
 (def node-property-fns (-> {}
                          (into (map (fn [label] [label [label (comp v4->v3 label)]]) [:position :rotation :scale :size]))
                          (into (map (fn [[label alpha]] [label [label (fn [n] (color-alpha n label alpha))]])
@@ -1396,6 +1460,7 @@
       (g/set-property self :def def)
       (g/set-property self :background-color (:background-color scene))
       (g/connect project :settings self :project-settings)
+      (g/connect project :display-profiles self :display-profiles)
       (g/make-nodes graph-id [fonts-node FontsNode]
                     (g/connect fonts-node :_node-id self :fonts-node)
                     (g/connect fonts-node :_node-id self :nodes)
@@ -1445,15 +1510,6 @@
                                                                (attach-layer self layers-node layer)))]
                           (recur (rest layer-descs) tx-data (inc index)))
                         tx-data)))
-      (g/make-nodes graph-id [layouts-node LayoutsNode]
-                   (g/connect layouts-node :_node-id self :layouts-node)
-                   (g/connect layouts-node :_node-id self :nodes)
-                   (g/connect layouts-node :node-outline self :child-outlines)
-                   (for [layout-desc (:layouts scene)]
-                     (g/make-nodes graph-id [layout [LayoutNode
-                                                     :name (:name layout-desc)
-                                                     :nodes (:nodes layout-desc)]]
-                       (attach-layout self layouts-node layout))))
       (g/make-nodes graph-id [nodes-node NodesNode]
         (g/connect nodes-node :_node-id self :nodes-node)
         (g/connect nodes-node :_node-id self :nodes)
@@ -1488,8 +1544,18 @@
                                           :type-text (g/set-property gui-node :font (:font node-desc))
                                           []))
                  node-id (first (map tx-node-id (filter tx-create-node? tx-data)))]
-             (recur (rest node-descs) (assoc id->node (:id node-desc) node-id) (into all-tx-data tx-data) (inc index)))
-            all-tx-data))))))
+              (recur (rest node-descs) (assoc id->node (:id node-desc) node-id) (into all-tx-data tx-data) (inc index)))
+            all-tx-data)))
+      (g/make-nodes graph-id [layouts-node LayoutsNode]
+                   (g/connect layouts-node :_node-id self :layouts-node)
+                   (g/connect layouts-node :_node-id self :nodes)
+                   (g/connect layouts-node :node-outline self :child-outlines)
+                   (for [layout-desc (:layouts scene)]
+                     (g/make-nodes graph-id [layout [LayoutNode
+                                                     :name (:name layout-desc)]]
+                       (attach-layout self layouts-node layout)
+                       ; TODO - move to node constructor when the tx-setter issue is fixed
+                       (g/set-property layout :nodes (into {} (map (fn [v] [(:id v) (convert-node-desc (extract-overrides v))]) (:nodes layout-desc))))))))))
 
 (defn- register [workspace def]
   (let [ext (:ext def)
