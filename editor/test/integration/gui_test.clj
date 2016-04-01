@@ -6,7 +6,8 @@
             [editor.workspace :as workspace]
             [editor.defold-project :as project]
             [editor.gui :as gui]
-            [editor.gl.pass :as pass])
+            [editor.gl.pass :as pass]
+            [editor.handler :as handler])
   (:import [java.io File]
            [java.nio.file Files attribute.FileAttribute]
            [javax.vecmath Point3d]
@@ -309,6 +310,14 @@
 (defn- max-x [scene]
   (.getX ^Point3d (:max (:aabb scene))))
 
+(defn- add-layout! [project scene name]
+  (let [parent (g/node-value scene :layouts-node)
+        user-data {:scene scene :parent parent :display-profile name :handler-fn gui/add-layout-handler}]
+    (handler/run :add [{:name :global :env {:selection [parent] :project project :user-data user-data}}] user-data)))
+
+(defn- set-active-layout! [scene layout]
+  (g/transact (g/set-property scene :active-layout layout)))
+
 (deftest gui-layout-active
   (with-clean-system
     (let [workspace (test-util/setup-workspace! world)
@@ -317,7 +326,7 @@
           box (gui-node node-id "box")
           dims (g/node-value node-id :scene-dims)
           scene (g/node-value node-id :scene)]
-      (g/transact (g/set-property node-id :active-layout "Landscape"))
+      (set-active-layout! node-id "Landscape")
       (let [new-box (gui-node node-id "box")]
         (is (and new-box (not= box new-box))))
       (let [new-dims (g/node-value node-id :scene-dims)]
@@ -325,4 +334,12 @@
       (let [new-scene (g/node-value node-id :scene)]
         (is (not= (max-x scene) (max-x new-scene)))))))
 
-(gui-layout-active)
+(deftest gui-layout-add
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          node-id (test-util/resource-node project "/gui/layouts.gui")
+          box (gui-node node-id "box")]
+      (add-layout! project node-id "Portrait")
+      (set-active-layout! node-id "Portrait")
+      (is (not= box (gui-node node-id "box"))))))

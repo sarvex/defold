@@ -1346,14 +1346,14 @@
           (attach-layer scene parent node)
           (project/select project [node]))))))
 
-(defn- add-layout-handler [project {:keys [scene parent node-type]}]
-  (let [name (outline/resolve-id "layout" (g/node-value scene :layout-names))]
-    (g/transact
-      (concat
-        (g/operation-label "Add Layout")
-        (g/make-nodes (g/node-id->graph-id scene) [node [LayoutNode :name name]]
-          (attach-layout scene parent node)
-          (project/select project [node]))))))
+(defn add-layout-handler [project {:keys [scene parent display-profile]}]
+  (g/transact
+    (concat
+      (g/operation-label "Add Layout")
+      (g/make-nodes (g/node-id->graph-id scene) [node [LayoutNode :name display-profile]]
+                    (attach-layout scene parent node)
+                    (g/set-property node :nodes {})
+                    (project/select project [node])))))
 
 (defn- make-add-handler [scene parent label icon handler-fn user-data]
   {:label label :icon icon :command :add
@@ -1390,16 +1390,29 @@
                         (let [parent (if (= node scene)
                                        (g/node-value scene :layouts-node)
                                        node)]
-                          (make-add-handler scene parent "Layout" layout-icon add-layout-handler {})))]
+                          (make-add-handler scene parent "Layout" layout-icon add-layout-handler {:layout true})))]
     (filter some? (conj node-options texture-option font-option layer-option layout-option))))
+
+(defn- unused-display-profiles [scene]
+  (let [layouts (set (map :name (g/node-value scene :layout-msgs)))]
+    (filter (complement layouts) (map :name (g/node-value scene :display-profiles)))))
+
+(defn- add-layout-options [node user-data]
+  (let [scene (node->gui-scene node)
+        parent (if (= node scene)
+                 (g/node-value scene :layouts-node)
+                 node)]
+    (mapv #(make-add-handler scene parent % layout-icon add-layout-handler {:display-profile %}) (unused-display-profiles scene))))
 
 (handler/defhandler :add :global
   (active? [selection] (and (= 1 (count selection))
                          (not-empty (add-handler-options (first selection)))))
   (run [project user-data] (when user-data ((:handler-fn user-data) project user-data)))
   (options [selection user-data]
-    (when (not user-data)
-      (add-handler-options (first selection)))))
+    (if (not user-data)
+      (add-handler-options (first selection))
+      (when (:layout user-data)
+        (add-layout-options (first selection) user-data)))))
 
 (defn- color-alpha [node-desc color-field alpha-field]
   (let [color (get node-desc color-field)
