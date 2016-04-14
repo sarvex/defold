@@ -485,7 +485,7 @@
                                     :inherit-alpha inherit-alpha
                                     :material-shader material-shader
                                     :blend-mode blend-mode)
-                  :batch-key [gpu-texture blend-mode]
+                  :batch-key {:texture gpu-texture :blend-mode blend-mode}
                   :select-batch-key _node-id
                   :index index
                   :layer-index layer-index})))

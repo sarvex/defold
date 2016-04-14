@@ -50,7 +50,12 @@
             :ref-val (:ref-val parent-c 0))]))
 
 (defn- set-states [s [state child-state]]
-  (update-in s [:renderable :user-data] assoc :clipping-state state :clipping-child-state child-state))
+  (-> s
+    (update-in [:renderable :user-data] assoc :clipping-state state)
+    (update-in [:renderable :batch-key] assoc :clipping-state state)
+    (cond->
+      child-state
+      (update-in [:renderable :user-data] assoc :clipping-child-state child-state))))
 
 (defn root-clippers [scene]
   (when (some (fn [s] (get-in s [:renderable :user-data :clipping])) (tree-seq (constantly true) :children scene))
@@ -69,11 +74,14 @@
   (get-in scene [:renderable :user-data :clipping :visible]))
 
 (defn- ->visible-scene [scene]
-  (-> scene
-    (update :renderable assoc :index 1)
-    (update-in [:renderable :user-data] dissoc :clipping)
-    (update-in [:renderable :user-data :clipping-state] (fn [s] (assoc s :write-mask 0 :color-mask [true true true true])))
-    (dissoc scene :children :transform)))
+  (let [clipping-state (-> (get-in scene [:renderable :user-data :clipping-state])
+                         (assoc :write-mask 0 :color-mask [true true true true]))]
+    (-> scene
+     (update :renderable assoc :index 1)
+     (update-in [:renderable :batch-key] assoc :clipping-state clipping-state)
+     (update-in [:renderable :user-data] dissoc :clipping)
+     (update-in [:renderable :user-data] assoc :clipping-state clipping-state)
+     (dissoc scene :children :transform))))
 
 (def update-scope)
 
@@ -109,7 +117,7 @@
                 true (let [new-scene (let [state (get-in parent-s clipping-child-state-path)]
                                        (cond-> scene
                                          state
-                                         (assoc-in clipping-state-path state)))
+                                         (set-states [state nil])))
                            sub-ctx (-> ctx
                                      (assoc :scenes [])
                                      (ctx-update-scope (:children scene) bit-field-offset new-scene))]
