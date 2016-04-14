@@ -775,3 +775,229 @@
           c (add-inv-clipper! project scene b true)
           d (add-inv-clipper! project scene a true)]
       (assert-render-order scene [a b c d]))))
+
+;; OVERFLOW TESTS
+
+(defn- scene->clipper-states [scene]
+  (->> (g/node-value scene :scene)
+    clipper-seq
+    (map (fn [s] [(:node-id s) (get-in s [:renderable :user-data :clipping-state])]))
+    (into {})))
+
+;; Verify that the number of root nodes is infinite and clears the stencil buffer at overflow.
+;;
+;; - a (2 bits)
+;; - b (2 bits)
+;;   - c (1 bit)
+;;     - d (1 bit)
+;;       - e (1 bit)
+;;         - f (1 bit)
+;;           - g (1 bit)
+;;             - h (1 bit)
+;;               - i (1 bit)
+;;
+;; (i) will not fit, which should trigger b to be reevaluated after a clear, assigning 1 bit to b
+(deftest root-clear
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          a (add-clipper! project scene nil false true)
+          b (add-clipper! project scene nil false true)]
+      (loop [i 7
+             parent b]
+        (when (> i 0)
+          (let [x (add-clipper! project scene parent false true)]
+            (recur (dec i) x))))
+      (is (get-in (scene->clipper-states scene) [b :clear])))))
+
+;; Same as above, but with inverteds.
+;;
+;; - a (inv, 1 bit)
+;; - b (inv, 1 bit)
+;; - c (inv, 1 bit)
+;; - d (inv, 1 bit)
+;; - e (inv, 1 bit)
+;; - f (inv, 1 bit)
+;; - g (inv, 1 bit)
+;; - h (inv, 1 bit)
+;; - i (inv, 1 bit)
+(deftest root-clear-invs
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          ids (doall (for [i (range 9)]
+                       (add-inv-clipper! project scene nil true)))]
+      (is (get-in (scene->clipper-states scene) [(last ids) :clear])))))
+
+;; Verify that an overflow is handled with an error.
+;;
+;; - a (1 bits)
+;;   - b (1 bits)
+;;     - c (1 bit)
+;;       - d (1 bit)
+;;         - e (1 bit)
+;;           - f (1 bit)
+;;             - g (1 bit)
+;;               - h (1 bit)
+;;                 - i (1 bit)
+;;
+;; (i) will not fit, which should produce an error value
+(deftest overflow
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          a (add-clipper! project scene nil false true)]
+      (loop [i 9
+             parent a]
+        (when (> i 0)
+          (let [x (add-clipper! project scene parent false true)]
+            (recur (dec i) x))))
+      (is (g/error-severe? (g/node-value scene :scene))))))
+
+;; Verify that an overflow is handled with an error.
+;;
+;; - a (inv, 1 bit)
+;;   - b (inv, 1 bit)
+;;   - c (inv, 1 bit)
+;;   - d (inv, 1 bit)
+;;   - e (inv, 1 bit)
+;;   - f (inv, 1 bit)
+;;   - g (inv, 1 bit)
+;;   - h (inv, 1 bit)
+;;   - i (inv, 1 bit)
+;;
+;; (i) will not fit, which should trigger i to be flagged with an error
+(deftest overflow-invs
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          a (add-inv-clipper! project scene nil true)]
+      (loop [i 8
+             parent a]
+        (when (> i 0)
+          (let [x (add-inv-clipper! project scene parent true)]
+            (recur (dec i) x))))
+      (let [error (g/node-value scene :scene)]
+        (is (g/error-severe? error))
+        ;; Recover from the error
+        (g/set-property! (get-in error [:user-data :source-id]) :clipping-mode :clipping-mode-none)
+        (is (not (g/error-severe? (g/node-value scene :scene))))))))
+
+;; Verify that an overflow is handled with a clear.
+;;
+;; *NOTE* This is an editor specific test.
+;;
+;; - a (2 bit)
+;;   - b (inv, 1 bits)
+;;     - c (inv, 1 bit)
+;;       - d (2 bit)
+;;       - e (inv, 1 bit)
+;;         - f (2 bit)
+;;           - g (inv, 1 bit)
+;;     - h (inv, 1 bit)
+;; - i (2 bit)
+;;   - j (inv, 1 bit)
+;;     - k (inv, 1 bit)
+;;
+;; (g) will not fit, but should trigger a clear between (a) and (i), thus making it fit.
+;; This is a feature of the editor, assuming that nodes will be enabled/disabled at run-time.
+;; Otherwise the user will see a warning.
+(deftest overflow-clear-start
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          a (add-clipper! project scene nil false true)
+          b (add-inv-clipper! project scene a true)
+          c (add-inv-clipper! project scene b true)
+          d (add-clipper! project scene c false true)
+          e (add-inv-clipper! project scene c true)
+          f (add-clipper! project scene e false true)
+          g (add-inv-clipper! project scene f true)
+          h (add-inv-clipper! project scene b true)
+          i (add-clipper! project scene nil false true)
+          j (add-inv-clipper! project scene i true)
+          k (add-inv-clipper! project scene j true)]
+      (let [non-error (g/node-value scene :scene)]
+        (is (not (g/error-severe? non-error)))))))
+
+;; Verify that an overflow is handled with a clear.
+;;
+;; *NOTE* This is an editor specific test.
+;; *NOTE* The difference to the previous test is that (g) is not inverted
+;;
+;; - a (2 bit)
+;;   - b (inv, 1 bits)
+;;     - c (inv, 1 bit)
+;;       - d (2 bit)
+;;       - e (inv, 1 bit)
+;;         - f (2 bit)
+;;           - g (1 bit)
+;;     - h (inv, 1 bit)
+;; - i (2 bit)
+;;   - j (inv, 1 bit)
+;;     - k (inv, 1 bit)
+;;
+;; (g) will not fit, but should trigger a clear between (a) and (i), thus making it fit.
+;; This is a feature of the editor, assuming that nodes will be enabled/disabled at run-time.
+;; Otherwise the user will see a warning.
+(deftest overflow-clear-start-2
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          a (add-clipper! project scene nil false true)
+          b (add-inv-clipper! project scene a true)
+          c (add-inv-clipper! project scene b true)
+          d (add-clipper! project scene c false true)
+          e (add-inv-clipper! project scene c true)
+          f (add-clipper! project scene e false true)
+          g (add-clipper! project scene f false true)
+          h (add-inv-clipper! project scene b true)
+          i (add-clipper! project scene nil false true)
+          j (add-inv-clipper! project scene i true)
+          k (add-inv-clipper! project scene j true)]
+      (let [non-error (g/node-value scene :scene)]
+        (is (not (g/error-severe? non-error)))))))
+
+;; Verify that an overflow is handled with a clear.
+;;
+;; *NOTE* This is an editor specific test.
+;;
+;; - i (2 bit)
+;;   - j (inv, 1 bit)
+;;     - k (inv, 1 bit)
+;; - a (2 bit)
+;;   - b (inv, 1 bits)
+;;     - c (inv, 1 bit)
+;;       - d (2 bit)
+;;       - e (inv, 1 bit)
+;;         - f (2 bit)
+;;           - g (inv, 1 bit)
+;;     - h (inv, 1 bit)
+;;
+;; (g) will not fit, but should trigger a clear between (a) and (i), thus making it fit.
+;; This is a feature of the editor, assuming that nodes will be enabled/disabled at run-time.
+;; Otherwise the user will see a warning.
+(deftest overflow-clear-end
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project (test-util/setup-project! workspace)
+          scene (test-util/resource-node project "/gui/empty.gui")
+          i (add-clipper! project scene nil false true)
+          j (add-inv-clipper! project scene i true)
+          k (add-inv-clipper! project scene j true)
+          a (add-clipper! project scene nil false true)
+          b (add-inv-clipper! project scene a true)
+          c (add-inv-clipper! project scene b true)
+          d (add-clipper! project scene c false true)
+          e (add-inv-clipper! project scene c true)
+          f (add-clipper! project scene e false true)
+          g (add-inv-clipper! project scene f true)
+          h (add-inv-clipper! project scene b true)]
+      (let [non-error (g/node-value scene :scene)]
+        (is (not (g/error-severe? non-error)))))))

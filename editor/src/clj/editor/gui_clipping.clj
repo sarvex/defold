@@ -1,5 +1,7 @@
 (ns editor.gui-clipping
-  (:import [javax.media.opengl GL GL2]))
+  (:require [dynamo.graph :as g])
+  (:import [javax.media.opengl GL GL2]
+           [clojure.lang ExceptionInfo]))
 
 (set! *warn-on-reflection* true)
 
@@ -12,10 +14,6 @@
 
 (defn- bit-mask [bits]
   (dec (bit-shift-left 1 bits)))
-
-(defn- overflow [non-inv-count inv-count bit-field-offset]
-  (let [bit-range (bit-range non-inv-count)]
-    (- (+ bit-range inv-count bit-field-offset) 8)))
 
 (def ^:private clipping-state {:write-mask 0xff
                                :mask 0
@@ -120,48 +118,65 @@
                          (merge (select-keys sub-ctx [:inv-offset :non-inv-index]))))))
             ctx scenes)))
 
-(defn- ctx-count-clippers [ctx scenes]
+(defn- bit-consumption [ctx]
+  (+ (bit-range (:non-inv-count ctx)) (:inv-count ctx)))
+
+(defn- ctx-count-clippers [ctx scenes available-bits]
   (reduce (fn [ctx scene]
-            (cond
-              (inv-clipper? scene) (-> ctx
-                                     (update :inv-count inc)
-                                     (ctx-count-clippers (:children scene)))
-              (non-inv-clipper? scene) (update ctx :non-inv-count inc)
-              true (ctx-count-clippers ctx (:children scene))))
+            (let [ctx (cond
+                        (inv-clipper? scene) (try
+                                               (-> ctx
+                                                 (update :inv-count inc)
+                                                 (ctx-count-clippers (:children scene) available-bits))
+                                               (catch ExceptionInfo e
+                                                 (throw (ex-info "bit overflow" {:source scene}))))
+                        (non-inv-clipper? scene) (update ctx :non-inv-count inc)
+                        true (ctx-count-clippers ctx (:children scene) available-bits))]
+              (if (> (bit-consumption ctx) available-bits)
+                (throw (ex-info "bit overflow" {:source scene}))
+                ctx)))
           ctx scenes))
 
 (defn- update-scope
   [scenes bit-field-offset inv-count parent-s]
-  (-> {:scenes []
-       :inv-count 0
-       :inv-offset inv-count
-       :non-inv-count 0
-       :non-inv-index 0}
-    (ctx-count-clippers scenes)
-    (ctx-update-scope scenes bit-field-offset parent-s)
-    :scenes))
+  (try
+    (-> {:scenes []
+         :inv-count 0
+         :inv-offset inv-count
+         :non-inv-count 0
+         :non-inv-index 0}
+      (ctx-count-clippers scenes (- 8 bit-field-offset inv-count))
+      (ctx-update-scope scenes bit-field-offset parent-s)
+      :scenes)
+    (catch ExceptionInfo e
+      (if parent-s
+        (throw (ex-info "bit overflow" {:source parent-s}))
+        (let [source-id (get-in (ex-data e) [:source :node-id])]
+          (update-scope (vec (take-while (fn [s] (not= (:node-id s) source-id)) scenes)) bit-field-offset inv-count parent-s))))))
 
 (defn setup-states [scene]
-  (loop [scene scene
-         roots (root-clippers scene)
-         clear? false]
-    (if (empty? roots)
-      scene
-      (let [new-scenes (update-scope (mapv first roots) 0 0 nil)
-            new-roots (map (fn [[s p] new-s] [new-s p]) roots new-scenes)
-            new-root-count (count new-roots)]
-        (if (= new-root-count 0)
-          ;; TODO Generate error
-          (do
-            (prn "FUCKING ERROR!!!")
-            nil)
-          (let [new-roots (cond-> new-roots
-                            clear?
-                            (update 0 (fn [[s p]] [(assoc-in s [:renderable :user-data :clipping-state :clear] true) p])))
-                new-scene (reduce (fn [s [r p]] (assoc-in s p r)) scene new-roots)]
-            (if (= new-root-count (count roots))
-              new-scene
-              (recur new-scene (subvec roots new-root-count) true))))))))
+  (let [new-roots (loop [all-roots [(root-clippers scene)]
+                         clear? false
+                         result []]
+                    (if (empty? all-roots)
+                      result
+                      (let [roots (first all-roots)]
+                        (if (empty? roots)
+                          (recur (rest all-roots) clear? result)
+                          (let [new-scenes (update-scope (mapv first roots) 0 0 nil)
+                                new-roots (mapv (fn [[s p] new-s] [new-s p]) roots new-scenes)
+                                new-root-count (count new-roots)]
+                            (if (= new-root-count 0)
+                              (if (> (count roots) 1)
+                                (recur (into [(subvec roots 0 1) (subvec roots 1)] (rest all-roots)) true result)
+                                (g/error-severe {:type :bit-overflow :source-id (get-in (last roots) [0 :node-id])}))
+                              (let [new-roots (cond-> new-roots
+                                                clear?
+                                                (assoc-in [0 0 :renderable :user-data :clipping-state :clear] true))]
+                                (recur (into [(subvec roots new-root-count)] (rest all-roots)) true (into result new-roots)))))))))]
+    (if (g/error? new-roots)
+      new-roots
+      (reduce (fn [s [r p]] (assoc-in s p r)) scene new-roots))))
 
 (defn- ->scope [index]
   {:root-layer nil :root-index index :index 1})

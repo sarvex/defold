@@ -1098,13 +1098,15 @@
       true (update :children (partial mapv (partial sort-children node-order))))))
 
 (defn- sort-scene [scene]
-  (let [node-order (->> scene
-                     clipping/scene->render-keys
-                     (sort-by second) ; sort by render-key
-                     (map first) ; keep scene keys
-                     (map-indexed (fn [index scene-key] [scene-key index]))
-                     (into {}))]
-    (sort-children node-order scene)))
+  (if (g/error? scene)
+    scene
+    (let [node-order (->> scene
+                       clipping/scene->render-keys
+                       (sort-by second) ; sort by render-key
+                       (map first) ; keep scene keys
+                       (map-indexed (fn [index scene-key] [scene-key index]))
+                       (into {}))]
+      (sort-children node-order scene))))
 
 (g/defnk produce-scene [_node-id scene-dims aabb child-scenes]
   (let [w (:width scene-dims)
