@@ -161,3 +161,6 @@
 
 (defn prop! [node-id label val]
   (g/transact (g/set-property node-id label val)))
+
+(defn prop-read-only? [node-id label]
+  (get-in (g/node-value node-id :_properties) [:properties label :read-only?]))

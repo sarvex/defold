@@ -27,6 +27,10 @@
 (set! *warn-on-reflection* true)
 
 (def ^:private lua-code-opts {:code lua/lua})
+(def ^:private go-prop-type->property-types (->> properties/go-prop-type->clj-type
+                                              (map (fn [[type clj-type]]
+                                                     [type (g/make-property-type (name type) clj-type)]))
+                                              (into {})))
 
 (def script-defs [{:ext "script"
                    :label "Script"
@@ -58,17 +62,21 @@
    :invalid-args (g/error-severe "Invalid arguments to go.property call") ; TODO: not used for now
    :invalid-value (g/error-severe "Invalid value in go.property call")})
 
-(g/defnk produce-user-properties [script-properties]
-  (let [script-props (filter (comp #{:ok :invalid-value} :status) script-properties)
+(g/defnk produce-user-properties [_node-id script-properties]
+  (let [script-props (filter (comp #{:ok} :status) script-properties)
         props (into {} (map (fn [p]
                               (let [key (:name p)
+                                    type (:type p)
                                     prop (-> (select-keys p [:value])
-                                           (assoc :validation-problems (status-errors (:status p)))
-                                           (assoc :edit-type {:type (properties/go-prop-type->clj-type (:type p))
-                                                              :go-prop-type (:type p)}))]
-                                [key prop]))
+                                           (assoc :node-id _node-id
+                                                  :type (go-prop-type->property-types type)
+                                                  :validation-problems (status-errors (:status p))
+                                                  :edit-type {:type (properties/go-prop-type->clj-type type)
+                                                              :go-prop-type type}
+                                                  :read-only? true))]
+                                [(keyword key) prop]))
                             script-props))
-        display-order (mapv :name script-props)]
+        display-order (mapv #(keyword (:name %)) script-props)]
     {:properties props
      :display-order display-order}))
 
@@ -112,7 +120,9 @@
 
   (output modules g/Any :cached (g/fnk [code] (lua-scan/src->modules code)))
   (output script-properties g/Any :cached (g/fnk [code] (lua-scan/src->properties code)))
-  (output user-properties g/Any :cached produce-user-properties)
+  (output user-properties g/Properties :cached produce-user-properties)
+  (output _properties g/Properties :cached (g/fnk [_declared-properties user-properties]
+                                                  (merge-with into _declared-properties user-properties)))
   (output save-data g/Any :cached produce-save-data)
   (output build-targets g/Any :cached produce-build-targets))
 
