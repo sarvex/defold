@@ -37,7 +37,7 @@
                    :icon "icons/32/Icons_12-Script-type.png"
                    :view-types [:code :default]
                    :view-opts lua-code-opts
-                   :tags #{:component}}
+                   :tags #{:component :overridable-properties}}
                   {:ext "render_script"
                    :label "Render Script"
                    :icon "icons/32/Icons_12-Script-type.png"
@@ -71,8 +71,8 @@
                                            (assoc :node-id _node-id
                                                   :type (go-prop-type->property-types type)
                                                   :validation-problems (status-errors (:status p))
-                                                  :edit-type {:type (properties/go-prop-type->clj-type type)
-                                                              :go-prop-type type}
+                                                  :edit-type {:type (properties/go-prop-type->clj-type type)}
+                                                  :go-prop-type type
                                                   :read-only? true))]
                                 [(keyword key) prop]))
                             script-props))
@@ -138,4 +138,3 @@
 (defn register-resource-types [workspace]
   (for [def script-defs]
     (register workspace def)))
-;;(register-resource-types 0)

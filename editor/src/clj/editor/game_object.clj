@@ -35,15 +35,20 @@
 (def game-object-icon "icons/32/Icons_06-Game-object.png")
 (def unknown-icon "icons/32/Icons_29-AT-Unkown.png") ; spelling...
 
-(defn- gen-ref-ddf [id position ^Quat4d rotation-q4 properties user-properties path]
-  (let [props (map (fn [[k v]] {:id k :type (get-in v [:edit-type :go-prop-type])}) user-properties)
-        props (mapv (fn [p] (assoc p :value (properties/go-prop->str (get properties (:id p)) (:type p))))
-                    (filter #(contains? properties (:id %)) props))]
+(defn- gen-ref-ddf
+  ([id position ^Quat4d rotation-q4 path]
+    (gen-ref-ddf id position rotation-q4 path {}))
+  ([id position ^Quat4d rotation-q4 path source-properties]
     {:id id
      :position position
      :rotation (math/vecmath->clj rotation-q4)
      :component (resource/resource->proj-path path)
-     :properties props}))
+     :properties (->> source-properties
+                   (filter (fn [[key p]] (contains? p :original-value)))
+                   (mapv (fn [[key p]]
+                           {:name (name key)
+                            :type (:go-prop-type p)
+                            :value (:value p)})))}))
 
 (defn- gen-embed-ddf [id position ^Quat4d rotation-q4 save-data]
   {:id id
@@ -88,34 +93,16 @@
 
   (property id g/Str)
 
-  (property embedded g/Bool (dynamic visible (g/always false)))
-
-  (property path (g/protocol resource/Resource)
-    (dynamic visible (g/fnk [embedded] (not embedded)))
-    (dynamic enabled (g/always false))
-    (value (gu/passthrough source-resource))
-    (set (project/gen-resource-setter [[:_node-id :source-id]
-                                       [:resource :source-resource]
-                                       [:node-outline :source-outline]
-                                       [:user-properties :user-properties]
-                                       [:scene :scene]
-                                       [:build-targets :build-targets]]))
-    (validate (g/fnk [embedded path build-targets scene]
-                (when (and (not embedded) (nil? path))
-                  (g/error-warning "Missing component")))))
-
-  (property properties g/Any
-    (dynamic link (g/fnk [source-properties] source-properties))
-    (dynamic override (g/fnk [user-properties] user-properties)))
+  ;; TODO - remove
+  (property properties g/Any)
 
   (display-order [:id :path scene/SceneNode])
 
-  (input source-id g/NodeID)
-  (input source-resource (g/protocol resource/Resource))
-  (input source-properties g/Any)
-  (input user-properties g/Any :substitute source-properties-subst)
-  (input project-id g/NodeID)
-  (input save-data g/Any)
+  #_(input source-id g/NodeID)
+  #_(input source-resource (g/protocol resource/Resource))
+  (input source-properties g/Properties)
+  #_(input user-properties g/Any :substitute source-properties-subst)
+  #_(input project-id g/NodeID)
   (input scene g/Any)
   (input build-targets g/Any)
 
@@ -123,13 +110,11 @@
   (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
 
   (output node-outline outline/OutlineData :cached
-    (g/fnk [_node-id embedded source-resource id source-outline]
+    (g/fnk [_node-id node-outline-label id source-outline]
       (let [source-outline (or source-outline {:icon unknown-icon})]
-        (assoc source-outline :node-id _node-id :label (if embedded id (format "%s (%s)" id (resource/resource->proj-path source-resource)))))))
-  (output ddf-message g/Any :cached (g/fnk [id embedded source-resource position ^Quat4d rotation-q4 properties user-properties save-data]
-                                           (if embedded
-                                             (gen-embed-ddf id position rotation-q4 save-data)
-                                             (gen-ref-ddf id position rotation-q4 properties (:properties user-properties) source-resource))))
+        (assoc source-outline :node-id _node-id :label node-outline-label))))
+  (output node-outline-label g/Str (g/fnk [id] id))
+  (output ddf-message g/Any :abstract)
   (output scene g/Any :cached (g/fnk [_node-id transform scene]
                                      (-> scene
                                        (assoc :node-id _node-id
@@ -140,9 +125,98 @@
                                              (if-let [target (first build-targets)]
                                                (let [target (wrap-if-raw-sound _node-id target)]
                                                  [(assoc target :instance-data {:resource (:resource target)
-                                                                               :instance-msg ddf-message
-                                                                               :transform transform})])
+                                                                                :instance-msg ddf-message
+                                                                                :transform transform})])
                                                []))))
+
+(g/defnode EmbeddedComponent
+  (inherits ComponentNode)
+
+  (input save-data g/Any :cascade-delete)
+  (output ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 save-data]
+                                           (gen-embed-ddf id position rotation-q4 save-data)))
+  (output _properties g/Properties :cached (g/fnk [_declared-properties source-properties]
+                                                  (merge-with into _declared-properties source-properties))))
+
+(g/defnode ReferencedComponent
+  (inherits ComponentNode)
+
+  (property resource-type g/Any
+            (dynamic visible (g/always false)))
+  (property path (g/protocol resource/Resource)
+            (dynamic edit-type (g/fnk [resource-type]
+                                      {:type (g/protocol resource/Resource)
+                                       :ext (:ext resource-type)}))
+            (value (gu/passthrough source-resource))
+            (set (project/gen-resource-setter [#_[:_node-id :source-id]
+                                               [:resource :source-resource]
+                                               [:node-outline :source-outline]
+                                               [:user-properties :user-properties]
+                                               [:scene :scene]
+                                               [:build-targets :build-targets]]))
+            (validate (g/fnk [path]
+                        (when (nil? path)
+                          (g/error-warning "Missing component")))))
+
+  (input source-resource (g/protocol resource/Resource))
+  (output node-outline-label g/Str :cached (g/fnk [id source-resource]
+                                                  (format "%s - %s" id (resource/resource->proj-path source-resource))))
+  (output ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 source-resource]
+                                           (gen-ref-ddf id position rotation-q4 source-resource))))
+
+(g/defnode OverriddenComponent
+  (inherits ReferencedComponent)
+
+  (property path g/Any
+            (dynamic edit-type (g/fnk [resource-type]
+                                      {:type (g/protocol resource/Resource)
+                                       :ext (:ext resource-type)
+                                       :to-type (fn [v] (:resource v))
+                                       :from-type (fn [r] {:resource r :overrides {}})}))
+            (value (g/fnk [source-resource property-overrides]
+                          {:resource source-resource
+                           :overrides property-overrides}))
+            (set (fn [basis self _ new-value]
+                   (let [project (project/get-project self)]
+                     (concat
+                      (if-let [old-source (g/node-value self :source-id :basis basis)]
+                        (g/delete-node old-source)
+                        [])
+                      (if (and new-value (:resource new-value))
+                        (project/connect-resource-node project (:resource new-value) self []
+                                                       (fn [comp-node]
+                                                         (let [override (g/override basis comp-node {:traverse? (constantly false)})
+                                                               id-mapping (:id-mapping override)
+                                                               or-node (get id-mapping comp-node)]
+                                                           (concat
+                                                             (:tx-data override)
+                                                             (let [outputs (g/output-labels (g/node-type* comp-node))]
+                                                               (for [[from to] [[:_node-id :source-id]
+                                                                                [:resource :source-resource]
+                                                                                [:node-outline :source-outline]
+                                                                                [:_properties :source-properties]
+                                                                                [:scene :scene]
+                                                                                [:build-targets :build-targets]]
+                                                                     :when (contains? outputs from)]
+                                                                 (g/connect or-node from self to)))
+                                                             (for [[label value] (:overrides new-value)]
+                                                               (g/set-property or-node label value))))))
+                          [])))))
+            (validate (g/fnk [path]
+                        (when (nil? (:resource path))
+                          (g/error-warning "Missing component")))))
+  (input source-id g/NodeID :cascade-delete)
+  (output property-overrides g/Any :cached
+          (g/fnk [source-properties]
+                 (into {}
+                       (map (fn [[key p]] [key (:value p)])
+                            (filter (fn [[_ p]] (contains? p :original-value))
+                                    (:properties source-properties))))))
+  (output ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 source-resource source-properties]
+                                           (gen-ref-ddf id position rotation-q4 source-resource source-properties)))
+  ;; TODO - cache it, not possible now because of dynamic prop invalidation bug
+  (output _properties g/Properties #_:cached (g/fnk [_node-id _declared-properties source-properties]
+                                                    (merge-with into _declared-properties source-properties))))
 
 (g/defnk produce-proto-msg [ref-ddf embed-ddf]
   {:components ref-ddf
@@ -241,9 +315,15 @@
           (recur (inc postfix)))))))
 
 (defn- add-component [self project source-resource id position rotation properties]
-  (let [properties (into {} (map (fn [p] [(:id p) (properties/str->go-prop (:value p) (:type p))]) properties))]
+  (let [resource-type (resource/resource-type source-resource)
+        override? (contains? (:tags resource-type) :overridable-properties)
+        type (if override? OverriddenComponent ReferencedComponent)
+        path (if override?
+               {:resource source-resource
+                :overrides properties}
+               source-resource)]
     (g/make-nodes (g/node-id->graph-id self)
-                  [comp-node [ComponentNode :id id :position position :rotation rotation :path source-resource :properties properties]]
+                  [comp-node [type :id id :resource-type resource-type :position position :rotation rotation :path path]]
                   (attach-component self comp-node))))
 
 (defn add-component-handler [self]
@@ -274,12 +354,12 @@
 (defn- add-embedded-component [self project type data id position rotation select?]
   (let [graph (g/node-id->graph-id self)
         resource (project/make-embedded-resource project type data)]
-    (g/make-nodes graph [comp-node [ComponentNode :id id :embedded true :position position :rotation rotation]]
+    (g/make-nodes graph [comp-node [EmbeddedComponent :id id :position position :rotation rotation]]
       (g/connect comp-node :_node-id self :nodes)
       (if select?
         (project/select project [comp-node])
         [])
-      (let [tx-data (project/make-resource-node graph project resource true {comp-node [[:_node-id :source-id]
+      (let [tx-data (project/make-resource-node graph project resource true {comp-node [#_[:_node-id :source-id]
                                                                                         [:_properties :source-properties]
                                                                                         [:node-outline :source-outline]
                                                                                         [:save-data :save-data]
@@ -357,8 +437,9 @@
         prototype     (protobuf/read-text GameObject$PrototypeDesc resource)]
     (concat
       (for [component (:components prototype)
-            :let [source-resource (workspace/resolve-resource resource (:component component))]]
-        (add-component self project source-resource (:id component) (:position component) (v4->euler (:rotation component)) (:properties component)))
+            :let [source-resource (workspace/resolve-resource resource (:component component))
+                  properties (into {} (map (fn [p] [(keyword (:id p)) (properties/str->go-prop (:value p) (:type p))]) (:properties component)))]]
+        (add-component self project source-resource (:id component) (:position component) (v4->euler (:rotation component)) properties))
       (for [embedded (:embedded-components prototype)]
         (add-embedded-component self project (:type embedded) (:data embedded) (:id embedded) (:position embedded) (v4->euler (:rotation embedded)) false)))))
 
