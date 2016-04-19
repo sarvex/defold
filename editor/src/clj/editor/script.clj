@@ -92,7 +92,7 @@
 
 (defn- build-script [self basis resource dep-resources user-data]
   (let [user-properties (:user-properties user-data)
-        properties (mapv (fn [[k v]] {:id k :value (:value v) :type (get-in v [:edit-type :go-prop-type])})
+        properties (mapv (fn [[k v]] {:id (name k) :value (:value v) :type (:go-prop-type v)})
                          (:properties user-properties))
         modules (:modules user-data)]
     {:resource resource :content (protobuf/map->bytes Lua$LuaModule
@@ -122,7 +122,11 @@
   (output script-properties g/Any :cached (g/fnk [code] (lua-scan/src->properties code)))
   (output user-properties g/Properties :cached produce-user-properties)
   (output _properties g/Properties :cached (g/fnk [_declared-properties user-properties]
-                                                  (merge-with into _declared-properties user-properties)))
+                                                  ;; TODO - fix this when corresponding graph issue has been fixed
+                                                  (cond
+                                                    (g/error? _declared-properties) _declared-properties
+                                                    (g/error? user-properties) user-properties
+                                                    true (merge-with into _declared-properties user-properties))))
   (output save-data g/Any :cached produce-save-data)
   (output build-targets g/Any :cached produce-build-targets))
 

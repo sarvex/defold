@@ -39,16 +39,19 @@
   ([id position ^Quat4d rotation-q4 path]
     (gen-ref-ddf id position rotation-q4 path {}))
   ([id position ^Quat4d rotation-q4 path source-properties]
-    {:id id
-     :position position
-     :rotation (math/vecmath->clj rotation-q4)
-     :component (resource/resource->proj-path path)
-     :properties (->> source-properties
-                   (filter (fn [[key p]] (contains? p :original-value)))
-                   (mapv (fn [[key p]]
-                           {:name (name key)
-                            :type (:go-prop-type p)
-                            :value (:value p)})))}))
+    (let [prop-order (into {} (map-indexed (fn [i k] [k i]) (:display-order source-properties)))]
+      {:id id
+       :position position
+       :rotation (math/vecmath->clj rotation-q4)
+       :component (resource/resource->proj-path path)
+       :properties (->> source-properties
+                     :properties
+                     (filter (fn [[key p]] (contains? p :original-value)))
+                     (sort-by (comp prop-order first))
+                     (mapv (fn [[key p]]
+                             {:id (name key)
+                              :type (:go-prop-type p)
+                              :value (properties/go-prop->str (:value p) (:go-prop-type p))})))})))
 
 (defn- gen-embed-ddf [id position ^Quat4d rotation-q4 save-data]
   {:id id
@@ -100,7 +103,7 @@
 
   #_(input source-id g/NodeID)
   #_(input source-resource (g/protocol resource/Resource))
-  (input source-properties g/Properties)
+  (input source-properties g/Properties :substitute {:properties {}})
   #_(input user-properties g/Any :substitute source-properties-subst)
   #_(input project-id g/NodeID)
   (input scene g/Any)
@@ -115,17 +118,25 @@
         (assoc source-outline :node-id _node-id :label node-outline-label))))
   (output node-outline-label g/Str (g/fnk [id] id))
   (output ddf-message g/Any :abstract)
+  (output rt-ddf-message g/Any :cached
+          (g/fnk [ddf-message source-properties]
+                 (assoc ddf-message
+                        :property-decls (->> source-properties
+                                          :properties
+                                          (filter (fn [[k v]] (:original-value v)))
+                                          (map (fn [[k v]] {:id (name k) :type (:go-prop-type v) :value (:value v)}))
+                                          properties/properties->decls))))
   (output scene g/Any :cached (g/fnk [_node-id transform scene]
                                      (-> scene
                                        (assoc :node-id _node-id
                                               :transform transform
                                               :aabb (geom/aabb-transform (geom/aabb-incorporate (get scene :aabb (geom/null-aabb)) 0 0 0) transform))
                                        (update :node-path (partial cons _node-id)))))
-  (output build-targets g/Any :cached (g/fnk [_node-id build-targets ddf-message transform]
+  (output build-targets g/Any :cached (g/fnk [_node-id build-targets rt-ddf-message transform]
                                              (if-let [target (first build-targets)]
                                                (let [target (wrap-if-raw-sound _node-id target)]
                                                  [(assoc target :instance-data {:resource (:resource target)
-                                                                                :instance-msg ddf-message
+                                                                                :instance-msg rt-ddf-message
                                                                                 :transform transform})])
                                                []))))
 
@@ -182,7 +193,7 @@
                       (if-let [old-source (g/node-value self :source-id :basis basis)]
                         (g/delete-node old-source)
                         [])
-                      (if (and new-value (:resource new-value))
+                      (if-let [resource (and new-value (:resource new-value))]
                         (project/connect-resource-node project (:resource new-value) self []
                                                        (fn [comp-node]
                                                          (let [override (g/override basis comp-node {:traverse? (constantly false)})
@@ -190,7 +201,7 @@
                                                                or-node (get id-mapping comp-node)]
                                                            (concat
                                                              (:tx-data override)
-                                                             (let [outputs (g/output-labels (g/node-type* comp-node))]
+                                                             (let [outputs (g/output-labels (:node-type (resource/resource-type resource)))]
                                                                (for [[from to] [[:_node-id :source-id]
                                                                                 [:resource :source-resource]
                                                                                 [:node-outline :source-outline]
@@ -235,13 +246,8 @@
                   {:component (resource/proj-path resource)})))
        inst-data))
 
-(defn- build-props [component]
-  (let [properties (mapv #(assoc % :value (properties/str->go-prop (:value %) (:type %))) (:properties component))]
-    (assoc component :property-decls (properties/properties->decls properties))))
-
 (defn- build-game-object [self basis resource dep-resources user-data]
   (let [instance-msgs (externalize (:instance-data user-data) dep-resources)
-        instance-msgs (mapv build-props instance-msgs)
         msg {:components instance-msgs}]
     {:resource resource :content (protobuf/map->bytes GameObject$PrototypeDesc msg)}))
 
@@ -315,7 +321,7 @@
           (recur (inc postfix)))))))
 
 (defn- add-component [self project source-resource id position rotation properties]
-  (let [resource-type (resource/resource-type source-resource)
+  (let [resource-type (and source-resource (resource/resource-type source-resource))
         override? (contains? (:tags resource-type) :overridable-properties)
         type (if override? OverriddenComponent ReferencedComponent)
         path (if override?
