@@ -73,7 +73,7 @@
                                                   :validation-problems (status-errors (:status p))
                                                   :edit-type {:type (properties/go-prop-type->clj-type type)}
                                                   :go-prop-type type
-                                                  :read-only? true))]
+                                                  :read-only? (nil? (g/override-original _node-id))))]
                                 [(keyword key) prop]))
                             script-props))
         display-order (mapv #(keyword (:name %)) script-props)]
