@@ -144,20 +144,6 @@
   (inherits scene/ScalableSceneNode)
   (inherits InstanceNode)
 
-  (property path (g/protocol resource/Resource)
-    (dynamic visible (g/fnk [embedded] (not embedded)))
-    (value (gu/passthrough source-resource))
-    (set (project/gen-resource-setter [[:_node-id      :source]
-                                       [:resource      :source-resource]
-                                       [:node-outline  :source-outline]
-                                       [:build-targets :build-targets]
-                                       [:scene         :scene]]))
-    (validate (g/fnk [embedded path scene]
-                (when (and (not embedded) (nil? path))
-                  (g/error-warning "Missing prototype")))))
-
-  (property embedded g/Bool (dynamic visible (g/always false)))
-
   (input source g/Any)
   (input source-resource (g/protocol resource/Resource))
   (input properties g/Any)
@@ -171,16 +157,14 @@
   (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
 
   (output node-outline outline/OutlineData :cached produce-go-outline)
-  (output ddf-message g/Any :cached (g/fnk [id child-ids source-resource embedded position ^Quat4d rotation-q4 scale save-data]
-                                           (if embedded
-                                             (gen-embed-ddf id child-ids position rotation-q4 scale save-data)
-                                             (gen-ref-ddf id child-ids position rotation-q4 scale source-resource))))
+  (ouptut node-outline-label g/Str (g/fnk [id] id))
+  (output ddf-message g/Any :abstract)
   (output build-targets g/Any (g/fnk [build-targets ddf-message transform] (let [target (first build-targets)]
                                                                              [(assoc target :instance-data {:resource (:resource target)
                                                                                                             :instance-msg ddf-message
                                                                                                             :transform transform})])))
 
-  (output scene g/Any :cached (g/fnk [_node-id transform scene child-scenes embedded]
+  (output scene g/Any :cached (g/fnk [_node-id transform scene child-scenes]
                                      (let [aabb (reduce #(geom/aabb-union %1 (:aabb %2)) (or (:aabb scene) (geom/null-aabb)) child-scenes)
                                            aabb (geom/aabb-transform (geom/aabb-incorporate aabb 0 0 0) transform)]
                                        (merge-with concat
@@ -189,6 +173,72 @@
                                                           :aabb aabb
                                                           :renderable {:passes [pass/selection]})
                                                    {:children child-scenes})))))
+
+(g/defnode EmbeddedGameObject
+  (inherits GameObjectInstanceNode)
+
+  (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale save-data]
+                                           (gen-embed-ddf id child-ids position rotation-q4 scale save-data))))
+
+(g/defnode ReferencedGameObject
+  (inherits GameObjectInstanceNode)
+
+  (property path g/Any
+            (dynamic edit-type (g/fnk [resource-type]
+                                      {:type (g/protocol resource/Resource)
+                                       :ext (:ext resource-type)
+                                       :to-type (fn [v] (:resource v))
+                                       :from-type (fn [r] {:resource r :overrides {}})}))
+            (value (g/fnk [source-resource component-overrides]
+                          {:resource source-resource
+                           :overrides component-overrides}))
+            (set (fn [basis self old-value new-value]
+                   (concat
+                     (if-let [old-source (g/node-value self :source-id :basis basis)]
+                       (g/delete-node old-source)
+                       [])
+                     (let [new-resource (:resource new-value)
+                           resource-type (and new-resource (resource/resource-type new-resource))
+                           override? (contains? (:tags resource-type) :overridable-properties)]
+                       (if override?
+                         (let [project (project/get-project self)]
+                           (project/connect-resource-node project new-resource self []
+                                                          (fn [comp-node]
+                                                            (let [override (g/override basis comp-node {:traverse? (constantly false)})
+                                                                  id-mapping (:id-mapping override)
+                                                                  or-node (get id-mapping comp-node)]
+                                                              (concat
+                                                                (:tx-data override)
+                                                                (let [outputs (g/output-labels (:node-type (resource/resource-type new-resource)))]
+                                                                  (for [[from to] [[:_node-id :source-id]
+                                                                                   [:resource :source-resource]
+                                                                                   [:node-outline :source-outline]
+                                                                                   [:_properties :source-properties]
+                                                                                   [:scene :scene]
+                                                                                   [:build-targets :build-targets]]
+                                                                        :when (contains? outputs from)]
+                                                                    (g/connect or-node from self to)))
+                                                                (for [[label value] (:overrides new-value)]
+                                                                  (g/set-property or-node label value)))))))
+                        (let [f (project/gen-resource-setter [[:resource :source-resource]
+                                                            [:node-outline :source-outline]
+                                                            [:user-properties :user-properties]
+                                                            [:scene :scene]
+                                                            [:build-targets :build-targets]])]
+                          (f basis self (:resource old-value) (:resource new-value)))))))
+              #_(project/gen-resource-setter [[:_node-id      :source]
+                                             [:resource      :source-resource]
+                                             [:node-outline  :source-outline]
+                                             [:build-targets :build-targets]
+                                             [:scene         :scene]]))
+            (validate (g/fnk [path]
+                             (when (nil? path)
+                               (g/error-warning "Missing prototype")))))
+
+  (ouptut node-outline-label g/Str (g/fnk [id source-resource]
+                                          (format "%s - %s" id (resource/resource->proj-path source-resource))))
+  (output ddf-message g/Any :cached (g/fnk [id child-ids source-resource position ^Quat4d rotation-q4 scale save-data]
+                                           (gen-ref-ddf id child-ids position rotation-q4 scale source-resource))))
 
 (g/defnk produce-proto-msg [name ref-inst-ddf embed-inst-ddf ref-coll-ddf]
   {:name name
