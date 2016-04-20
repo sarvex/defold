@@ -113,7 +113,7 @@
                  (assoc ddf-message
                         :property-decls (->> source-properties
                                           :properties
-                                          (filter (fn [[k v]] (:original-value v)))
+                                          (filter (fn [[k v]] (contains? v :original-value)))
                                           (map (fn [[k v]] {:id (name k) :type (:go-prop-type v) :value (:value v)}))
                                           properties/properties->decls))))
   (output scene g/Any :cached (g/fnk [_node-id transform scene]
