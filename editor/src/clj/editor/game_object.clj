@@ -99,7 +99,6 @@
   (input build-targets g/Any)
 
   (input source-outline outline/OutlineData :substitute source-outline-subst)
-  (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
 
   (output node-outline outline/OutlineData :cached
     (g/fnk [_node-id node-outline-label id source-outline source-properties]
