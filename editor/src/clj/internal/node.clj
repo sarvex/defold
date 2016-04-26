@@ -725,13 +725,6 @@
     (has-declared-output? node-type argument)
     `(gt/produce-value ~self-name ~argument ~ctx-name)))
 
-(defn check-local-cache [ctx-name nodeid-sym transform]
-  `(get-in @(:local ~ctx-name) [~nodeid-sym ~transform]))
-
-(defn check-global-cache [ctx-name nodeid-sym transform]
-  `(if-some [cached# (get (:snapshot ~ctx-name) [~nodeid-sym ~transform])]
-     (do (swap! (:hits ~ctx-name) conj [~nodeid-sym ~transform]) cached#)))
-
 (def ^:private jammable? (complement internal-keys))
 
 (defn original-root [basis node-id]
@@ -784,10 +777,14 @@
 
 (defn check-caches [ctx-name nodeid-sym node-type transform forms]
   (if ((gt/cached-outputs node-type) transform)
-    (list `or
-          (check-local-cache ctx-name nodeid-sym transform)
-          (check-global-cache ctx-name nodeid-sym transform)
-          forms)
+    `(let [local# @(:local ~ctx-name)
+           global# (:snapshot ~ctx-name)
+           key# [~nodeid-sym ~transform]]
+       (cond
+         (contains? local# key#) (get-in local# key#)
+         (contains? global# key#) (if-some [cached# (get global# key#)]
+                                           (do (swap! (:hits ~ctx-name) conj key#) cached#))
+         true ~forms))
     forms))
 
 (defn gather-inputs [input-sym schema-sym self-name ctx-name nodeid-sym propmap-sym record-name node-type-name node-type transform production-function forms]
