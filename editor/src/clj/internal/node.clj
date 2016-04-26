@@ -1125,7 +1125,7 @@
   (eval (print-method-forms record-name node-type-name node-type)))
 
 (defn- output-fn [type output]
-  (eval (dollar-name (:name type) output)))
+  (find-var (dollar-name (:name type) output)))
 
 (defrecord OverrideNode [override-id node-id original-id properties]
   gt/Node
