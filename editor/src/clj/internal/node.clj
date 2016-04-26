@@ -767,7 +767,7 @@
 
 (defn detect-cycles [ctx-name nodeid-sym transform node-type-name forms]
   `(do
-     (assert (not (some (:in-production ~ctx-name) [~nodeid-sym ~transform]))
+     (assert (not (contains? (:in-production ~ctx-name) [~nodeid-sym ~transform]))
              (format "Cycle Detected on node type %s and output %s" (:name ~node-type-name) ~transform))
      ~forms))
 
