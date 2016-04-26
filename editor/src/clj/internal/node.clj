@@ -96,7 +96,7 @@
                             :snapshot        (if caching? (c/cache-snapshot cache) {})
                             :hits            (atom [])
                             :basis           basis
-                            :in-production   []
+                            :in-production   #{}
                             :in-transaction? in-transaction?
                             :ignore-errors   ignore-errors
                             :skip-validation skip-validation
@@ -774,7 +774,7 @@
 
 (defn detect-cycles [ctx-name nodeid-sym transform node-type-name forms]
   `(do
-     (assert (every? #(not= % [~nodeid-sym ~transform]) (:in-production ~ctx-name))
+     (assert (not (some (:in-production ~ctx-name) [~nodeid-sym ~transform]))
              (format "Cycle Detected on node type %s and output %s" (:name ~node-type-name) ~transform))
      ~forms))
 
