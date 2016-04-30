@@ -198,23 +198,6 @@
   [basis output]
   (get-in basis [:graphs (gt/node-id->graph-id (first output)) :successors output] #{}))
 
-;; TODO - remove, old version
-#_(defn pre-traverse
-   "Traverses a graph depth-first preorder from start, successors being
-  a function that returns direct successors for the node. Returns a
-  lazy seq of nodes."
-   [basis start succ & {:keys [seen] :or {seen #{}}}]
-   (loop [stack  start
-          seen   seen
-          result (transient [])]
-     (if-let [nxt (peek stack)]
-       (if (contains? seen nxt)
-         (recur (pop stack) seen result)
-         (let [seen (conj seen nxt)
-               nbrs (remove seen (succ basis nxt))]
-           (recur (into (pop stack) nbrs) seen (conj! result nxt))))
-       (persistent! result))))
-
 (defn pre-traverse
   "Traverses a graph depth-first preorder from start, successors being
   a function that returns direct successors for the node. Returns a
@@ -371,24 +354,6 @@
                          (persistent! arcs))))]
       (concat explicit implicit-targets implicit)))
 
-  ;; TODO - remove, old version
-  #_(arcs-by-head
-     [this node-id label]
-     (let [explicit (explicit-arcs-by-source this node-id label)
-           implicit-targets (implicit-target-arcs this explicit)
-           node (node-by-id-at this node-id)
-           implicit (when-let [override-ids (and node #{(gt/override-id node)})]
-                      (loop [original (gt/original node)
-                             arcs (transient [])]
-                        (if original
-                          (let [explicit (explicit-arcs-by-source this original label)
-                                implicit (mapcat (fn [^ArcBase a]
-                                                   (map (fn [nid] (assoc a :target nid))
-                                                        (implicit-overrides this (.target a) (.targetLabel a) explicit-arcs-by-target override-ids)))
-                                             explicit)]
-                            (recur (gt/original (node-by-id-at this original)) (reduce conj! arcs implicit)))
-                          (persistent! arcs))))]
-       (concat explicit implicit-targets implicit)))
   (arcs-by-head
     [this node-id label]
     (basis-arcs-by-head this node-id label))
@@ -571,23 +536,3 @@
                          (persistent! (reduce conj! s deps)))]
         (recur (assoc-in basis [:graphs gid :successors] successors) changes))
       basis)))
-
-;; TODO - test again, new version
-#_(defn update-successors
-   [basis changes]
-   (let [result (loop [changes changes
-                       result (into {} (map (fn [gid] [gid (transient {})]) (keys (:graphs basis))))]
-                  (if-let [output (first changes)]
-                    (let [[node-id label] output
-                          gid (gt/node-id->graph-id node-id)
-                          internal-succs (for [label (disj ((input-deps basis node-id) label) label)
-                                               nid (tree-seq (constantly true) (partial overrides basis) node-id)]
-                                           [nid label])
-                          succ (->> (gt/targets basis node-id label)
-                                 (mapcat (fn [[nid label]] (map vector (repeat nid) ((input-deps basis nid) label))))
-                                 (concat internal-succs)
-                                 set)]
-                      (recur (rest changes) (update result gid assoc! output succ)))
-                    result))]
-     (reduce-kv (fn [basis gid successors] (update-in basis [:graphs gid :successors] merge (persistent! successors)))
-                basis result)))
