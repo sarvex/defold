@@ -17,6 +17,11 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.scene.control.ButtonBase;
+import javafx.stage.Modality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,6 +81,32 @@ public class Start extends Application {
         updateTimer.schedule(newUpdateTask(), firstUpdateDelay);
     }
 
+    private Boolean showRestartDialog() throws IOException {
+        Parent root = FXMLLoader.load(Thread.currentThread().getContextClassLoader().getResource("update-alert.fxml"));
+        Stage stage = new Stage();
+        Scene scene = new Scene(root);
+        ButtonBase ok = (ButtonBase) root.lookup("#ok");
+        ButtonBase cancel = (ButtonBase) root.lookup("#cancel");
+        final Boolean[] result = {false};
+
+        ok.setOnAction(event -> {
+            result[0] = true;
+            stage.close();
+        });
+
+        cancel.setOnAction(event -> {
+            result[0] = false;
+            stage.close();
+        });
+
+        stage.setTitle("Update applied");
+        stage.initModality(Modality.APPLICATION_MODAL);
+        stage.setScene(scene);
+        stage.showAndWait();
+
+        return result[0];
+    }
+
     private TimerTask newUpdateTask() {
         return new TimerTask() {
             @Override
@@ -84,7 +115,15 @@ public class Start extends Application {
                     logger.debug("checking for updates");
                     UpdateInfo updateInfo = updater.check();
                     if (updateInfo != null) {
-                        System.exit(17);
+                        javafx.application.Platform.runLater(() -> {
+                            try {
+                                if (showRestartDialog()) {
+                                    System.exit(17);
+                                }
+                            } catch (IOException e) {
+                                logger.error("Unable to open update alert dialog");
+                            }
+                        });
                     }
                     updateTimer.schedule(newUpdateTask(), updateDelay);
                 } catch (IOException e) {
@@ -142,41 +181,46 @@ public class Start extends Application {
 
     @Override
     public void start(Stage primaryStage) throws Exception {
-        Splash splash = new Splash();
+        try {
+	        Splash splash = new Splash();
 
-        Future<?> extractFuture = threadPool.submit(() -> {
-            try {
-                NativeArtifacts.extractNatives();
-            } catch (Exception e) {
-                logger.error("failed to extract native libs", e);
-            }
-        });
+	        Future<?> extractFuture = threadPool.submit(() -> {
+	            try {
+	                NativeArtifacts.extractNatives();
+	            } catch (Exception e) {
+	                logger.error("failed to extract native libs", e);
+	            }
+	        });
 
-        threadPool.submit(() -> {
-            try {
-                pool.add(makeEditor());
-                javafx.application.Platform.runLater(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            extractFuture.get();
-                            openEditor(new String[0]);
-                            splash.close();
-                        } catch (Throwable t) {
-                            t.printStackTrace();
-                        }
-                    }
-                });
-            } catch (Throwable t) {
-                t.printStackTrace();
-                String message = (t instanceof InvocationTargetException) ? t.getCause().getMessage() : t.getMessage();
-                javafx.application.Platform.runLater(() -> {
-                    splash.setLaunchError(message);
-                    splash.setErrorShowing(true);
-                });
-            }
-            return null;
-        });
+	        threadPool.submit(() -> {
+	            try {
+	                pool.add(makeEditor());
+	                javafx.application.Platform.runLater(new Runnable() {
+	                    @Override
+	                    public void run() {
+	                        try {
+	                            extractFuture.get();
+	                            openEditor(new String[0]);
+	                            splash.close();
+	                        } catch (Throwable t) {
+	                            t.printStackTrace();
+	                        }
+	                    }
+	                });
+	            } catch (Throwable t) {
+	                t.printStackTrace();
+	                String message = (t instanceof InvocationTargetException) ? t.getCause().getMessage() : t.getMessage();
+	                javafx.application.Platform.runLater(() -> {
+	                    splash.setLaunchError(message);
+	                    splash.setErrorShowing(true);
+	                });
+	            }
+	            return null;
+	        });
+        } catch (Throwable t) {
+            t.printStackTrace(System.err);
+            throw t;
+        }
     }
 
     @Override

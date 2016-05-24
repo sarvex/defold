@@ -3,11 +3,11 @@
   (:require [clojure.set :as set]
             [clojure.tools.macro :as ctm]
             [cognitect.transit :as transit]
-            [dynamo.util :as util]
+            [internal.util :as util]
             [internal.cache :as c]
-            [internal.disposal :as dispose]
             [internal.graph :as ig]
             [internal.graph.types :as gt]
+            [internal.graph.error-values :as ie]
             [internal.node :as in]
             [internal.property :as ip]
             [internal.system :as is]
@@ -18,21 +18,23 @@
   (:import [internal.graph.types Arc]
            [java.io ByteArrayOutputStream StringBufferInputStream]))
 
+(set! *warn-on-reflection* true)
+
 (namespaces/import-vars [plumbing.core defnk fnk])
 
-(namespaces/import-vars [internal.graph.types NodeID node-id->graph-id node->graph-id sources targets connected? dependencies Properties Node node-id node-type property-types produce-value NodeType supertypes interfaces protocols method-impls transforms transform-types internal-properties declared-properties public-properties externs declared-inputs injectable-inputs declared-outputs cached-outputs input-dependencies input-cardinality cascade-deletes substitute-for input-type output-type input-labels output-labels property-labels property-display-order error? error])
+(namespaces/import-vars [internal.graph.types NodeID node-id->graph-id node->graph-id sources targets connected? dependencies Properties Node node-id property-types produce-value NodeType supertypes interfaces protocols method-impls transforms transform-types internal-properties declared-properties public-properties externs declared-inputs injectable-inputs declared-outputs cached-outputs input-dependencies input-cardinality cascade-deletes substitute-for input-type output-type input-labels output-labels property-labels property-display-order])
+
+(namespaces/import-vars [internal.graph.error-values INFO WARNING SEVERE FATAL error-info error-warning error-severe error-fatal error? error-info? error-warning? error-severe? error-fatal? most-serious error-aggregate worse-than])
 
 (namespaces/import-vars [internal.node has-input? has-output? has-property? merge-display-order])
 
+(namespaces/import-vars [internal.property make-property-type])
+
 (namespaces/import-vars [schema.core Any Bool Inst Int Keyword Num Regex Schema Str Symbol Uuid both check enum protocol maybe fn-schema one optional-key pred recursive required-key validate])
 
-(namespaces/import-vars [internal.graph.types IDisposable dispose disposable?])
+(namespaces/import-vars [internal.graph.types always PropertyType property-value-type property-default-value property-tags property-type? Properties])
 
-(namespaces/import-vars [internal.graph.types always PropertyType property-value-type property-default-value property-validate property-valid-value? property-tags property-type? Properties])
-
-(namespaces/import-vars [internal.property property-default-setter property-default-getter])
-
-(namespaces/import-vars [internal.graph arc type-compatible? node-by-id-at node-ids])
+(namespaces/import-vars [internal.graph arc type-compatible? node-by-id-at node-ids pre-traverse])
 
 (namespaces/import-macro schema.core/defn      s-defn)
 (namespaces/import-macro schema.core/defrecord s-defrecord)
@@ -72,7 +74,15 @@
   ([node-id]
    (node-type* (now) node-id))
   ([basis node-id]
-   (gt/node-type (ig/node-by-id-at basis node-id))))
+   (when-let [n (ig/node-by-id-at basis node-id)]
+     (gt/node-type n basis))))
+
+(defn node-type
+  "Return the node-type given a node. Uses the current basis if not provided."
+  ([node]
+    (node-type (now) node))
+  ([basis node]
+    (gt/node-type node basis)))
 
 (defn cache "The system cache of node values"
   []
@@ -134,19 +144,18 @@
 
   It returns the transaction result, (tx-result),  which is a map containing keys about the transaction.
   Transaction result-keys:
-  `[:status :basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :properties-modified :label :sequence-label]`
+  `[:status :basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :label :sequence-label]`
   "
   [txs]
   (when *tps-debug*
     (send-off tps-counter tick (System/nanoTime)))
-  (let [basis     (ig/multigraph-basis (util/map-vals deref (is/graphs @*the-system*)))
-        tx-result (it/transact* (it/new-transaction-context basis) txs)]
+  (let [basis     (is/basis @*the-system*)
+        id-gens   (is/id-generators @*the-system*)
+        tx-result (it/transact* (it/new-transaction-context basis id-gens) txs)]
     (when (= :ok (:status tx-result))
       (dosync
        (merge-graphs @*the-system* basis (get-in tx-result [:basis :graphs]) (:graphs-modified tx-result) (:outputs-modified tx-result))
-       (c/cache-invalidate (is/system-cache @*the-system*) (:outputs-modified tx-result)))
-      (doseq [d (vals (:nodes-deleted tx-result))]
-        (is/dispose! @*the-system* d)))
+       (c/cache-invalidate (is/system-cache @*the-system*) (:outputs-modified tx-result))))
     tx-result))
 
 ;; ---------------------------------------------------------------------------
@@ -304,11 +313,15 @@
        (let [description#    ~(in/node-type-forms symb (concat node-intrinsics forms))
              replacing#      (if-let [x# (and (resolve '~symb) (var-get (resolve '~symb)))]
                                (when (satisfies? NodeType x#) x#))
+             basis#          (is/basis @*the-system*)
              all-graphs#     (util/map-vals deref (is/graphs @*the-system*))
              to-be-replaced# (when (and all-graphs# replacing#)
-                               (filterv #(= replacing# (node-type %)) (mapcat ig/node-values (vals all-graphs#))))
-             ctor#           (fn [args#] (~ctor-name (merge (in/defaults ~symb) args#)))]
-         (def ~symb (in/make-node-type (assoc description# :dynamo.graph/ctor ctor#)))
+                               (filterv #(and (= replacing# (node-type basis# %)) (nil? (gt/original %))) (mapcat ig/node-values (vals all-graphs#))))
+             ctor#           (fn [args#] (~ctor-name (merge (in/defaults ~symb) args#)))
+             type# (in/make-node-type (assoc description# :dynamo.graph/ctor ctor#))]
+         (def ~symb type#)
+         (doseq [super-type# (gt/supertypes type#)]
+           (derive type# super-type#))
          (in/declare-node-value-function-names '~symb ~symb)
          (in/define-node-record  '~record-name '~symb ~symb)
          (in/define-node-value-functions '~record-name '~symb ~symb)
@@ -353,7 +366,9 @@
            (fn [ctor id]
              (list `it/new-node
                    (if (sequential? ctor)
-                     `(construct ~@ctor :_node-id ~id)
+                     (if (= 2 (count ctor))
+                       `(apply construct ~(first ctor) :_node-id ~id (mapcat identity ~(second ctor)))
+                       `(construct ~@ctor :_node-id ~id))
                      `(construct  ~ctor :_node-id ~id))))
            ctors locals)
         ~@body-exprs))))
@@ -381,8 +396,13 @@
   Example:
 
   `(transact (make-node world SimpleTestNode))`"
-  [graph-id node-type & {:as args}]
-  (it/new-node (construct-node-with-id graph-id node-type args)))
+  [graph-id node-type & args]
+  (let [args (if (empty? args)
+               {}
+               (if (= 1 (count args))
+                 (first args)
+                 (apply assoc {} args)))]
+    (it/new-node (construct-node-with-id graph-id node-type args))))
 
 (defn make-node!
   "Creates the transaction step and runs it in a transaction, returning the resulting node.
@@ -457,6 +477,12 @@
   `(disconnect aux-node :scalar view-node :last-name)`"
   [source-node-id source-label target-node-id target-label]
   (transact (disconnect source-node-id source-label target-node-id target-label)))
+
+(defn disconnect-sources
+  ([target-node-id target-label]
+    (disconnect-sources (now) target-node-id target-label))
+  ([basis target-node-id target-label]
+    (it/disconnect-sources basis target-node-id target-label)))
 
 (defn become
   "Creates the transaction step to turn one kind of node into another, in a transaction. All properties and their values
@@ -534,6 +560,13 @@
   [node-id p f & args]
   (transact (apply update-property node-id p f args)))
 
+(defn clear-property
+  [node-id p]
+  (it/clear-property node-id p))
+
+(defn update-graph-value [graph-id k f & args]
+  (it/update-graph-value graph-id update (into [k f] args)))
+
 (defn set-graph-value
  "Create the transaction step to attach a named value to a graph. It will take effect when the transaction is
   applied in a transact.
@@ -542,7 +575,7 @@
 
   `(transact (set-graph-value 0 :string-value \"A String\"))`"
   [graph-id k v]
-  (it/update-graph graph-id assoc [k v]))
+  (it/update-graph-value graph-id assoc [k v]))
 
 (defn set-graph-value!
   "Create the transaction step to attach a named value to a graph and applies the transaction.
@@ -580,16 +613,17 @@
 
   Example:
 
-  `(transact (mark-defective node-id (g/error \"Resource Not Found\")))`"
-  [node-id defective-value]
-  (let [node-type (node-type* node-id)
-        outputs   (keys (gt/transforms node-type))
-        externs   (gt/externs node-type)]
-    (list
-     (set-property node-id :_output-jammers
-                   (zipmap (remove externs outputs)
-                           (repeat (always defective-value))))
-     (invalidate node-id))))
+  `(transact (mark-defective node-id (g/severe \"Resource Not Found\")))`"
+  ([node-id defective-value]
+   (mark-defective node-id (node-type* node-id) defective-value))
+  ([node-id node-type defective-value]
+   (let [outputs   (keys (gt/transforms node-type))
+         externs   (gt/externs node-type)]
+     (list
+      (set-property node-id :_output-jammers
+                    (zipmap (remove externs outputs)
+                            (repeat (always defective-value))))
+      (invalidate node-id)))))
 
 (defn mark-defective!
   "Creates the transaction step to mark a node as _defective_.
@@ -598,7 +632,7 @@
 
   Example:
 
-  `(mark-defective! node-id (g/error \"Resource Not Found\"))`"
+  `(mark-defective! node-id (g/severe \"Resource Not Found\"))`"
   [node-id defective-value]
   (transact (mark-defective node-id defective-value)))
 
@@ -621,14 +655,15 @@
 
   `(node-value node-id :chained-output)`"
   ([node-id label]
-   (in/node-value (now) (cache) node-id label))
-  ([basis node-id label]
-   (in/node-value basis (cache) node-id label))
-  ([basis cache node-id label]
-   (when (instance? Node node-id)
-     (try (throw (ex-info "Pass node IDs instead of node objects!" {}))
-          (catch Exception e (.printStackTrace e))))
-   (in/node-value basis cache node-id label)))
+   (node-value node-id label :cache (cache) :basis (now)))
+  ([node-id label & {:as options}]
+    (let [options (cond-> options
+                    true (assoc :in-transaction? (it/in-transaction?))
+                    (not (:cache options))
+                    (assoc :cache (cache))
+                    (not (:basis options))
+                    (assoc :basis (now)))]
+      (in/node-value node-id label options))))
 
 (defn graph-value
   "Returns the graph from the system given a graph-id and key.  It returns the graph at the point in time of the bais, if provided.
@@ -640,7 +675,7 @@
   ([graph-id k]
    (graph-value (now) graph-id k))
   ([basis graph-id k]
-   (get-in basis [:graphs graph-id k])))
+   (get-in basis [:graphs graph-id :graph-values k])))
 
 ;; ---------------------------------------------------------------------------
 ;; Constructing property maps
@@ -654,8 +689,8 @@
   (if ys
     (apply aggregate-properties (aggregate-properties x y) ys)
     (-> x
-        (update :properties merge x (:properties y))
-        (update :display-order #(conj (or % []) (:display-order y))))))
+        (update :properties merge (:properties y))
+        (update :display-order #(into (or % []) (:display-order y))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Interrogating the Graph
@@ -697,6 +732,14 @@
   ([basis node-id label]
    (gt/sources basis node-id label)))
 
+(defn targets-of
+  "Find the [node-id label] pairs for all connections out of the given
+  node's output label. The result is a sequence of pairs."
+  ([node-id label]
+   (targets-of (now) node-id label))
+  ([basis node-id label]
+   (gt/targets basis node-id label)))
+
 (defn find-node
   "Looks up nodes with a property that matches the given value. Exact
   equality is used. At present, this does a linear scan of all
@@ -714,14 +757,21 @@
   ([basis outputs]
     (c/cache-invalidate (cache) (dependencies basis outputs))))
 
+(defn node-instance*?
+  "Returns true if the node is a member of a given type, including
+   supertypes."
+  ([type node]
+    (node-instance*? (now) type node))
+  ([basis type node]
+    (isa? (node-type basis node) type)))
+
 (defn node-instance?
   "Returns true if the node is a member of a given type, including
    supertypes."
-  [type node-id]
-  (let [node-ty    (node-type* node-id)
-        supertypes (supertypes node-ty)
-        all-types  (into #{node-ty} supertypes)]
-    (all-types type)))
+  ([type node-id]
+    (node-instance? (now) type node-id))
+  ([basis type node-id]
+    (node-instance*? basis type (ig/node-by-id-at basis node-id))))
 
 ;; ---------------------------------------------------------------------------
 ;; Support for property getters & setters
@@ -803,9 +853,6 @@
      (transit/write writer fragment)
      (.toString out))))
 
-(defn- in-same-graph? [graph-id node-id]
-  (= graph-id (node-id->graph-id node-id)))
-
 (defn- serialize-arc [id-dictionary arc]
   (let [[src-id src-label]  (gt/head arc)
         [tgt-id tgt-label]  (gt/tail arc)]
@@ -819,37 +866,42 @@
           [(mapcat #(gt/arcs-by-tail basis %) nodes)
            (mapcat #(gt/arcs-by-head basis %) nodes)]))
 
-(defn- predecessors
-  [basis node-id]
-  (let [same-graph? (partial in-same-graph? (node-id->graph-id node-id))]
-    (filterv same-graph? (map first (sources basis node-id)))))
+(defn- in-same-graph? [_ arc]
+  (apply = (map node-id->graph-id (take-nth 2 arc))))
+
+(defn- predecessors [preds basis node-id]
+  (let [preds (conj preds in-same-graph?)]
+    (mapv first (filter #(reduce (fn [v f] (and v (f basis %))) true preds) (inputs basis node-id)))))
 
 (defn- input-traverse
   [basis pred root-ids]
-  (ig/pre-traverse basis root-ids
-                   (util/guard #(pred (ig/node-by-id-at %1 %2)) predecessors)))
+  (ig/pre-traverse basis root-ids (partial predecessors [pred])))
 
 (defn default-node-serializer
-  [node]
-  (let [property-labels        (keys (-> node gt/property-types))
-        all-node-properties    (select-keys node property-labels)
+  [basis node]
+  (let [node-id (gt/node-id node)
+        all-node-properties (into {} (map (fn [[key value]] [key (:value value)])
+                                          (:properties (node-value node-id :_declared-properties))))
         properties-without-fns (util/filterm (comp not fn? val) all-node-properties)]
-    {:node-type  (gt/node-type node)
+    {:node-type  (node-type basis node)
      :properties properties-without-fns}))
+
+(def opts-schema {(optional-key :traverse?) Runnable
+                  (optional-key :serializer) Runnable})
 
 (defn copy
   "Given a vector of root ids, and an options map that can contain an
-  `:include?` predicate and a `serializer` function, returns a copy
+  `:traverse?` predicate and a `serializer` function, returns a copy
   graph fragment that can be serialized or pasted.  Works on the
   current basis, if a basis is not provided.
 
-   The `:include?` predicate determines whether the node will be
+   The `:traverse?` predicate determines whether the target node will be
   included at all. If it returns a falsey value, then traversal stops
   there. That node and all arcs to it will be left behind. If the
   predicate returns true, then that node --- or a stand-in for it ---
   will be included in the fragment.
 
-  `:include?` will be called with the node value.
+  `:traverse?` will be called with the basis and arc data.
 
    The `:serializer` function determines _how_ to represent the node
   in the fragment.  `dynamo.graph/default-node-serializer` adds a map
@@ -865,13 +917,14 @@
 
   Example:
 
-  `(g/copy root-ids {:include? (comp not resource?)
-                     :serializer (some-fn custom-serializer default-node-serializer %)}"
+  `(g/copy root-ids {:traverse? (comp not resource? #(nth % 3))
+                     :serializer (some-fn custom-serializer default-node-serializer %)})"
   ([root-ids opts]
    (copy (now) root-ids opts))
-  ([basis root-ids {:keys [include? serializer] :or {include? (constantly true) serializer default-node-serializer} :as opts}]
-   (let [serializer     #(assoc (serializer (ig/node-by-id-at basis %2)) :serial-id %1)
-         original-ids   (input-traverse basis include? root-ids)
+  ([basis root-ids {:keys [traverse? serializer] :or {traverse? (constantly false) serializer default-node-serializer} :as opts}]
+    (validate opts-schema opts)
+   (let [serializer     #(assoc (serializer basis (ig/node-by-id-at basis %2)) :serial-id %1)
+         original-ids   (input-traverse basis traverse? root-ids)
          replacements   (zipmap original-ids (map-indexed serializer original-ids))
          serial-ids     (util/map-vals :serial-id replacements)
          fragment-arcs  (connecting-arcs basis original-ids)]
@@ -924,17 +977,65 @@
       :tx-data       (into node-txs connect-txs)})))
 
 ;; ---------------------------------------------------------------------------
+;; Sub-graph instancing
+;; ---------------------------------------------------------------------------
+(defn- traverse-cascade-delete [basis [src-id src-label tgt-id tgt-label]]
+  ((cascade-deletes (node-type* basis tgt-id)) tgt-label))
+
+(defn- make-override-node
+  [graph-id override-id original-node-id]
+  (in/make-override-node override-id (is/next-node-id @*the-system* graph-id) original-node-id {}))
+
+(defn override
+  ([root-id]
+    (override root-id {}))
+  ([root-id opts]
+    (override (now) root-id opts))
+  ([basis root-id {:keys [traverse?] :or {traverse? (constantly true)}}]
+    (let [graph-id (node-id->graph-id root-id)
+          preds [traverse-cascade-delete traverse?]
+          traverse-fn (partial predecessors preds)
+          node-ids (ig/pre-traverse basis [root-id] traverse-fn)
+          override-id (is/next-override-id @*the-system* graph-id)
+          overrides (mapv (partial make-override-node graph-id override-id) node-ids)
+          new-node-ids (map gt/node-id overrides)
+          orig->new (zipmap node-ids new-node-ids)
+          new-tx-data (map it/new-node overrides)
+          override-tx-data (concat
+                             (it/new-override override-id root-id traverse-fn)
+                             (map (fn [node-id new-id] (it/override-node node-id new-id)) node-ids new-node-ids))]
+      {:id-mapping orig->new
+       :tx-data (concat new-tx-data override-tx-data)})))
+
+(defn transfer-overrides [from-node-id to-node-id]
+  (it/transfer-overrides from-node-id to-node-id (partial is/next-node-id @*the-system* (node-id->graph-id to-node-id))))
+
+(defn overrides
+  ([root-id]
+    (overrides (now) root-id))
+  ([basis root-id]
+    (ig/overrides basis root-id)))
+
+(defn override-original
+  ([node-id]
+    (override-original (now) node-id))
+  ([basis node-id]
+    (when-let [n (node-by-id basis node-id)]
+      (gt/original n))))
+
+(defn override?
+  ([node-id]
+    (override? (now) node-id))
+  ([basis node-id]
+    (not (nil? (override-original basis node-id)))))
+
+;; ---------------------------------------------------------------------------
 ;; Boot, initialization, and facade
 ;; ---------------------------------------------------------------------------
 (defn initialize!
   "Set up the initial system including graphs, caches, and dispoal queues"
   [config]
   (reset! *the-system* (is/make-system config)))
-
-(defn dispose-pending!
-  "Empties the dispoal queues of all values"
-  []
-  (dispose/dispose-pending *the-system*))
 
 (defn- make-graph
   [& {:as options}]
@@ -957,6 +1058,11 @@
   "Retuns the last graph added to the system"
   []
   (is/last-graph @*the-system*))
+
+(defn graph-version
+  "Returns the latest version of a graph id"
+  [graph-id]
+  (is/graph-time @*the-system* graph-id))
 
 (defn delete-graph!
   "Given a `graph-id`, deletes it from the system

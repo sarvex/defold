@@ -6,9 +6,10 @@
   (:import [java.awt.image BufferedImage ColorModel]
            [java.nio ByteBuffer]
            [com.dynamo.graphics.proto Graphics$TextureImage$TextureFormat Graphics$TextureFormatAlternative$CompressionLevel]
-           [com.defold.libs TexcLibrary TexcLibrary$ColorSpace TexcLibrary$PixelFormat]
+           [com.defold.libs TexcLibrary TexcLibrary$ColorSpace TexcLibrary$PixelFormat TexcLibrary$CompressionType]
            [com.sun.jna Pointer]))
 
+(set! *warn-on-reflection* true)
 (set! *unchecked-math* true)
 
 ; Set up some compile-time aliases for those long Java constant names
@@ -63,7 +64,7 @@
   (TexcLibrary/TEXC_GenMipMaps texture))
 
 (defn- transcode [texture pixel-format color-model compression-level]
-  (TexcLibrary/TEXC_Transcode texture pixel-format color-model compression-level))
+  (TexcLibrary/TEXC_Transcode texture pixel-format color-model compression-level TexcLibrary$CompressionType/CT_DEFAULT))
 
 (defn double-down [[n m]] [(max (bit-shift-right n 1) 1)
                            (max (bit-shift-right m 1) 1)])

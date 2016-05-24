@@ -6,3 +6,7 @@
 /share/ext/download
 /go/pkg
 /go/bin
+
+/.ccache
+.idea
+/editor/defold-editor.iml

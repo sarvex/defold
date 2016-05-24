@@ -18,7 +18,7 @@ namespace dmRender
 
     typedef struct RenderContext*           HRenderContext;
     typedef struct RenderTargetSetup*       HRenderTargetSetup;
-    typedef uint32_t                        HRenderType;
+    typedef uint64_t                        HRenderType;
     typedef struct NamedConstantBuffer*     HNamedConstantBuffer;
     typedef struct RenderScript*            HRenderScript;
     typedef struct RenderScriptInstance*    HRenderScriptInstance;
@@ -196,7 +196,7 @@ namespace dmRender
 
     typedef void (*RenderListDispatchFn)(RenderListDispatchParams const &params);
 
-    static const HRenderType INVALID_RENDER_TYPE_HANDLE = ~0;
+    static const HRenderType INVALID_RENDER_TYPE_HANDLE = ~0ULL;
 
     HRenderContext NewRenderContext(dmGraphics::HContext graphics_context, const RenderContextParams& params);
     Result DeleteRenderContext(HRenderContext render_context, dmScript::HContext script_context);
@@ -286,6 +286,7 @@ namespace dmRender
     void                    AddRenderScriptInstanceMaterial(HRenderScriptInstance render_script_instance, const char* material_name, dmRender::HMaterial material);
     void                    ClearRenderScriptInstanceMaterials(HRenderScriptInstance render_script_instance);
     RenderScriptResult      InitRenderScriptInstance(HRenderScriptInstance render_script_instance);
+    RenderScriptResult      DispatchRenderScriptInstance(HRenderScriptInstance render_script_instance);
     RenderScriptResult      UpdateRenderScriptInstance(HRenderScriptInstance render_script_instance);
     void                    OnReloadRenderScriptInstance(HRenderScriptInstance render_script_instance);
 

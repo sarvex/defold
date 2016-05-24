@@ -16,7 +16,7 @@ namespace dmRender
      */
     struct Glyph
     {
-        uint16_t    m_Character;
+        uint32_t    m_Character;
         /// Width of the glyph
         uint32_t    m_Width;
         /// Total advancement of the glyph, measured from left to the next glyph
@@ -31,6 +31,11 @@ namespace dmRender
         int32_t     m_X;
         /// Y coordinate of the glyph in the map
         int32_t     m_Y;
+
+        bool        m_InCache;
+        uint64_t    m_GlyphDataOffset;
+        uint64_t    m_GlyphDataSize;
+        uint32_t    m_Frame;
     };
 
     /**
@@ -43,14 +48,6 @@ namespace dmRender
 
         /// All glyphs represented in the map
         dmArray<Glyph> m_Glyphs;
-        /// Width of the map texture
-        uint32_t m_TextureWidth;
-        /// Height of the map texture
-        uint32_t m_TextureHeight;
-        /// Texture data
-        const void* m_TextureData;
-        /// Texture data size
-        uint32_t m_TextureDataSize;
         /// Offset of the shadow along the x-axis
         float m_ShadowX;
         /// Offset of the shadow along the y-axis
@@ -65,6 +62,21 @@ namespace dmRender
         float m_SdfOffset;
         /// Distance value where outline should end
         float m_SdfOutline;
+        /// Font alpha
+        float m_Alpha;
+        /// Font outline alpha
+        float m_OutlineAlpha;
+        /// Font shadow alpha
+        float m_ShadowAlpha;
+
+        uint32_t m_CacheWidth;
+        uint32_t m_CacheHeight;
+        uint8_t m_GlyphChannels;
+        void* m_GlyphData;
+
+        uint32_t m_CacheCellWidth;
+        uint32_t m_CacheCellHeight;
+        uint8_t m_CacheCellPadding;
     };
 
     /**
@@ -74,6 +86,8 @@ namespace dmRender
     {
         /// Total string width
         float m_Width;
+        /// Total string height
+        float m_Height;
         /// Max ascent of font
         float m_MaxAscent;
         /// Max descent of font, positive value
@@ -150,6 +164,10 @@ namespace dmRender
         float       m_Width;
         /// Text render box height. Used for vertical alignment
         float       m_Height;
+        /// Text line spacing
+        float       m_Leading;
+        /// Text letter spacing
+        float       m_Tracking;
         /// True for linebreak
         bool        m_LineBreak;
         /// Horizontal alignment
@@ -190,9 +208,8 @@ namespace dmRender
      * @param line_break line break characters
      * @param metrics Metrics, out-value
      */
-    void GetTextMetrics(HFontMap font_map, const char* text, float width, bool line_break, TextMetrics* metrics);
+    void GetTextMetrics(HFontMap font_map, const char* text, float width, bool line_break, float leading, float tracking, TextMetrics* metrics);
 
 }
 
 #endif // FONTRENDERER_H
-

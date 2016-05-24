@@ -13,7 +13,6 @@
 #include <direct.h>
 #endif
 
-#include <engine/engine.h>
 #include <dlib/dstrings.h>
 #include <dlib/sys.h>
 #include <dlib/log.h>
@@ -249,11 +248,29 @@ namespace dmScript
     }
 
     /*# loads resource from game data
+     * Loads a custom resource. Specify the full filename of the resource that you want
+     * to load. When loaded, it is returned as a string.
      *
+     * In order for the engine to include custom resources in the build process, you need
+     * to specify them in the "game.project" settings file:
+     * <pre>
+     * [project]
+     * title = My project
+     * version = 0.1
+     * custom_resources = main/data/,assets/level_data.json
+     * </pre>
      *
      * @name sys.load_resource
-     * @param filename resource to load (string)
-     * @return loaded lua table, which is empty if the file could not be found (table)
+     * @param filename resource to load, full path (string)
+     * @return loaded data, which is empty if the file could not be found (string)
+     * @examples
+     * <pre>
+     * -- Load level data into a string
+     * local data = sys.load_resource("/assets/level_data.json")
+     * -- Decode json string to a Lua table
+     * local data_table = json.decode(data)
+     * pprint(data_table)
+     * </pre>
      */
     int Sys_LoadResource(lua_State* L)
     {
@@ -281,10 +298,11 @@ namespace dmScript
     /*# get system information
      * <p>
      * Returns a table with the following members:
-     * device_model, system_name, system_version, language, territory, gmt_offset (minutes), device_ident, ad_ident and ad_tracking_enabled.
+     * device_model, manufacturer, system_name, system_version, api_version, language, device_language, territory, gmt_offset (minutes), device_ident, ad_ident, ad_tracking_enabled and user_agent.
      * </p>
-     * <p><code>device_model</code> is currently only available on iOS and Android.</p>
+     * <p><code>device_model</code> and <code>manufacturer</code> is currently only available on iOS and Android.</p>
      * <p><code>language</code> is in ISO-639 format (two characters) and <code>territory</code> in ISO-3166 format (two characters).</p>
+     * <p><code>device_language</code> is in ISO-639 format (two characters) and if applicable by a dash (-) and an ISO 15924 script code. Reflects device preferred language.</p>
      * <p><code>device_ident</code> is "identifierForVendor" and <code>ad_ident</code> is "advertisingIdentifier" on iOS</p>
      * <p><code>device_ident</code> is "android_id" and <code>ad_ident</code> is advertising ID provided by Google Play on Android.</p>
      *
@@ -311,6 +329,9 @@ namespace dmScript
         lua_pushliteral(L, "system_version");
         lua_pushstring(L, info.m_SystemVersion);
         lua_rawset(L, -3);
+        lua_pushliteral(L, "api_version");
+        lua_pushstring(L, info.m_ApiVersion);
+        lua_rawset(L, -3);
         lua_pushliteral(L, "language");
         lua_pushstring(L, info.m_Language);
         lua_rawset(L, -3);
@@ -331,6 +352,9 @@ namespace dmScript
         lua_rawset(L, -3);
         lua_pushliteral(L, "ad_tracking_enabled");
         lua_pushboolean(L, info.m_AdTrackingEnabled);
+        lua_rawset(L, -3);
+        lua_pushliteral(L, "user_agent");
+        lua_pushstring(L, info.m_UserAgent ? info.m_UserAgent : "");
         lua_rawset(L, -3);
 
         assert(top + 1 == lua_gettop(L));
@@ -359,6 +383,33 @@ namespace dmScript
         lua_rawset(L, -3);
         lua_pushliteral(L, "version_sha1");
         lua_pushstring(L, info.m_VersionSHA1);
+        lua_rawset(L, -3);
+
+        assert(top + 1 == lua_gettop(L));
+        return 1;
+    }
+
+    /*# get application information
+     * <p>
+     * Returns a table with the following members:
+     * installed.
+     * </p>
+     *
+     * @name sys.get_application_info
+     * @return table with application information
+     */
+    int Sys_GetApplicationInfo(lua_State* L)
+    {
+        int top = lua_gettop(L);
+
+        const char* id = luaL_checkstring(L, 1);
+
+        dmSys::ApplicationInfo info;
+        dmSys::GetApplicationInfo(id, &info);
+
+        lua_newtable(L);
+        lua_pushliteral(L, "installed");
+        lua_pushboolean(L, info.m_Installed);
         lua_rawset(L, -3);
 
         assert(top + 1 == lua_gettop(L));
@@ -514,6 +565,7 @@ namespace dmScript
         {"load_resource", Sys_LoadResource},
         {"get_sys_info", Sys_GetSysInfo},
         {"get_engine_info", Sys_GetEngineInfo},
+        {"get_application_info", Sys_GetApplicationInfo},
         {"get_ifaddrs", Sys_GetIfaddrs},
         {"set_error_handler", Sys_SetErrorHandler},
         {"set_connectivity_host", Sys_SetConnectivityHost},

@@ -67,6 +67,8 @@
 
     NSRect contentRect =
         [_glfwWin.window contentRectForFrameRect:[_glfwWin.window frame]];
+
+    contentRect = [[_glfwWin.window contentView] convertRectToBacking:contentRect];
     _glfwWin.width = contentRect.size.width;
     _glfwWin.height = contentRect.size.height;
 
@@ -89,12 +91,16 @@
 - (void)windowDidBecomeKey:(NSNotification *)notification
 {
     _glfwWin.active = GL_TRUE;
+    if(_glfwWin.windowFocusCallback)
+        _glfwWin.windowFocusCallback(1);
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification
 {
     _glfwWin.active = GL_FALSE;
     _glfwInputDeactivation();
+    if(_glfwWin.windowFocusCallback)
+        _glfwWin.windowFocusCallback(0);
 }
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
@@ -312,11 +318,16 @@ static int convertMacKeyCode( unsigned int macKeyCode )
     }
     else
     {
-        NSPoint p = [event locationInWindow];
-
         // Cocoa coordinate system has origin at lower left
+        NSPoint p = [event locationInWindow];
+        p.y = [[_glfwWin.window contentView] bounds].size.height - p.y;
+
+        // Need convert mouse coord into backing coords
+        // which will be different for retina windows.
+        p = [self convertPointToBacking:p];
+
         _glfwInput.MousePosX = p.x;
-        _glfwInput.MousePosY = [[_glfwWin.window contentView] bounds].size.height - p.y;
+        _glfwInput.MousePosY = p.y;
     }
 
     if( _glfwWin.mousePosCallback )
@@ -507,25 +518,28 @@ int  _glfwPlatformOpenWindow( int width, int height,
     // Don't use accumulation buffer support; it's not accelerated
     // Aux buffers probably aren't accelerated either
 
-    CFDictionaryRef fullscreenMode = NULL;
+    CGDisplayModeRef fullscreenMode = NULL;
     if( wndconfig->mode == GLFW_FULLSCREEN )
     {
-        fullscreenMode =
-            // I think it's safe to pass 0 to the refresh rate for this function
-            // rather than conditionalizing the code to call the version which
-            // doesn't specify refresh...
-            CGDisplayBestModeForParametersAndRefreshRateWithProperty(
-            CGMainDisplayID(),
-            colorBits + fbconfig->alphaBits,
-            width,
-            height,
-            wndconfig->refreshRate,
-            // Controversial, see macosx_fullscreen.m for discussion
-            kCGDisplayModeIsSafeForHardware,
-            NULL);
+        // Find a good display mode for fullscreen based on width and height.
+        CFArrayRef modes = CGDisplayCopyAllDisplayModes(CGMainDisplayID(), NULL);
+        CFIndex count = CFArrayGetCount(modes);
+        int bestSizeDiff = INT_MAX;
+        for (CFIndex i = 0; i < count; i++) {
+            CGDisplayModeRef mode = (CGDisplayModeRef) CFArrayGetValueAtIndex(modes, i);
+            int mode_width = CGDisplayModeGetWidth(mode);
+            int mode_height = CGDisplayModeGetHeight(mode);
+            int res_diff = abs((mode_width - width) * (mode_width - width) + (mode_height - height) * (mode_height - height));
 
-        width = [[(id)fullscreenMode objectForKey:(id)kCGDisplayWidth] intValue];
-        height = [[(id)fullscreenMode objectForKey:(id)kCGDisplayHeight] intValue];
+            if (fullscreenMode == NULL ||
+                (res_diff < bestSizeDiff && mode_width >= width && mode_height >= height)) {
+                fullscreenMode = mode;
+                bestSizeDiff = res_diff;
+            }
+        }
+        CFRelease(modes);
+        width = CGDisplayModeGetWidth(fullscreenMode);
+        height = CGDisplayModeGetHeight(fullscreenMode);
     }
 
     unsigned int styleMask = 0;
@@ -549,6 +563,11 @@ int  _glfwPlatformOpenWindow( int width, int height,
                     backing:NSBackingStoreBuffered
                       defer:NO];
     [_glfwWin.window setContentView:[[GLFWContentView alloc] init]];
+
+    if (wndconfig->highDPI) {
+        [ [_glfwWin.window contentView] setWantsBestResolutionOpenGLSurface:YES];
+    }
+
     [_glfwWin.window setDelegate:_glfwWin.delegate];
     [_glfwWin.window setAcceptsMouseMovedEvents:YES];
     [_glfwWin.window center];
@@ -556,7 +575,7 @@ int  _glfwPlatformOpenWindow( int width, int height,
     if( wndconfig->mode == GLFW_FULLSCREEN )
     {
         CGCaptureAllDisplays();
-        CGDisplaySwitchToMode( CGMainDisplayID(), fullscreenMode );
+        CGDisplaySetDisplayMode( CGMainDisplayID(), fullscreenMode, NULL );
     }
 
     unsigned int attribute_count = 0;
@@ -634,6 +653,14 @@ int  _glfwPlatformOpenWindow( int width, int height,
     [_glfwWin.window makeKeyAndOrderFront:nil];
     [_glfwWin.context setView:[_glfwWin.window contentView]];
 
+    // Fetch the resulting width and height for backing buffer
+    // will differ from the input params on retina enabled windows.
+    NSRect contentRect =
+        [_glfwWin.window contentRectForFrameRect:[_glfwWin.window frame]];
+    contentRect = [[_glfwWin.window contentView] convertRectToBacking:contentRect];
+    _glfwWin.width = contentRect.size.width;
+    _glfwWin.height = contentRect.size.height;
+
     if( wndconfig->mode == GLFW_FULLSCREEN )
     {
         // TODO: Make this work on pre-Leopard systems
@@ -672,8 +699,8 @@ void _glfwPlatformCloseWindow( void )
     if( _glfwWin.fullscreen )
     {
         [[_glfwWin.window contentView] exitFullScreenModeWithOptions:nil];
-        CGDisplaySwitchToMode( CGMainDisplayID(),
-                               (CFDictionaryRef)_glfwLibrary.DesktopMode );
+        CGDisplaySetDisplayMode( CGMainDisplayID(),
+                                 (CGDisplayModeRef)_glfwLibrary.DesktopMode, NULL );
         CGReleaseAllDisplays();
     }
 
@@ -857,6 +884,14 @@ void _glfwPlatformRefreshWindowParams( void )
     _glfwWin.glForward = GL_FALSE;
     _glfwWin.glDebug = GL_FALSE;
     _glfwWin.glProfile = 0;
+
+    NSRect contentRectFrame = [_glfwWin.window contentRectForFrameRect:[_glfwWin.window frame]];
+    NSRect contentRectBacking = [[_glfwWin.window contentView] convertRectToBacking:contentRectFrame];
+    _glfwWin.highDPI = 0;
+    if (contentRectBacking.size.width > contentRectFrame.size.width ||
+        contentRectBacking.size.height > contentRectFrame.size.height) {
+        _glfwWin.highDPI = 1;
+    }
 }
 
 //========================================================================
@@ -955,6 +990,10 @@ void _glfwPlatformSetMouseCursorPos( int x, int y )
 }
 
 void _glfwShowKeyboard( int show, int type, int auto_close )
+{
+}
+
+void _glfwResetKeyboard( void )
 {
 }
 

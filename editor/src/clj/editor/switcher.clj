@@ -8,11 +8,11 @@
             [editor.gl :as gl]
             [editor.gl.shader :as shader]
             [editor.gl.vertex :as vtx]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.types :as types]
             [editor.workspace :as workspace]
             [editor.scene :as scene]
-            [internal.render.pass :as pass])
+            [editor.gl.pass :as pass])
   (:import [com.dynamo.graphics.proto Graphics$Cubemap Graphics$TextureImage Graphics$TextureImage$Image Graphics$TextureImage$Type]
            [com.jogamp.opengl.util.awt TextRenderer]
            [editor.types Region Animation Camera Image TexturePacking Rect EngineFormatTexture AABB TextureSetAnimationFrame TextureSetAnimation TextureSet]
@@ -21,6 +21,8 @@
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
            [javax.media.opengl.glu GLU]
            [javax.vecmath Matrix4d Point3d]))
+
+(set! *warn-on-reflection* true)
 
 (def switcher-icon "icons/board_game.png")
 
@@ -113,17 +115,17 @@
 
 ; Rendering
 
-(defn render-palette [ctx ^GL2 gl gpu-texture vertex-binding layout]
+(defn render-palette [^GL2 gl render-args gpu-texture vertex-binding layout]
   (doseq [group layout]
     (scene/overlay-text gl (:name group) (- (:x group) palette-cell-size-half) (+ (* 0.25 group-spacing) (- palette-cell-size-half (:y group)))))
   (let [cell-count (reduce (fn [v0 v1] (+ v0 (count (:cells v1)))) 0 layout)]
-   (gl/with-gl-bindings gl [gpu-texture shader vertex-binding]
+   (gl/with-gl-bindings gl render-args [gpu-texture shader vertex-binding]
     (shader/set-uniform shader gl "texture" 0)
     (gl/gl-draw-arrays gl GL/GL_TRIANGLES 0 (* 6 cell-count)))))
 
-(defn render-level [^GL2 gl level gpu-texture vertex-binding layout]
+(defn render-level [^GL2 gl render-args level gpu-texture vertex-binding layout]
   (let [cell-count (count layout)]
-    (gl/with-gl-bindings gl [gpu-texture shader vertex-binding]
+    (gl/with-gl-bindings gl render-args [gpu-texture shader vertex-binding]
       (shader/set-uniform shader gl "texture" 0)
       (gl/gl-draw-arrays gl GL/GL_TRIANGLES 0 (* 6 cell-count)))))
 
@@ -183,11 +185,11 @@
 (g/defnk produce-controller-renderable
   [this level gpu-texture palette-vertex-binding level-vertex-binding active-brush palette-layout level-layout]
   {pass/overlay [{:world-transform geom/Identity4d
-                  :render-fn (fn [ctx gl glu]
-                               (render-palette ctx gl gpu-texture palette-vertex-binding palette-layout))}]
+                  :render-fn (fn [gl render-args renderables count]
+                               (render-palette gl render-args gpu-texture palette-vertex-binding palette-layout))}]
    pass/transparent [{:world-transform geom/Identity4d
-                   :render-fn (fn [ctx gl glu]
-                                (render-level gl level gpu-texture level-vertex-binding level-layout))}]})
+                   :render-fn (fn [gl render-args renderables count]
+                                (render-level gl render-args level gpu-texture level-vertex-binding level-layout))}]})
 
 (defn- hit? [cell pos cell-size-half]
   (let [xc (:x cell)
@@ -234,15 +236,15 @@
         action))
     action))
 
-(g/defnode SwitcherController
- (property active-brush g/Str (default "red_candy"))
+#_(g/defnode SwitcherController
+  (property active-brush g/Str (default "red_candy"))
 
- (input source   g/Any)
- (input camera   g/Any)
- (input viewport Region)
+  (input source   g/Any)
+  (input camera   g/Any)
+  (input viewport Region)
 
- (output input-handler Runnable     (g/fnk [source camera viewport] (fn [self action] (handle-input self action source camera viewport))))
- (output renderable    pass/RenderData produce-controller-renderable))
+  (output input-handler Runnable     (g/fnk [source camera viewport] (fn [self action] (handle-input self action source camera viewport))))
+  (output renderable    pass/RenderData produce-controller-renderable))
 
 (g/defnk produce-save-data [resource level]
   {:resource resource
@@ -254,7 +256,7 @@
          level-vertex-binding (vtx/use-with ::switcher (gen-level-vertex-buffer anim-data level-layout cell-size-half) shader)]
      {:id _node-id
       :aabb aabb
-      :renderable {:render-fn (fn [gl render-args renderables count] (render-level gl level gpu-texture level-vertex-binding level-layout))
+      :renderable {:render-fn (fn [gl render-args renderables count] (render-level gl render-args level gpu-texture level-vertex-binding level-layout))
                    :passes [pass/transparent]}}))
 
 (g/defnode SwitcherNode
@@ -276,10 +278,10 @@
   (output save-data g/Any :cached produce-save-data)
   (output scene     g/Any :cached produce-scene))
 
-(defn load-level [project self input]
-  (with-open [reader (PushbackReader. (io/reader (g/node-value self :resource)))]
+(defn load-level [project self resource]
+  (with-open [reader (PushbackReader. (io/reader resource))]
     (let [level      (edn/read reader)
-          atlas-resource (workspace/resolve-resource (g/node-value self :resource) switcher-atlas-file)]
+          atlas-resource (workspace/resolve-resource resource switcher-atlas-file)]
       (concat
         (g/set-property self :width (:width level))
         (g/set-property self :height (:height level))
@@ -295,4 +297,4 @@
                                     :node-type SwitcherNode
                                     :load-fn load-level
                                     :icon switcher-icon
-                                    :view-types [:scene]))
+                                    :view-types [:scene :text]))

@@ -78,7 +78,11 @@
   (.glDepthMask gl true)
   (.glEnable gl GL/GL_DEPTH_TEST)
   (.glClearColor gl r g b a)
-  (.glClear gl (bit-or GL/GL_STENCIL_BUFFER_BIT GL/GL_COLOR_BUFFER_BIT GL/GL_DEPTH_BUFFER_BIT))
+  (.glDepthMask gl true)
+  (.glClearDepth gl 1.0)
+  (.glStencilMask gl 0xFF)
+  (.glClearStencil gl 0)
+  (.glClear gl (bit-or GL/GL_COLOR_BUFFER_BIT GL/GL_DEPTH_BUFFER_BIT GL/GL_STENCIL_BUFFER_BIT))
   (.glDisable gl GL/GL_DEPTH_TEST)
   (.glDepthMask gl false))
 
@@ -118,13 +122,14 @@
        (.release ~ctx))))
 
 (defmacro with-gl-bindings
-  [glsymb gl-stuff & body]
+  [glsymb render-args-symb gl-stuff & body]
   (assert (vector? gl-stuff) (str "GL objects must be a vector of values that satisfy GlBind" gl-stuff))
   `(let [gl# ~glsymb
+         render-args# ~render-args-symb
          items# ~gl-stuff]
      (doseq [b# items#]
        (when (satisfies? p/GlBind b#)
-         (p/bind b# gl#)))
+         (p/bind b# gl# render-args#)))
      (let [res# (do ~@body)]
        (doseq [b# (reverse items#)]
          (when (satisfies? p/GlBind b#)
@@ -132,11 +137,11 @@
        res#)))
 
 (defmacro do-gl
-  [glsymb bindings & body]
+  [glsymb render-args bindings & body]
   (assert (even? (count bindings)) "Bindings must contain an even number of forms")
   (let [bound-syms (map first (partition 2 bindings))]
     `(let ~bindings
-       (with-gl-bindings ~glsymb ~(into [] bound-syms)
+       (with-gl-bindings ~glsymb ~render-args ~(into [] bound-syms)
          ~@body))))
 
 (defmacro gl-push-matrix [gl & body]

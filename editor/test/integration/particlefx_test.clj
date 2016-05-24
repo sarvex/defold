@@ -4,7 +4,7 @@
             [support.test-support :refer [with-clean-system]]
             [editor.collection :as collection]
             [editor.handler :as handler]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.types :as types]
             [editor.particle-lib :as plib]
             [integration.test-util :as test-util])
@@ -32,7 +32,7 @@
              (let [workspace (test-util/setup-workspace! world)
                    project   (test-util/setup-project! workspace)
                    node-id   (test-util/resource-node project "/particlefx/fireworks_big.particlefx")
-                   outline (g/node-value node-id :outline)]
+                   outline (g/node-value node-id :node-outline)]
                (is (= 4 (count (:children outline))))
                (let [mod-drag (get-in outline [:children 2 :node-id])
                      props (:properties (g/node-value mod-drag :_properties))]

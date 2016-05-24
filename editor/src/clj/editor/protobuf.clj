@@ -125,8 +125,13 @@
        (.setM30 (.getElement v 3 0)) (.setM31 (.getElement v 3 1)) (.setM32 (.getElement v 3 2)) (.setM33 (.getElement v 3 3)))
      (.build))))
 
+(def ^:private upper-pattern (re-pattern #"\p{javaUpperCase}"))
+
 (defn- field->key [^Descriptors$FieldDescriptor field-desc]
-  (keyword (s/replace (.getName field-desc) "_" "-")))
+  (let [field-name (.getName field-desc)]
+    (keyword (if (re-find upper-pattern field-name)
+               (->kebab-case field-name)
+               (s/replace field-name "_" "-")))))
 
 (defn pb->map
   [^Message pb]
@@ -138,6 +143,9 @@
 
                        (= (.getType descriptor) Descriptors$FieldDescriptor$Type/ENUM)
                        (if repeated? (vec (map pb-enum->val value)) (pb-enum->val value))
+
+                       (= (.getJavaType descriptor) Descriptors$FieldDescriptor$JavaType/BOOLEAN)
+                       (if repeated? (vec (map boolean value)) (boolean value))
 
                        :else
                        (if repeated? (vec value) value))))
@@ -159,7 +167,7 @@
 (defn field-set? [m key]
   (not (identical? (get m key) (get-in (meta m) [:proto-defaults key]))))
 
-(defn- desc->cls [^Descriptors$FieldDescriptor desc val]
+(defn desc->cls [^Descriptors$FieldDescriptor desc val]
  (if (.isRepeated desc)
    Iterable
    (let [java-type (.getJavaType desc)]
@@ -234,7 +242,8 @@
       (= type (Descriptors$FieldDescriptor$JavaType/FLOAT)) (float val)
       (= type (Descriptors$FieldDescriptor$JavaType/DOUBLE)) (double val)
       (= type (Descriptors$FieldDescriptor$JavaType/STRING)) (str val)
-      (= type (Descriptors$FieldDescriptor$JavaType/BOOLEAN)) (boolean val)
+      ;; The reason we convert to Boolean object is for symmetry - the protobuf system do this when loading from protobuf files
+      (= type (Descriptors$FieldDescriptor$JavaType/BOOLEAN)) (java.lang.Boolean. (boolean val))
       (= type (Descriptors$FieldDescriptor$JavaType/BYTE_STRING)) val
       (= type (Descriptors$FieldDescriptor$JavaType/ENUM)) (kw->enum desc val)
       (= type (Descriptors$FieldDescriptor$JavaType/MESSAGE)) (map->pb (.getMessageType desc) val)
@@ -304,8 +313,15 @@
 (defn enum-values [^java.lang.Class cls]
   (let [values-method (.getMethod cls "values" (into-array Class []))
         value-descs (map #(.getValueDescriptor ^ProtocolMessageEnum %) (.invoke values-method nil (object-array 0)))]
-    (zipmap (map #(pb-enum->val ^Descriptors$EnumValueDescriptor %) value-descs)
-            (map #(do {:display-name (-> ^Descriptors$EnumValueDescriptor % (.getOptions) (.getExtension DdfExtensions/displayName))}) value-descs))))
+    (map (fn [value-desc]
+            [(pb-enum->val ^Descriptors$EnumValueDescriptor value-desc)
+             {:display-name (-> ^Descriptors$EnumValueDescriptor value-desc (.getOptions) (.getExtension DdfExtensions/displayName))}])
+          value-descs)))
 
 (defn hash64 [v]
   (MurmurHash/hash64 v))
+
+(defn fields-by-indices
+  [^java.lang.Class cls]
+  (let [^Descriptors$Descriptor desc (j/invoke-no-arg-class-method cls "getDescriptor")]
+    (into {} (map (fn [^Descriptors$FieldDescriptor field] [(.getNumber field) (field->key field)]) (.getFields desc)))))

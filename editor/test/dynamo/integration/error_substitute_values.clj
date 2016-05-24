@@ -14,7 +14,7 @@
 
 (g/defnode SimpleArrayTestNode
   (input my-input g/Str :array)
-  (output passthrough [g/Str] (g/fnk [my-input] my-input)))
+  (output passthrough [(g/maybe g/Str)] (g/fnk [my-input] my-input)))
 
 (deftest test-producing-values-without-substitutes
   (testing "values with no errors"
@@ -86,13 +86,13 @@
         (is (= [nil] (g/node-value atnode2 :passthrough)))))))
 
 (g/defnode ErrorOutputNode
-  (output my-output g/Str (g/always (g/error "I am an error!"))))
+  (output my-output g/Str (g/always (g/error-severe "I am an error!"))))
 
 (defn thrown-for-reason?
   [node output reason]
   (let [error (:error (try (g/node-value node output)
                            (catch Exception e (ex-data e))))]
-    (and (g/error? error)
+    (and (g/error-severe? error)
          (= reason (:reason error)))))
 
 (deftest test-producing-vals-with-errors
@@ -103,7 +103,7 @@
         (g/transact (g/connect onode :my-output tnode :my-input))
         (is (g/error? (g/node-value tnode :passthrough))))))
 
-  (with-redefs [in/warn (constantly nil)]
+  (binding [in/*suppress-schema-warnings* true]
     (testing "array values with errors"
       (with-clean-system
         (let [[onode atnode] (tx-nodes (g/make-node world ErrorOutputNode)
@@ -134,8 +134,8 @@
   (output passthrough g/Str (g/fnk [my-input] my-input)))
 
 (g/defnode SubArrayTestNode
-  (input my-input g/Str :array :substitute "beans")
-  (output passthrough [g/Str] (g/fnk [my-input] my-input)))
+  (input my-input g/Str :array :substitute (fn [_] ["beans"]))
+  (output passthrough [(g/maybe g/Str)] (g/fnk [my-input] my-input)))
 
 (deftest test-producing-vals-with-nil-substitutes
   (testing "values with nils do not trigger substitutes"
@@ -202,3 +202,41 @@
         (g/transact (g/connect onode :my-output tnode1 :my-input))
         (g/transact (g/connect tnode1 :passthrough atnode2 :my-input))
         (is (= ["beans"] (g/node-value atnode2 :passthrough)))))))
+
+(g/defnode BaseInputNode
+  (input the-input g/Str)
+  (output the-input g/Str (g/fnk [the-input] the-input)))
+
+(g/defnode DerivedSubstInputNode
+  (inherits BaseInputNode)
+  (input the-input g/Str :substitute "substitute")
+  (output the-input g/Str (g/fnk [the-input] the-input)))
+
+(deftest derived-can-substitute
+  (testing "base node does no substitution"
+    (with-clean-system
+      (let [[err base] (tx-nodes (g/make-node world ErrorOutputNode)
+                                 (g/make-node world BaseInputNode))]
+        (g/transact (g/connect err :my-output base :the-input))
+        (is (g/error? (g/node-value base :the-input))))))
+  (testing "derived does substitution"
+    (with-clean-system
+      (let [[err der] (tx-nodes (g/make-node world ErrorOutputNode)
+                                (g/make-node world DerivedSubstInputNode))]
+        (g/transact (g/connect err :my-output der :the-input))
+        (is (= "substitute" (g/node-value der :the-input)))))))
+
+(defn subst-fn [err] "substitute")
+
+(g/defnode NamedSubstFn
+  (input the-input g/Str :substitute subst-fn)
+  (output the-input g/Str (g/fnk [the-input] the-input)))
+
+(deftest substitute-fn-can-be-defn
+  (testing "substitute function can be a defn"
+    (with-clean-system
+      (let [[err sub] (tx-nodes (g/make-node world ErrorOutputNode)
+                                (g/make-node world NamedSubstFn))]
+        (g/transact (g/connect err :my-output sub :the-input))
+        (is (= "substitute" (g/node-value sub :the-input)))))))
+

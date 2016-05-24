@@ -8,6 +8,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.FileWriter;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -16,6 +17,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -42,6 +44,7 @@ import com.dynamo.bob.fs.IResource;
 import com.dynamo.bob.fs.ZipMountPoint;
 import com.dynamo.bob.util.BobProjectProperties;
 import com.dynamo.bob.util.LibraryUtil;
+import com.dynamo.bob.util.ReportGenerator;
 import com.dynamo.graphics.proto.Graphics.TextureProfiles;
 
 /**
@@ -53,10 +56,15 @@ public class Project {
 
     public final static String LIB_DIR = ".internal/lib";
 
+    public enum OutputFlags {
+        NONE,
+        UNCOMPRESSED
+    }
+
     private IFileSystem fileSystem;
     private Map<String, Class<? extends Builder<?>>> extToBuilder = new HashMap<String, Class<? extends Builder<?>>>();
     private List<String> inputs = new ArrayList<String>();
-    private List<String> outputs = new ArrayList<String>();
+    private HashMap<String, EnumSet<OutputFlags>> outputs = new HashMap<String, EnumSet<OutputFlags>>();
     private ArrayList<Task<?>> newTasks;
     private State state;
     private String rootDirectory = ".";
@@ -355,6 +363,7 @@ public class Project {
         bundlers = new HashMap<Platform, Class<? extends IBundler>>();
         bundlers.put(Platform.X86Darwin, OSXBundler.class);
         bundlers.put(Platform.X86Linux, LinuxBundler.class);
+        bundlers.put(Platform.X86_64Linux, LinuxBundler.class);
         bundlers.put(Platform.X86Win32, Win32Bundler.class);
         bundlers.put(Platform.Armv7Android, AndroidBundler.class);
         bundlers.put(Platform.Armv7Darwin, IOSBundler.class);
@@ -421,6 +430,23 @@ public class Project {
 
         for (String command : commands) {
             if (command.equals("build")) {
+
+                // Do early test if report files are writeable before we start building
+                boolean generateReport = this.hasOption("build-report") || this.hasOption("build-report-html");
+                FileWriter fileJSONWriter = null;
+                FileWriter fileHTMLWriter = null;
+
+                if (this.hasOption("build-report")) {
+                    String reportJSONPath = this.option("build-report", "report.json");
+                    File reportJSONFile = new File(reportJSONPath);
+                    fileJSONWriter = new FileWriter(reportJSONFile);
+                }
+                if (this.hasOption("build-report-html")) {
+                    String reportHTMLPath = this.option("build-report-html", "report.html");
+                    File reportHTMLFile = new File(reportHTMLPath);
+                    fileHTMLWriter = new FileWriter(reportHTMLFile);
+                }
+
                 IProgress m = monitor.subProgress(99);
                 m.beginTask("Building...", newTasks.size());
                 result = runTasks(m);
@@ -428,6 +454,29 @@ public class Project {
                 if (anyFailing(result)) {
                     break;
                 }
+
+                // Generate and save build report
+                if (generateReport) {
+                    IProgress mrep = monitor.subProgress(1);
+                    mrep.beginTask("Generating report...", 1);
+                    ReportGenerator rg = new ReportGenerator(this);
+                    String reportJSON = rg.generateJSON();
+
+                    // Save JSON report
+                    if (this.hasOption("build-report")) {
+                        fileJSONWriter.write(reportJSON);
+                        fileJSONWriter.close();
+                    }
+
+                    // Save HTML report
+                    if (this.hasOption("build-report-html")) {
+                        String reportHTML = rg.generateHTML(reportJSON);
+                        fileHTMLWriter.write(reportHTML);
+                        fileHTMLWriter.close();
+                    }
+                    mrep.done();
+                }
+
             } else if (command.equals("clean")) {
                 IProgress m = monitor.subProgress(1);
                 m.beginTask("Cleaning...", newTasks.size());
@@ -479,9 +528,9 @@ public class Project {
         newTasks.clear();
 
         // Keep track of the paths for all outputs
-        outputs = new ArrayList<String>(allOutputs.size());
+        outputs = new HashMap<String, EnumSet<OutputFlags>>(allOutputs.size());
         for (IResource res : allOutputs) {
-            outputs.add(res.getAbsPath());
+            outputs.put(res.getAbsPath(), EnumSet.noneOf(OutputFlags.class));
         }
 
         // This flag is set to true as soon as one task has failed. This will
@@ -617,8 +666,23 @@ run:
         this.inputs = new ArrayList<String>(inputs);
     }
 
-    public List<String> getOutputs() {
+    public HashMap<String, EnumSet<OutputFlags>> getOutputs() {
         return outputs;
+    }
+
+    /**
+     * Add output flag to resource
+     * @param resourcePath output resource absolute path
+     * @param flag OutputFlag to add
+     */
+    public boolean addOutputFlags(String resourcePath, OutputFlags flag) {
+        EnumSet<OutputFlags> currentFlags = outputs.get(resourcePath);
+        if(currentFlags == null) {
+            return false;
+        }
+        currentFlags.add(flag);
+        outputs.replace(resourcePath, currentFlags);
+        return true;
     }
 
     /**
@@ -731,6 +795,14 @@ run:
      */
     public boolean hasOption(String key) {
         return options.containsKey(key);
+    }
+
+    /**
+     * Get a map of all options
+     * @return A map of options
+     */
+    public Map<String, String> getOptions() {
+        return options;
     }
 
     class Walker extends FileSystemWalker {

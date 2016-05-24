@@ -2,10 +2,16 @@
   "Internal functions that implement the transactional behavior."
   (:require [clojure.set :as set]
             [clojure.string :as str]
-            [dynamo.util :as util]
+            [internal.util :as util]
             [internal.graph :as ig]
             [internal.graph.types :as gt]
-            [internal.property :as ip]))
+            [internal.graph.error-values :as ie]
+            [internal.node :as in]
+            [internal.property :as ip]
+            [internal.system :as is]
+            [schema.core :as s]))
+
+(set! *warn-on-reflection* true)
 
 ;; ---------------------------------------------------------------------------
 ;; Configuration parameters
@@ -17,12 +23,13 @@
 ;; Internal state
 ;; ---------------------------------------------------------------------------
 (def ^:dynamic *tx-debug* nil)
+(def ^:dynamic *in-transaction?* nil)
 
 (def ^:private ^java.util.concurrent.atomic.AtomicInteger next-txid (java.util.concurrent.atomic.AtomicInteger. 1))
 (defn- new-txid [] (.getAndIncrement next-txid))
 
 (defmacro txerrstr [ctx & rest]
-  `(str (:txid ~ctx) " " ~@(interpose " " rest)))
+  `(str (:txid ~ctx) ": " ~@(interpose " " rest)))
 
 ;; ---------------------------------------------------------------------------
 ;; Building transactions
@@ -44,6 +51,25 @@
   [{:type     :delete-node
     :node-id  node-id}])
 
+(defn new-override
+  [override-id root-id traverse-fn]
+  [{:type :new-override
+    :override-id override-id
+    :root-id root-id
+    :traverse-fn traverse-fn}])
+
+(defn override-node
+  [original-node-id override-node-id]
+  [{:type        :override-node
+    :original-node-id original-node-id
+    :override-node-id override-node-id}])
+
+(defn transfer-overrides [from-node-id to-node-id id-fn]
+  [{:type         :transfer-overrides
+    :from-node-id from-node-id
+    :to-node-id   to-node-id
+    :id-fn        id-fn}])
+
 (defn update-property
   "*transaction step* - Expects a node, a property label, and a
   function f (with optional args) to be performed on the current value
@@ -55,9 +81,15 @@
     :fn       f
     :args     args}])
 
-(defn update-graph
+(defn clear-property
+  [node-id pr]
+  [{:type     :clear-property
+    :node-id  node-id
+    :property pr}])
+
+(defn update-graph-value
   [gid f args]
-  [{:type :update-graph
+  [{:type :update-graph-value
     :gid  gid
     :fn   f
     :args args}])
@@ -85,6 +117,11 @@
     :target-id    to-node-id
     :target-label to-label}])
 
+(defn disconnect-sources
+  [basis target-node target-label]
+  (for [[src-node src-label] (gt/sources basis target-node target-label)]
+    (disconnect src-node src-label target-node target-label)))
+
 (defn label
   [label]
   [{:type  :label
@@ -105,21 +142,18 @@
 ;; ---------------------------------------------------------------------------
 (defn- pairs [m] (for [[k vs] m v vs] [k v]))
 
-(defn- mark-activated
-  [{:keys [basis] :as ctx} node-id input-label]
-  (let [dirty-deps (-> (ig/node-by-id-at basis node-id) gt/node-type gt/input-dependencies (get input-label))]
-    (update-in ctx [:nodes-affected node-id] set/union dirty-deps)))
+(defn- mark-input-activated
+  [ctx node-id input-label]
+  (let [basis (:basis ctx)
+        dirty-deps (-> (ig/node-by-id-at basis node-id) (gt/node-type basis) gt/input-dependencies (get input-label))]
+    (update-in ctx [:nodes-affected node-id] into dirty-deps)))
 
-(defn- activate-all-outputs
-  [{:keys [basis] :as ctx} node-id node]
-  (let [all-labels  (-> node gt/node-type gt/output-labels)
-        ctx         (update-in ctx [:nodes-affected node-id] set/union all-labels)
-        all-targets (into #{[node-id nil]} (mapcat #(gt/targets basis node-id %) all-labels))]
-    (reduce
-     (fn [ctx [target-id target-label]]
-       (mark-activated ctx target-id target-label))
-     ctx
-     all-targets)))
+(defn- mark-output-activated
+  [ctx node-id output-label]
+  (update ctx :outputs-modified conj [node-id output-label]))
+
+(defn- next-node-id [ctx gid]
+  (is/next-node-id* (:node-id-generators ctx) gid))
 
 (defmulti perform
   "A multimethod used for defining methods that perform the individual
@@ -136,10 +170,9 @@
   such as [[connect]] and [[update-property]]."
   (fn [ctx m] (:type m)))
 
-
 (defn- disconnect-inputs
   [ctx target-node target-label]
-  (loop [ctx     ctx
+  (loop [ctx ctx
          sources (gt/sources (:basis ctx) target-node target-label)]
     (if-let [source (first sources)]
       (recur (perform ctx {:type         :disconnect
@@ -147,142 +180,341 @@
                            :source-label (second source)
                            :target-id    target-node
                            :target-label target-label})
-             (next sources))
+        (next sources))
       ctx)))
 
 (defn- disconnect-outputs
   [ctx source-node source-label]
   (loop [ctx ctx
-         targets     (gt/targets (:basis ctx) source-node source-label)]
+         targets (gt/targets (:basis ctx) source-node source-label)]
     (if-let [target (first targets)]
       (recur (perform ctx {:type         :disconnect
                            :source-id    source-node
                            :source-label source-label
                            :target-id    (first target)
                            :target-label (second target)})
-             (next targets))
+        (next targets))
       ctx)))
 
+(defn- disconnect-stale [ctx node-id old-node new-node labels-fn disconnect-fn]
+  (let [basis (:basis ctx)
+        stale-labels (set/difference
+                       (-> old-node (gt/node-type basis) labels-fn)
+                       (-> new-node (gt/node-type basis) labels-fn))]
+    (loop [ctx ctx
+           labels stale-labels]
+      (if-let [label (first labels)]
+        (recur (disconnect-fn ctx node-id label) (rest labels))
+        ctx))))
+
+(defn- disconnect-stale-inputs [ctx node-id old-node new-node]
+  (disconnect-stale ctx node-id old-node new-node gt/input-labels disconnect-inputs))
+
+(defn- disconnect-stale-outputs [ctx node-id old-node new-node]
+  (disconnect-stale ctx node-id old-node new-node gt/output-labels disconnect-outputs))
+
+(def ^:private replace-node (comp first gt/replace-node))
+
+(defn- activate-all-outputs
+  [ctx node-id node]
+  (let [all-labels (map vector (repeat node-id) (-> node (gt/node-type (:basis ctx)) gt/output-labels))]
+    (update ctx :outputs-modified into all-labels)))
+
 (defmethod perform :become
-  [{:keys [basis nodes-affected] :as ctx}
-   {:keys [node-id to-node]}]
-  (if-let [old-node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
-    (let [old-node         (ig/node-by-id-at basis node-id)
-          to-node-id       (gt/node-id to-node)
-          new-node         (merge to-node old-node)
-
-          ;; disconnect inputs that no longer exist
-          vanished-inputs  (set/difference (-> old-node gt/node-type gt/input-labels)
-                                           (-> new-node gt/node-type gt/input-labels))
-          ctx              (reduce (fn [ctx in]  (disconnect-inputs ctx node-id  in))  ctx vanished-inputs)
-
-          ;; disconnect outputs that no longer exist
-          vanished-outputs (set/difference (-> old-node gt/node-type gt/output-labels)
-                                           (-> new-node gt/node-type gt/output-labels))
-          ctx              (reduce (fn [ctx out] (disconnect-outputs ctx node-id out)) ctx vanished-outputs)
-
-          [basis-after _]  (gt/replace-node (:basis ctx) node-id new-node)]
-      (assoc (activate-all-outputs ctx node-id new-node)
-             :basis           basis-after))
+  [ctx {:keys [node-id to-node]}]
+  (if-let [old-node (ig/node-by-id-at (:basis ctx) node-id)] ; nil if node was deleted in this transaction
+    (let [new-node (merge to-node old-node)]
+      (-> ctx
+        (disconnect-stale-inputs node-id old-node new-node)
+        (disconnect-stale-outputs node-id old-node new-node)
+        (update :basis replace-node node-id new-node)
+        (activate-all-outputs node-id new-node)))
     ctx))
 
+(def ^:private basis-delete-node (comp first gt/delete-node))
+
+(defn- disconnect-all-inputs [ctx node-id node]
+  (reduce (fn [ctx in] (disconnect-inputs ctx node-id in)) ctx (-> node (gt/node-type (:basis ctx)) gt/input-labels)))
+
+(defn- disconnect-all-outputs [ctx node-id node]
+  (reduce (fn [ctx in] (disconnect-outputs ctx node-id in)) ctx (-> node (gt/node-type (:basis ctx)) gt/output-labels)))
+
 (defn- delete-single
-  [{:keys [basis nodes-deleted nodes-added] :as ctx} node-id]
-  (if-let [node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
-    (let [all-labels         (set/union (-> node gt/node-type gt/input-labels) (-> node gt/node-type gt/output-labels))
-          ctx                (reduce (fn [ctx in]  (disconnect-inputs ctx node-id  in)) ctx (-> node gt/node-type gt/input-labels))
-          basis              (:basis ctx)
-          [basis node]       (gt/delete-node basis node-id)
-          ctx                (update-in ctx [:nodes-affected node-id] set/union all-labels)]
-      (assoc ctx
-             :basis            basis
-             :nodes-deleted    (assoc nodes-deleted node-id node)
-             :nodes-added      (util/removev #(= node-id %) nodes-added)))
+  [ctx node-id]
+  (if-let [node (ig/node-by-id-at (:basis ctx) node-id)] ; nil if node was deleted in this transaction
+    (let [type (gt/node-type node (:basis ctx))
+          all-labels (set/union
+                       (-> type gt/input-labels)
+                       (-> type gt/output-labels))]
+      (-> ctx
+        (disconnect-all-inputs node-id node)
+        (update :basis basis-delete-node node-id)
+        (update-in [:nodes-affected node-id] set/union all-labels)
+        (assoc-in [:nodes-deleted node-id] node)
+        (update :nodes-added (partial filterv #(not= node-id %)))))
     ctx))
 
 (defn- cascade-delete-sources
   [basis node-id]
-  (for [input         (gt/cascade-deletes (gt/node-type (ig/node-by-id-at basis node-id)))
+  (for [input (some-> (ig/node-by-id-at basis node-id)
+                (gt/node-type basis)
+                gt/cascade-deletes)
         [source-id _] (gt/sources basis node-id input)]
     source-id))
 
-(defmethod perform :delete-node
-  [ctx {:keys [node-id]}]
-  (let [basis-to-use (if (contains? (set (:nodes-added ctx)) node-id) (:basis ctx) (:original-basis ctx))
-        to-delete    (ig/pre-traverse basis-to-use [node-id] cascade-delete-sources)]
+(defn- ctx-delete-node [ctx node-id]
+  (let [basis (:basis ctx)
+        overrides-deep (comp reverse (partial tree-seq (constantly true) (partial ig/overrides basis)))
+        to-delete    (->> (ig/pre-traverse basis [node-id] cascade-delete-sources)
+                       (mapcat overrides-deep))]
     (reduce delete-single ctx to-delete)))
 
-(defn- assert-has-property-label
-  [node label]
-  (assert (contains? node label)
-          (format "Attemping to use property %s from %s, but it does not exist" label (:name (gt/node-type node)))))
+(defmethod perform :delete-node
+  [ctx {:keys [node-id]}]
+  (ctx-delete-node ctx node-id))
 
-(defn apply-defaults
-  [basis node]
-  (letfn [(use-setter [basis prop] (if-let [v (get node prop)]
-                                          (ip/invoke-setter basis node prop v)
-                                          basis))]
-    (reduce use-setter basis (util/key-set (gt/property-types node)))))
+(defmethod perform :new-override
+  [ctx {:keys [override-id root-id traverse-fn]}]
+  (-> ctx
+    (update :basis gt/add-override override-id (ig/make-override root-id traverse-fn))))
 
-(defmethod perform :create-node
-  [{:keys [basis nodes-affected world-ref nodes-added successors-changed] :as ctx}
-   {:keys [node]}]
-  (let [[basis-after full-node] (gt/add-node basis node)
+(defn- ctx-override-node [ctx original-id override-id]
+  (let [basis (:basis ctx)
+        original (ig/node-by-id-at basis original-id)
+        all-originals (take-while some? (iterate (fn [nid] (some->> (ig/node-by-id-at basis nid)
+                                                             gt/original)) original-id))
+        all-outputs (-> original (gt/node-type basis) gt/output-labels)]
+    (-> ctx
+      (update :basis gt/override-node original-id override-id)
+      (update :successors-changed into (set (concat
+                                              (for [nid all-originals
+                                                    output all-outputs]
+                                                [nid output])
+                                              (mapcat #(gt/sources basis %) all-originals)))))))
+
+(defmethod perform :override-node
+  [ctx {:keys [original-node-id override-node-id]}]
+  (ctx-override-node ctx original-node-id override-node-id))
+
+(declare apply-tx ctx-add-node)
+
+(defn- ctx-make-override-nodes [ctx override-id node-ids]
+  (reduce (fn [ctx node-id]
+            (let [gid (gt/node-id->graph-id node-id)
+                  new-sub-id (next-node-id ctx gid)
+                  new-sub-node (in/make-override-node override-id new-sub-id node-id {})]
+              (-> ctx
+                (ctx-add-node new-sub-node)
+                (ctx-override-node node-id new-sub-id))))
+          ctx node-ids))
+
+(defn- populate-overrides [ctx node-id]
+  (let [basis (:basis ctx)
+        override-nodes (ig/overrides basis node-id)
+        overrides (map #(->> %
+                          (ig/node-by-id-at basis)
+                          gt/override-id)
+                       override-nodes)]
+    (reduce (fn [ctx oid]
+              (let [o (ig/override-by-id basis oid)
+                    traverse-fn (:traverse-fn o)
+                    node-ids (filter #(not= node-id %) (ig/pre-traverse basis [node-id] traverse-fn))]
+                (reduce populate-overrides
+                        (ctx-make-override-nodes ctx oid node-ids)
+                        override-nodes)))
+      ctx overrides)))
+
+(defmethod perform :transfer-overrides
+  [ctx {:keys [from-node-id to-node-id id-fn]}]
+  (let [basis (:basis ctx)
+        override-nodes (ig/overrides basis from-node-id)
+        retained (set override-nodes)
+        override-ids (into {} (map #(let [n (ig/node-by-id-at basis %)] [% (gt/override-id n)]) override-nodes))
+        overrides (into {} (map (fn [[_ oid]] [oid (ig/override-by-id basis oid)]) override-ids))
+        nid->or (comp overrides override-ids)
+        overrides-to-fix (filter (fn [[oid o]] (= (:root-id o) from-node-id)) overrides)
+        nodes-to-delete (filter (complement retained) (mapcat #(let [o (nid->or %)
+                                                                    traverse-fn (:traverse-fn o)
+                                                                    nodes (ig/pre-traverse basis [%] traverse-fn)]
+                                                                nodes)
+                                                             override-nodes))]
+    (-> ctx
+      (update :basis (fn [basis] (gt/override-node-clear basis from-node-id)))
+      (update :basis (fn [basis]
+                       (reduce (fn [basis [oid o]] (gt/replace-override basis oid (assoc o :root-id to-node-id)))
+                               basis overrides-to-fix)))
+      ((partial reduce ctx-delete-node) nodes-to-delete)
+      ((partial reduce (fn [ctx node-id]
+                         (let [basis (:basis ctx)
+                               n (ig/node-by-id-at basis node-id)
+                               [new-basis new-node] (gt/replace-node basis node-id (gt/set-original n to-node-id))]
+                           (-> ctx
+                             (assoc :basis new-basis)
+                             (activate-all-outputs node-id n)
+                             (ctx-override-node to-node-id node-id)))))
+        override-nodes)
+      (populate-overrides to-node-id))))
+
+(defn- invoke-setter
+  [ctx node-id node property old-value new-value]
+  (let [basis (:basis ctx)
+        value-type (some-> ((gt/property-types node basis) property)
+                     gt/property-value-type
+                     in/allow-nil)]
+   (if-let [validation-error (and value-type (s/check value-type new-value))]
+     (let [node-type (gt/node-type node basis)]
+       (in/warn-output-schema node-id node-type property new-value value-type validation-error)
+       (throw (ex-info "SCHEMA-VALIDATION"
+                   {:node-id          node-id
+                    :type             node-type
+                    :property         property
+                    :expected         value-type
+                    :actual           new-value
+                    :validation-error validation-error})))
+     (let [setter-fn (in/setter-for basis node property)]
+      (-> ctx
+        (update :basis ip/property-default-setter node-id property old-value new-value)
+        (cond->
+          (not= old-value new-value)
+          (->
+            (mark-output-activated node-id property)
+            (cond->
+              (not (nil? setter-fn))
+              (update :deferred-setters conj [setter-fn node-id old-value new-value])))))))))
+
+(defn apply-defaults [ctx node]
+  (let [node-id (gt/node-id node)]
+    (loop [ctx ctx
+           props (util/key-set (gt/property-types node (:basis ctx)))]
+      (if-let [prop (first props)]
+        (let [ctx (if-let [v (get node prop)]
+                    (invoke-setter ctx node-id node prop nil v)
+                    ctx)]
+          (recur ctx (rest props)))
+        ctx))))
+
+(defn- merge-nodes-affected [nodes-affected node-id all-outputs]
+  (merge-with set/union nodes-affected {node-id all-outputs}))
+
+(defn- ctx-add-node [ctx node]
+  (let [[basis-after full-node] (gt/add-node (:basis ctx) node)
         node-id                 (gt/node-id full-node)
-        all-outputs             (-> full-node gt/node-type gt/output-labels)]
-    (assoc ctx
-           :basis              (apply-defaults basis-after full-node)
-           :nodes-added        (conj nodes-added node-id)
-           :successors-changed (into successors-changed (map (fn [label] [node-id label]) all-outputs))
-           :nodes-affected     (merge-with set/union nodes-affected {node-id all-outputs}))))
+        all-outputs             (-> full-node (gt/node-type basis-after) gt/output-labels)]
+    (-> ctx
+      (assoc :basis basis-after)
+      (apply-defaults node)
+      (update :nodes-added conj node-id)
+      (update :successors-changed into (map vector (repeat node-id) all-outputs))
+      (update :nodes-affected merge-nodes-affected node-id all-outputs))))
 
+(defmethod perform :create-node [ctx {:keys [node]}]
+  (ctx-add-node ctx node))
 
-(defmethod perform :update-property
-  [{:keys [basis properties-modified] :as ctx}
-   {:keys [node-id property fn args]}]
-  (if-let [node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
-    (let [_                  (assert-has-property-label node property)
-          old-value          (ip/invoke-getter basis node property)
-          new-value          (apply fn old-value args)]
-      (if (= old-value new-value)
-        ctx
+(defmethod perform :update-property [ctx {:keys [node-id property fn args]}]
+  (let [basis (:basis ctx)]
+    (if-let [node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
+      (let [old-value (gt/get-property node basis property)
+            new-value (apply fn old-value args)]
+        (invoke-setter ctx node-id node property old-value new-value))
+      ctx)))
+
+(defn- ctx-set-property-to-nil [ctx node-id node property]
+  (let [basis (:basis ctx)
+        old-value (gt/get-property node basis property)]
+    (if-let [setter-fn (in/setter-for basis node property)]
+      (apply-tx ctx (setter-fn basis node-id old-value nil))
+      ctx)))
+
+(defmethod perform :clear-property [ctx {:keys [node-id property]}]
+  (let [basis (:basis ctx)]
+    (if-let [node (ig/node-by-id-at basis node-id)] ; nil if node was deleted in this transaction
+      (do
         (-> ctx
-            (mark-activated node-id property)
-            (assoc
-             :basis               (ip/invoke-setter basis node property new-value)
-             :properties-modified (update-in properties-modified [node-id] conj property)))))
+          (mark-output-activated node-id property)
+          (update :basis replace-node node-id (gt/clear-property node basis property))
+          (ctx-set-property-to-nil node-id node property)))
+      ctx)))
+
+(defn- ctx-disconnect-single [ctx target target-id target-label]
+  (if (= :one (gt/input-cardinality (gt/node-type target (:basis ctx)) target-label))
+    (disconnect-inputs ctx target-id target-label)
     ctx))
 
-(defmethod perform :connect
-  [{:keys [basis graphs-modified successors-changed] :as ctx}
-   {:keys [source-id source-label target-id target-label] :as tx-data}]
-  (if-let [source (ig/node-by-id-at basis source-id)] ; nil if source node was deleted in this transaction
-   (if-let [target (ig/node-by-id-at basis target-id)] ; nil if target node was deleted in this transaction
-     (-> ctx
-         (mark-activated target-id target-label)
-         (assoc
-          :basis              (gt/connect basis source-id source-label target-id target-label)
-          :successors-changed (conj successors-changed [source-id source-label])))
-     ctx)
-   ctx))
+(def ctx-connect)
 
-(defmethod perform :disconnect
-  [{:keys [basis graphs-modified successors-changed] :as ctx}
-   {:keys [source-id source-label target-id target-label]}]
-  (if-let [source (ig/node-by-id-at basis source-id)] ; nil if source node was deleted in this transaction
-    (if-let [target (ig/node-by-id-at basis target-id)] ; nil if target node was deleted in this transaction
+(defn- ctx-add-overrides [ctx source-id source source-label target target-label]
+  (let [basis (:basis ctx)
+        target-id (gt/node-id target)]
+    (if ((gt/cascade-deletes (gt/node-type target basis)) target-label)
+      (loop [overrides (ig/overrides basis target-id)
+             ctx ctx]
+        (if-let [or (first overrides)]
+          (let [basis (:basis ctx)
+                or-node (ig/node-by-id-at basis or)
+                override-id (gt/override-id or-node)
+                traverse-fn (ig/override-traverse-fn basis override-id)]
+            (if (traverse-fn basis target-id)
+              (populate-overrides ctx target-id)
+              ctx))
+          ctx))
+      ctx)))
+
+(defn- ctx-connect [ctx source-id source-label target-id target-label]
+  (if-let [source (ig/node-by-id-at (:basis ctx) source-id)] ; nil if source node was deleted in this transaction
+    (if-let [target (ig/node-by-id-at (:basis ctx) target-id)] ; nil if target node was deleted in this transaction
       (-> ctx
-          (mark-activated target-id target-label)
-          (assoc
-           :basis              (gt/disconnect basis source-id source-label target-id target-label)
-           :successors-changed (conj successors-changed [source-id source-label])))
+        ; If the input has :one cardinality, disconnect existing connections first
+        (ctx-disconnect-single target target-id target-label)
+        (mark-input-activated target-id target-label)
+        (update :basis gt/connect source-id source-label target-id target-label)
+        (update :successors-changed conj [source-id source-label])
+        (ctx-add-overrides source-id source source-label target target-label))
       ctx)
     ctx))
 
-(defmethod perform :update-graph
-  [{:keys [basis] :as ctx} {:keys [gid fn args]}]
+(defmethod perform :connect
+  [ctx {:keys [source-id source-label target-id target-label] :as tx-data}]
+  (ctx-connect ctx source-id source-label target-id target-label))
+
+(defn- ctx-remove-overrides [ctx source source-label target target-label]
+  (let [basis (:basis ctx)]
+    (if ((gt/cascade-deletes (gt/node-type target basis)) target-label)
+      (let [source-id (gt/node-id source)
+            target-id (gt/node-id target)
+            src-or-nodes (map (partial ig/node-by-id-at basis) (ig/overrides basis source-id))]
+        (loop [tgt-overrides (ig/overrides basis target-id)
+               ctx ctx]
+          (if-let [or (first tgt-overrides)]
+            (let [basis (:basis ctx)
+                  or-node (ig/node-by-id-at basis or)
+                  override-id (gt/override-id or-node)
+                  tgt-ors (filter #(= override-id (gt/override-id %)) src-or-nodes)
+                  traverse-fn (ig/override-traverse-fn basis override-id)
+                  to-delete (ig/pre-traverse-sources basis (mapv gt/node-id tgt-ors) traverse-fn)]
+              (recur (rest tgt-overrides)
+                     (reduce ctx-delete-node ctx to-delete)))
+            ctx)))
+      ctx)))
+
+(defn- ctx-disconnect [ctx source-id source-label target-id target-label]
+  (if-let [source (ig/node-by-id-at (:basis ctx) source-id)] ; nil if source node was deleted in this transaction
+    (if-let [target (ig/node-by-id-at (:basis ctx) target-id)] ; nil if target node was deleted in this transaction
+      (-> ctx
+        (mark-input-activated target-id target-label)
+        (update :basis gt/disconnect source-id source-label target-id target-label)
+        (update :successors-changed conj [source-id source-label])
+        (ctx-remove-overrides source source-label target target-label))
+      ctx)
+    ctx))
+
+(defmethod perform :disconnect
+  [ctx {:keys [source-id source-label target-id target-label]}]
+  (ctx-disconnect ctx source-id source-label target-id target-label))
+
+(defmethod perform :update-graph-value
+  [ctx {:keys [gid fn args]}]
   (-> ctx
-      (update-in [:basis :graphs gid] #(apply fn % args))
+      (update-in [:basis :graphs gid :graph-values] #(apply fn % args))
       (update :graphs-modified conj gid)))
 
 (defmethod perform :label
@@ -294,9 +526,9 @@
   (assoc ctx :sequence-label label))
 
 (defmethod perform :invalidate
-  [{:keys [basis nodes-affected] :as ctx} {:keys [node-id] :as tx-data}]
-  (if-let [node (ig/node-by-id-at basis node-id)]
-    (assoc ctx :nodes-affected (merge-with set/union nodes-affected {node-id (-> node gt/node-type gt/output-labels)}))
+  [ctx {:keys [node-id] :as tx-data}]
+  (if-let [node (ig/node-by-id-at (:basis ctx) node-id)]
+    (update ctx :nodes-affected merge-nodes-affected node-id (-> node (gt/node-type (:basis ctx)) gt/output-labels))
     ctx))
 
 (defn- apply-tx
@@ -307,28 +539,22 @@
       (if (sequential? action)
         (recur (apply-tx ctx action) (next actions))
         (recur
-         (update-in
-          (try (perform ctx action)
-               (catch Exception e
-                 (when *tx-debug*
-                   (println (txerrstr ctx "Transaction failed on " action)))
-                 (throw e)))
-          [:completed] conj action) (next actions)))
+          (update
+            (try (perform ctx action)
+              (catch Exception e
+                (when *tx-debug*
+                  (println (txerrstr ctx "Transaction failed on " action)))
+                (throw e)))
+            :completed conj action) (next actions)))
       ctx)))
-
-(defn- last-seen-node
-  [{:keys [basis nodes-deleted]} node-id]
-  (or
-    (ig/node-by-id-at basis node-id)
-    (get nodes-deleted node-id)))
 
 (defn- mark-outputs-modified
   [{:keys [nodes-affected] :as ctx}]
   (update-in ctx [:outputs-modified] #(set/union % (pairs nodes-affected))))
 
 (defn- mark-nodes-modified
-  [{:keys [nodes-affected properties-affected] :as ctx}]
-  (update ctx :nodes-modified #(set/union % (keys nodes-affected) (keys properties-affected))))
+  [{:keys [nodes-affected outputs-modified] :as ctx}]
+  (update ctx :nodes-modified #(set/union % (keys nodes-affected) (map first outputs-modified))))
 
 (defn map-vals-bargs
   [m f]
@@ -341,7 +567,7 @@
     label
     (update-in [:basis :graphs] map-vals-bargs #(assoc % :tx-label label))))
 
-(def tx-report-keys [:basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :properties-modified :label :sequence-label])
+(def tx-report-keys [:basis :graphs-modified :nodes-added :nodes-modified :nodes-deleted :outputs-modified :label :sequence-label])
 
 (defn- finalize-update
   "Makes the transacted graph the new value of the world-state graph."
@@ -351,30 +577,23 @@
              :graphs-modified (into graphs-modified (map gt/node-id->graph-id nodes-modified)))))
 
 (defn new-transaction-context
-  [basis]
+  [basis node-id-generators]
   {:basis               basis
-   :original-basis      basis
    :nodes-affected      {}
    :nodes-added         []
    :nodes-modified      #{}
    :nodes-deleted       {}
+   :outputs-modified    #{}
    :graphs-modified     #{}
-   :properties-modified {}
    :successors-changed  #{}
+   :node-id-generators node-id-generators
    :completed           []
-   :tx-id               (new-txid)})
-
-(defn update-successors*
-  [basis changes]
-  (if-let [change (first changes)]
-    (let [new-successors (ig/index-successors basis change)
-          gid            (gt/node-id->graph-id (first change))]
-      (recur (assoc-in basis [:graphs gid :successors change] new-successors) (next changes)))
-    basis))
+   :txid                (new-txid)
+   :deferred-setters    []})
 
 (defn update-successors
   [{:keys [successors-changed] :as ctx}]
-  (update ctx :basis update-successors* successors-changed))
+  (update ctx :basis ig/update-successors successors-changed))
 
 (defn- trace-dependencies
   [ctx]
@@ -383,15 +602,31 @@
   ;; reachable from the original collection.
   (update ctx :outputs-modified #(gt/dependencies (:basis ctx) %)))
 
+(defn apply-setters [ctx]
+  (let [setters (:deferred-setters ctx)
+        ctx (assoc ctx :deferred-setters [])]
+    (if (empty? setters)
+      ctx
+      (-> (reduce (fn [ctx [f node-id old-value new-value]]
+                    (if (ig/node-by-id-at (:basis ctx) node-id)
+                      (apply-tx ctx (f (:basis ctx) node-id old-value new-value))
+                      ctx)) ctx setters)
+        recur))))
+
 (defn transact*
   [ctx actions]
   (when *tx-debug*
-    (println (txerrstr ctx "actions" actions)))
-  (-> ctx
+    (println (txerrstr ctx "actions" (seq actions))))
+  (with-bindings {#'*in-transaction?* true}
+    (-> ctx
       (apply-tx actions)
+      apply-setters
       mark-outputs-modified
       mark-nodes-modified
       update-successors
       trace-dependencies
       apply-tx-label
-      finalize-update))
+      finalize-update)))
+
+(defn in-transaction? []
+  *in-transaction?*)

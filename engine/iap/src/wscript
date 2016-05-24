@@ -16,6 +16,7 @@ def build(bld):
                      target = 'iap_doc.json',
                      rule = '${SCRIPT_DOC} ${SRC} -t json ${TGT}')
 
+    source += ['iap_common.cpp']
     if re.match('arm.*?darwin', bld.env.PLATFORM):
         source += ['iap_ios.mm']
     elif re.match('.*?android', bld.env.PLATFORM):
@@ -23,6 +24,7 @@ def build(bld):
 
         classpath = ['%s/ext/share/java/android.jar' % bld.env.DYNAMO_HOME,
                      '%s/ext/share/java/android-support-v4.jar' % bld.env.DYNAMO_HOME,
+                     '%s/ext/share/java/in-app-purchasing-2.0.61.jar' % bld.env.DYNAMO_HOME, # amazon
                      '%s/share/java/gamesys_android.jar' % bld.env.DYNAMO_HOME]
         classpath = os.pathsep.join(classpath)
 
@@ -37,7 +39,9 @@ def build(bld):
                          destfile='iap_android.jar')
 
         bld.install_files('${PREFIX}/share/java', 'iap_android.jar')
-
+    elif 'js-web' in bld.env.PLATFORM:
+        bld.install_files('${PREFIX}/lib/js-web/js', '../src/js/library_facebook_iap.js', postpone = False)
+        source += ['iap_emscripten.cpp']
     else:
         source += ['iap_null.cpp']
 

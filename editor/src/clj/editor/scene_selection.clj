@@ -1,7 +1,7 @@
 (ns editor.scene-selection
   (:require [clojure.set :as set]
             [dynamo.graph :as g]
-            [dynamo.util :as util]
+            [editor.system :as system]
             [editor.background :as background]
             [editor.colors :as colors]
             [editor.camera :as c]
@@ -11,13 +11,10 @@
             [editor.grid :as grid]
             [editor.input :as i]
             [editor.math :as math]
-            [editor.project :as project]
-            [editor.scene-tools :as scene-tools]
             [editor.types :as types]
             [editor.workspace :as workspace]
-            [internal.render.pass :as pass]
-            [service.log :as log]
-            [editor.scene :as scene])
+            [editor.gl.pass :as pass]
+            [service.log :as log])
   (:import [com.defold.editor Start UIUtil]
            [com.jogamp.opengl.util GLPixelStorageModes]
            [com.jogamp.opengl.util.awt TextRenderer]
@@ -84,12 +81,12 @@
                                   (let [selection-set (set selection)
                                         prev-selection-set (g/node-value controller :prev-selection-set)]
                                     (seq (set/union (set/difference prev-selection-set selection-set) (set/difference selection-set prev-selection-set))))))
-        selection (or (not-empty (sel-filter-fn (map :node-id selection))) (filter #(not (nil? %)) [(:node-id (g/node-value controller :scene))]))]
+        selection (or (not-empty (sel-filter-fn (map :node-id selection))) (filter #(not (nil? %)) [(g/node-value controller :root-id)]))]
     (select-fn selection op-seq)))
 
 (def mac-toggle-modifiers #{:shift :meta})
 (def other-toggle-modifiers #{:control})
-(def toggle-modifiers (if util/mac? mac-toggle-modifiers other-toggle-modifiers))
+(def toggle-modifiers (if system/mac? mac-toggle-modifiers other-toggle-modifiers))
 
 (defn handle-selection-input [self action user-data]
   (let [start      (g/node-value self :start)
@@ -127,6 +124,19 @@
                      action)
       action)))
 
+(def ^Integer min-pick-size 10)
+
+(defn- imin [^Integer v1 ^Integer v2] (Math/min v1 v2))
+(defn- imax [^Integer v1 ^Integer v2] (Math/max v1 v2))
+
+(defn calc-picking-rect [start current]
+  (let [ps [start current]
+        min-p (Point2i. (reduce imin (map first ps)) (reduce imin (map second ps)))
+        max-p (Point2i. (reduce imax (map first ps)) (reduce imax (map second ps)))
+        dims (doto (Point2i. max-p) (.sub min-p))
+        center (doto (Point2i. min-p) (.add (Point2i. (/ (.x dims) 2) (/ (.y dims) 2))))]
+    (Rect. nil (.x center) (.y center) (Math/max (.x dims) min-pick-size) (Math/max (.y dims) min-pick-size))))
+
 (g/defnode SelectionController
   (property select-fn Runnable)
   (property start types/Vec3)
@@ -137,23 +147,10 @@
 
   (input selection g/Any)
   (input picking-selection g/Any)
-  (input scene g/Any)
+  (input root-id g/NodeID)
 
-  (output picking-rect Rect :cached (g/fnk [start current] (scene/calc-picking-rect start current)))
+  (output picking-rect Rect :cached (g/fnk [start current] (calc-picking-rect start current)))
   (output renderable pass/RenderData :cached (g/fnk [start current] {pass/overlay [{:world-transform (Matrix4d. geom/Identity4d)
                                                                                     :render-fn render-selection-box
                                                                                     :user-data {:start start :current current}}]}))
   (output input-handler Runnable :cached (g/always handle-selection-input)))
-
-(scene/defcontroller :selection
-  (make [project resource-node view renderer]
-        (let [view-graph  (g/node-id->graph-id view)]
-          (g/make-nodes view-graph
-                  [selection  [SelectionController :select-fn (fn [selection op-seq] (project/select! project selection op-seq))]]
-
-                  (g/connect resource-node        :scene                     selection        :scene)
-                  (g/connect selection            :renderable                renderer         :tool-renderables)
-                  (g/connect selection            :input-handler             view             :input-handlers)
-                  (g/connect selection            :picking-rect              renderer         :picking-rect)
-                  (g/connect renderer             :picking-selection         selection        :picking-selection)
-                  (g/connect view                 :selection                 selection        :selection)))))

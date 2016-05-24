@@ -223,7 +223,7 @@ int Push_Schedule(lua_State* L)
     }
 
     sn.id        = g_Push.m_ScheduleLastID++;
-    sn.timestamp = dmTime::GetTime() + seconds * 1000000; // in microseconds
+    sn.timestamp = dmTime::GetTime() + ((uint64_t)seconds) * 1000000L; // in microseconds
     sn.title     = strdup(title);
     sn.message   = strdup(message);
     sn.payload   = strdup(payload);
@@ -738,4 +738,4 @@ dmExtension::Result FinalizePush(dmExtension::Params* params)
     return dmExtension::RESULT_OK;
 }
 
-DM_DECLARE_EXTENSION(PushExt, "Push", AppInitializePush, AppFinalizePush, InitializePush, 0, FinalizePush)
+DM_DECLARE_EXTENSION(PushExt, "Push", AppInitializePush, AppFinalizePush, InitializePush, 0, 0, FinalizePush)

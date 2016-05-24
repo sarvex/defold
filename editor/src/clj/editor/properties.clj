@@ -1,14 +1,18 @@
 (ns editor.properties
   (:require [clojure.set :as set]
+            [clojure.string :as str]
             [cognitect.transit :as transit]
             [camel-snake-kebab :as camel]
             [dynamo.graph :as g]
             [editor.types :as t]
             [editor.math :as math]
             [editor.protobuf :as protobuf]
+            [editor.validation :as validation]
             [editor.core :as core])
   (:import [java.util StringTokenizer]
            [javax.vecmath Quat4d]))
+
+(set! *warn-on-reflection* true)
 
 (defprotocol Sampler
   (sample [this]))
@@ -58,7 +62,7 @@
                              :property-type-vector3 t/Vec3
                              :property-type-vector4 t/Vec4
                              :property-type-quat t/Vec3
-                             :property-type-bool g/Bool})
+                             :property-type-boolean g/Bool})
 
 (defn- q-round [v]
   (let [f 10e6]
@@ -189,7 +193,7 @@
                                                  new-keys (into {} (map #(do [% (conj k %)]) (keys (:properties properties))))]
                                                {:properties (into {} (map (fn [[o-k o-v]]
                                                                       (let [prop (-> o-v
-                                                                                   (set/rename-keys {:value :default-value})
+                                                                                   (set/rename-keys {:value :original-value})
                                                                                    (assoc :node-id (:node-id v)
                                                                                           :value (get (:value v) o-k)))]
                                                                         [(conj k o-k) prop]))
@@ -239,19 +243,27 @@
                                   (let [prop {:key k
                                               :node-ids (mapv :node-id v)
                                               :values (mapv :value v)
+                                              :validation-problems (mapv :validation-problems v)
                                               :edit-type (property-edit-type (first v))
-                                              :label (:label (first v))}
-                                        default-vals (mapv :default-value (filter #(contains? % :default-value) v))
-                                        prop (if (empty? default-vals) prop (assoc prop :default-values default-vals))]
+                                              :label (:label (first v))
+                                              :read-only? (reduce (fn [res read-only] (or res read-only)) false (map #(get % :read-only? false) v))}
+                                        default-vals (mapv :original-value (filter #(contains? % :original-value) v))
+                                        prop (if (empty? default-vals) prop (assoc prop :original-values default-vals))]
                                     [k prop]))
                                 common-props))]
     {:properties coalesced
      :display-order (prune-display-order (first display-orders) (set (keys coalesced)))}))
 
 (defn values [property]
-  (if (contains? property :default-values)
-    (mapv (fn [v d-v] (if (nil? v) d-v v)) (:values property) (:default-values property))
-    (:values property)))
+  (mapv (fn [value default-value validation-problem]
+          (if-not (nil? validation-problem)
+            (:value validation-problem)
+            (if-not (nil? value)
+              value
+              default-value)))
+        (:values property)
+        (:original-values property (repeat nil))
+        (:validation-problems property)))
 
 (defn- set-values [property values]
   (let [key (:key property)]
@@ -270,11 +282,19 @@
          camel/->Camel_Snake_Case_String
          (clojure.string/replace "_" " ")))))
 
-(defn set-values! [property values]
-  (g/transact
-    (concat
-      (g/operation-label (str "Set " (label property)))
-      (set-values property values))))
+(defn read-only? [property]
+  (:read-only? property))
+
+(defn set-values!
+  ([property values]
+    (set-values! property values (gensym)))
+  ([property values op-seq]
+    (when (not (read-only? property))
+      (g/transact
+        (concat
+          (g/operation-label (str "Set " (label property)))
+          (g/operation-sequence op-seq)
+          (set-values property values))))))
 
 (defn- dissoc-in
   "Dissociates an entry from a nested associative structure returning a new
@@ -301,13 +321,27 @@
       v0)))
 
 (defn overridden? [property]
-  (and (contains? property :default-values) (not-every? nil? (:values property))))
+  (and (contains? property :original-values) (not-every? nil? (:values property))))
+
+(defn validation-message [property]
+  (when-let [err (validation/error-aggregate (:validation-problems property))]
+    {:severity (:severity err) :message (validation/error-message err)}))
 
 (defn clear-override! [property]
   (when (overridden? property)
     (g/transact
       (concat
-        (g/operation-label (str "Set " (label property)))
+        (g/operation-label (str "Clear " (label property)))
         (let [key (:key property)]
           (for [node-id (:node-ids property)]
-            (g/update-property node-id (first key) dissoc-in (rest key))))))))
+            (g/clear-property node-id key)))))))
+
+(defn ->choicebox [vals]
+  {:type :choicebox
+   :options (zipmap vals vals)})
+
+(defn ->pb-choicebox [cls]
+  (let [options (protobuf/enum-values cls)]
+    {:type :choicebox
+     :options (zipmap (map first options)
+                      (map (comp :display-name second) options))}))

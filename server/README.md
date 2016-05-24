@@ -1,5 +1,8 @@
 # Defold Server
 
+## persistence.xml
+It's possible to override persistence.xml properties with Java system properties. See EntityManagerFactoryProvider and Server
+
 
 ## Eclipse/Gradle
 
@@ -25,6 +28,9 @@ Run with
 
 
 ## Misc
+
+A local directory used to store cached archives must be configured by providing the archive_cache_root configuration setting
+The highest allowed archive cache size is configured by the archive_cache_max_size configuration setting (in Mb)
 
 If you get an error similar to this or why we can't user über jar
 

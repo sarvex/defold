@@ -5,7 +5,7 @@
   (:import [com.defold.editor.test TestDdf TestDdf$Msg TestDdf$SubMsg TestDdf$Transform TestDdf$DefaultValue
             TestDdf$OptionalNoDefaultValue TestDdf$EmptyMsg TestDdf$Uint64Msg TestDdf$RepeatedUints
             TestDdf$NestedMessages TestDdf$NestedMessages$NestedEnum$Enum TestDdf$BooleanMsg TestDdf$BytesMsg
-            TestAtlasProto$AtlasAnimation TestAtlasProto$AtlasImage]
+            TestAtlasProto$AtlasAnimation TestAtlasProto$AtlasImage TestDdf$JavaCasingMsg]
            [javax.vecmath Point3d Vector3d]
            [com.google.protobuf ByteString]))
 
@@ -39,12 +39,18 @@
            :matrix4-value (into [] (map double (range 16)))
            :sub-msg-value {:uint-value 1}
            :enum-value :enum-val0
-           :bool-value true}
+           :bool-value false}
         new-m (round-trip TestDdf$Msg m)]
     (is (= 1 (:uint-value new-m)))
     (is (= 2 (:int-value new-m)))
     (is (= "three" (:string-value new-m)))
+    (is (identical? java.lang.Boolean/FALSE (:bool-value new-m)))
     (is (= m new-m))))
+
+(deftest java-casing
+  (let [m {:java-casing "test"}
+        new-m (round-trip TestDdf$JavaCasingMsg m)]
+    (is (= "test" (:java-casing new-m)))))
 
 (deftest default-vals
   (testing "Defaults readable"
@@ -107,8 +113,8 @@
     (is (= m new-m))))
 
 (deftest enum-values
-  (let [expected {:enum-val0 {:display-name "Enum Val0"}
-                  :enum-val1 {:display-name "Enum Val1"}}
+  (let [expected (list [:enum-val0 {:display-name "Enum Val0"}]
+                       [:enum-val1 {:display-name "Enum Val1"}])
         values (protobuf/enum-values TestDdf$NestedMessages$NestedEnum$Enum)]
     (is (= values expected))))
 
@@ -121,3 +127,6 @@
   (let [m {:value (ByteString/copyFromUtf8 "test-string")}
         new-m (round-trip TestDdf$BytesMsg m)]
     (is (= m new-m))))
+
+(deftest field-order
+  (is (= :uint-value ((protobuf/fields-by-indices TestDdf$Msg) 1))))

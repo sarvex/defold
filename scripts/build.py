@@ -15,25 +15,25 @@ Build utility for installing external packages, building engine, editor and cr
 Run build.py --help for help
 """
 
-PACKAGES_ALL="protobuf-2.3.0 waf-1.5.9 gtest-1.5.0 vectormathlibrary-r1649 junit-4.6 protobuf-java-2.3.0 openal-1.1 maven-3.0.1 ant-1.9.3 vecmath vpx-v0.9.7-p1 asciidoc-8.6.7 facebook-4.4.0 luajit-2.0.3 tremolo-0.0.8 PVRTexLib-4.14.6".split()
-PACKAGES_HOST="protobuf-2.3.0 gtest-1.5.0 glut-3.7.6 cg-3.1 openal-1.1 vpx-v0.9.7-p1 PVRTexLib-4.14.6 luajit-2.0.3 tremolo-0.0.8".split()
+PACKAGES_ALL="protobuf-2.3.0 waf-1.5.9 gtest-1.5.0 vectormathlibrary-r1649 junit-4.6 protobuf-java-2.3.0 openal-1.1 maven-3.0.1 ant-1.9.3 vecmath vpx-v0.9.7-p1 asciidoc-8.6.7 facebook-4.4.0 luajit-2.0.3 tremolo-0.0.8 PVRTexLib-4.14.6 webp-0.5.0".split()
+PACKAGES_HOST="protobuf-2.3.0 gtest-1.5.0 glut-3.7.6 cg-3.1 openal-1.1 vpx-v0.9.7-p1 PVRTexLib-4.14.6 webp-0.5.0 luajit-2.0.3 tremolo-0.0.8".split()
 PACKAGES_EGGS="protobuf-2.3.0-py2.5.egg pyglet-1.1.3-py2.5.egg gdata-2.0.6-py2.6.egg Jinja2-2.6-py2.6.egg".split()
 PACKAGES_IOS="protobuf-2.3.0 gtest-1.5.0 facebook-4.4.0 luajit-2.0.3 tremolo-0.0.8".split()
 PACKAGES_IOS_64="protobuf-2.3.0 gtest-1.5.0 facebook-4.4.0 tremolo-0.0.8".split()
-PACKAGES_DARWIN_64="protobuf-2.3.0 gtest-1.5.0 PVRTexLib-4.14.6 luajit-2.0.3 vpx-v0.9.7-p1 tremolo-0.0.8".split()
-PACKAGES_WIN32="PVRTexLib-4.5".split()
-PACKAGES_LINUX="PVRTexLib-4.5".split()
-PACKAGES_ANDROID="protobuf-2.3.0 gtest-1.5.0 facebook-4.4.1 android-support-v4 android-4.2.2 google-play-services-4.0.30 luajit-2.0.3 tremolo-0.0.8".split()
+PACKAGES_DARWIN_64="protobuf-2.3.0 gtest-1.5.0 PVRTexLib-4.14.6 webp-0.5.0 luajit-2.0.3 vpx-v0.9.7-p1 tremolo-0.0.8".split()
+PACKAGES_WIN32="PVRTexLib-4.5 webp-0.5.0 openal-1.1".split()
+PACKAGES_LINUX="PVRTexLib-4.5 webp-0.5.0".split()
+PACKAGES_ANDROID="protobuf-2.3.0 gtest-1.5.0 facebook-4.4.1 android-support-v4 android-23 google-play-services-4.0.30 luajit-2.0.3 tremolo-0.0.8 amazon-iap-2.0.16".split()
 PACKAGES_EMSCRIPTEN="gtest-1.5.0 protobuf-2.3.0".split()
 PACKAGES_EMSCRIPTEN_SDK="emsdk-portable.tar.gz".split()
 DEFOLD_PACKAGES_URL = "https://s3-eu-west-1.amazonaws.com/defold-packages"
 NODE_MODULE_XHR2_URL = "%s/xhr2-0.1.0-common.tar.gz" % (DEFOLD_PACKAGES_URL)
 NODE_MODULE_LIB_DIR = os.path.join("ext", "lib", "node_modules")
-EMSCRIPTEN_VERSION_STR = "1.22.0"
+EMSCRIPTEN_VERSION_STR = "1.35.23"
 # The linux tool does not yet support git tags, so we have to treat it as a special case for the moment.
 EMSCRIPTEN_VERSION_STR_LINUX = "master"
 EMSCRIPTEN_SDK_OSX = "sdk-{0}-64bit".format(EMSCRIPTEN_VERSION_STR)
-EMSCRIPTEN_SDK_LINUX = "sdk-{0}-32bit".format(EMSCRIPTEN_VERSION_STR_LINUX)
+EMSCRIPTEN_SDK_LINUX = "sdk-{0}-64bit".format(EMSCRIPTEN_VERSION_STR_LINUX)
 EMSCRIPTEN_DIR = join('bin', 'emsdk_portable', 'emscripten', EMSCRIPTEN_VERSION_STR)
 EMSCRIPTEN_DIR_LINUX = join('bin', 'emsdk_portable', 'emscripten', EMSCRIPTEN_VERSION_STR_LINUX)
 PACKAGES_FLASH="gtest-1.5.0".split()
@@ -289,7 +289,7 @@ class Configuration(object):
 
     def _form_ems_path(self):
         path = ''
-        if self.host == 'linux':
+        if 'linux' in self.host:
             path = join(self.ext, EMSCRIPTEN_DIR_LINUX)
         else:
             path = join(self.ext, EMSCRIPTEN_DIR)
@@ -304,7 +304,7 @@ class Configuration(object):
 
     def get_ems_sdk_name(self):
         sdk = EMSCRIPTEN_SDK_OSX
-        if 'linux' == self.host:
+        if 'linux' in self.host:
             sdk = EMSCRIPTEN_SDK_LINUX
         return sdk;
 
@@ -312,7 +312,14 @@ class Configuration(object):
         return join(self.ext, 'bin', 'emsdk_portable', 'emsdk')
 
     def activate_ems(self):
+        # Compile a file warm up the emscripten caches (libc etc)
+        c_file = tempfile.mktemp(suffix='.c')
+        exe_file = tempfile.mktemp(suffix='.js')
+        with open(c_file, 'w') as f:
+            f.write('int main() { return 0; }')
+
         self.exec_env_command([self.get_ems_exe_path(), 'activate', self.get_ems_sdk_name()])
+        self.exec_env_command(['%s/emcc' % self._form_ems_path(), c_file, '-o%s' % exe_file])
 
     def check_ems(self):
         home = os.path.expanduser('~')
@@ -379,12 +386,18 @@ class Configuration(object):
         sha1 = self._git_sha1()
         full_archive_path = join(self.archive_path, sha1, 'engine', self.target_platform).replace('\\', '/')
         share_archive_path = join(self.archive_path, sha1, 'engine', 'share').replace('\\', '/')
+        java_archive_path = join(self.archive_path, sha1, 'engine', 'share', 'java').replace('\\', '/')
         dynamo_home = self.dynamo_home
 
         bin_dir = self.build_utility.get_binary_path()
         lib_dir = self.target_platform
 
-        for n in ['dmengine', 'dmengine_release', 'dmengine_headless', 'launcher']:
+        # upload editor 2.0 launcher
+        if self.target_platform in ['linux', 'x86_64-linux', 'darwin', 'x86_64-darwin', 'win32']:
+            launcherbin = join(bin_dir, "launcher" + exe_ext)
+            self.upload_file(launcherbin, '%s/%s%s' % (full_archive_path, "launcher", exe_ext))
+
+        for n in ['dmengine', 'dmengine_release', 'dmengine_headless']:
             engine = join(bin_dir, exe_prefix + n + exe_ext)
             self.upload_file(engine, '%s/%s%s%s' % (full_archive_path, exe_prefix, n, exe_ext))
             if self.target_platform == 'js-web':
@@ -400,6 +413,8 @@ class Configuration(object):
 
             doc = self._ziptree(join(dynamo_home, 'share', 'doc'), directory = join(dynamo_home, 'share'))
             self.upload_file(doc, '%s/ref-doc.zip' % (share_archive_path))
+
+            self.upload_file(join(dynamo_home, 'share', 'java', 'dlib.jar'), '%s/dlib.jar' % (java_archive_path))
 
         if 'android' in self.target_platform:
             files = [
@@ -429,7 +444,7 @@ class Configuration(object):
 
         eclipse = '--eclipse' if self.eclipse else ''
 
-        libs="dlib ddf particle glfw graphics lua hid input physics resource extension script tracking render gameobject gui sound gamesys tools record iap push adtruth facebook crash engine".split()
+        libs="dlib ddf particle glfw graphics lua hid input physics resource extension script tracking render gameobject gui sound gamesys tools record iap push iac adtruth facebook crash engine".split()
 
         # Base platforms is the set of platforms to build the base libs for
         # The base libs are the libs needed to build bob, i.e. contains compiler code
@@ -555,8 +570,8 @@ class Configuration(object):
 
         p2 = """
 instructions.configure=\
-  addRepository(type:0,location:http${#58}//d.defold.com.s3-website-eu-west-1.amazonaws.com/%(channel)s/update/);\
-  addRepository(type:1,location:http${#58}//d.defold.com.s3-website-eu-west-1.amazonaws.com/%(channel)s/update/);
+  addRepository(type:0,location:http${#58}//d.defold.com/%(channel)s/update/);\
+  addRepository(type:1,location:http${#58}//d.defold.com/%(channel)s/update/);
 """
 
         with open('com.dynamo.cr/com.dynamo.cr.editor-product/cr-generated.p2.inf', 'w') as f:
@@ -566,7 +581,7 @@ instructions.configure=\
 
     def _archive_cr(self, product, build_dir):
         sha1 = self._git_sha1()
-        full_archive_path = join(self.archive_path, sha1, product).replace('\\', '/') + '/'
+        full_archive_path = join(self.archive_path, sha1, self.channel, product).replace('\\', '/') + '/'
         host, path = full_archive_path.split(':', 1)
         for p in glob(join(build_dir, 'target/products/*.zip')):
             self.upload_file(p, full_archive_path)
@@ -595,13 +610,34 @@ instructions.configure=\
         cwd = join(self.defold_root, 'com.dynamo.cr', 'com.dynamo.cr.parent')
         self.exec_env_command([join(self.dynamo_home, 'ext/share/maven/bin/mvn'), 'clean', 'package', '-P', product, '-Declipse-version=%s' % self.eclipse_version], cwd = cwd)
 
+    def check_editor2_reflections(self):
+        cwd = join(self.defold_root, 'editor')
+        reflection_prefix = 'Reflection warning, ' # final space important
+        included_reflections = ['editor/'] # [] = include all
+        ignored_reflections = []
+
+        # lein check puts reflection warnings on stderr, redirect to stdout to capture all output
+        output = self.exec_env_command(['./scripts/lein', 'check'], cwd=cwd, stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+        lines = output.splitlines()
+        reflection_lines = (line for line in lines if re.match(reflection_prefix, line))
+        reflections = (re.match('(' + reflection_prefix + ')(.*)', line).group(2) for line in reflection_lines)
+        filtered_reflections = reflections if not included_reflections else (line for line in reflections if any((re.match(include, line) for include in included_reflections)))
+        failures = list(line for line in filtered_reflections if not any((re.match(ignored, line) for ignored in ignored_reflections)))
+
+        if failures:
+            for failure in failures:
+                print(failure)
+            exit(1)
+
     def build_editor2(self):
         cwd = join(self.defold_root, 'editor')
         self.exec_env_command(['./scripts/install_jars'], cwd = cwd)
         self.exec_env_command(['./scripts/lein', 'clean'], cwd = cwd)
         self.exec_env_command(['./scripts/lein', 'protobuf'], cwd = cwd)
         self.exec_env_command(['./scripts/lein', 'builtins'], cwd = cwd)
+        self.check_editor2_reflections()
         self.exec_env_command(['./scripts/lein', 'test'], cwd = cwd)
+
         # TODO: Version
         self.exec_env_command(['./scripts/bundle.py', '--platform=x86_64-darwin', '--platform=x86-linux', '--platform=x86-win32', '--version=2.0.0'], cwd = cwd)
 
@@ -797,7 +833,7 @@ instructions.configure=\
     type='org.eclipse.equinox.internal.p2.artifact.repository.CompositeArtifactRepository'
     version='1.0.0'>
   <children size='1'>
-      <child location='http://%(host)s/archive/%(sha1)s/editor/repository'/>
+      <child location='http://%(host)s/archive/%(sha1)s/%(channel)s/editor/repository'/>
   </children>
 </repository>"""
 
@@ -807,7 +843,7 @@ instructions.configure=\
     type='org.eclipse.equinox.internal.p2.metadata.repository.CompositeMetadataRepository'
     version='1.0.0'>
   <children size='1'>
-      <child location='http://%(host)s/archive/%(sha1)s/editor/repository'/>
+      <child location='http://%(host)s/archive/%(sha1)s/%(channel)s/editor/repository'/>
   </children>
 </repository>
 """
@@ -821,7 +857,7 @@ instructions.configure=\
 
         u = urlparse.urlparse(self.archive_path)
         bucket = self._get_s3_bucket(u.hostname)
-        host = bucket.get_website_endpoint()
+        host = 'd.defold.com'
 
         model = {'releases': [],
                  'has_releases': False}
@@ -833,13 +869,12 @@ instructions.configure=\
 
         # NOTE
         # - The stable channel is based on the latest tag
-        # - The beta channel is based on the latest commit in the dev-branch, i.e. origin/dev
+        # - The beta and alpha channels are based on the latest
+        #   commit in their branches, i.e. origin/dev for alpha
         if self.channel == 'stable':
             release_sha1 = model['releases'][0]['sha1']
-        elif self.channel == 'beta':
-            release_sha1 = self._git_sha1()
         else:
-            raise Exception('Unknown channel %s' % self.channel)
+            release_sha1 = self._git_sha1()
 
         if sys.stdin.isatty():
             sys.stdout.write('Release %s with SHA1 %s to channel %s? [y/n]: ' % (self.version, release_sha1, self.channel))
@@ -849,7 +884,8 @@ instructions.configure=\
 
         model['editor'] = {'stable': [ dict(name='Mac OSX', url='/%s/Defold-macosx.cocoa.x86_64.zip' % self.channel),
                                        dict(name='Windows', url='/%s/Defold-win32.win32.x86.zip' % self.channel),
-                                       dict(name='Linux', url='/%s/Defold-linux.gtk.x86.zip' % self.channel)] }
+                                       dict(name='Linux (64-bit)', url='/%s/Defold-linux.gtk.x86_64.zip' % self.channel),
+                                       dict(name='Linux (32-bit)', url='/%s/Defold-linux.gtk.x86.zip' % self.channel)] }
 
         # NOTE: We upload index.html to /CHANNEL/index.html
         # The root-index, /index.html, redirects to /stable/index.html
@@ -866,9 +902,9 @@ instructions.configure=\
                                                  'sha1' : release_sha1}))
 
         # Create redirection keys for editor
-        for name in ['Defold-macosx.cocoa.x86_64.zip', 'Defold-win32.win32.x86.zip', 'Defold-linux.gtk.x86.zip']:
+        for name in ['Defold-macosx.cocoa.x86_64.zip', 'Defold-win32.win32.x86.zip', 'Defold-linux.gtk.x86.zip', 'Defold-linux.gtk.x86_64.zip']:
             key_name = '%s/%s' % (self.channel, name)
-            redirect = '/archive/%s/editor/%s' % (release_sha1, name)
+            redirect = '/archive/%s/%s/editor/%s' % (release_sha1, self.channel, name)
             self._log('Creating link from %s -> %s' % (key_name, redirect))
             key = bucket.new_key(key_name)
             key.set_redirect(redirect)
@@ -879,7 +915,8 @@ instructions.configure=\
             key = bucket.new_key(full_name)
             key.content_type = 'text/xml'
             key.set_contents_from_string(template % {'host': host,
-                                                     'sha1': release_sha1})
+                                                     'sha1': release_sha1,
+                                                     'channel': self.channel})
 
     def _get_s3_archive_prefix(self):
         u = urlparse.urlparse(self.archive_path)
@@ -908,7 +945,12 @@ instructions.configure=\
         prefix = self._get_s3_archive_prefix()
         for key in bucket.list(prefix = prefix):
             rel = os.path.relpath(key.name, prefix)
-            if rel.split('/')[0] != 'editor':
+
+            # Download everything, except the editors.
+            # We check if the relative path includes '/editor/'
+            # since the path looks like this:
+            # archive_path/{channel}/editor/...
+            if '/editor/' not in rel:
                 p = os.path.join(local_dir, sha1, rel)
                 self._mkdirs(os.path.dirname(p))
                 self._log('s3://%s/%s -> %s' % (bucket_name, key.name, p))
@@ -935,12 +977,13 @@ instructions.configure=\
             sys.exit(5)
 
         from boto.s3.connection import S3Connection
+        from boto.s3.connection import OrdinaryCallingFormat
         from boto.s3.key import Key
 
         # NOTE: We hard-code host (region) here and it should not be required.
         # but we had problems with certain buckets with period characters in the name.
         # Probably related to the following issue https://github.com/boto/boto/issues/621
-        conn = S3Connection(key, secret, host='s3-eu-west-1.amazonaws.com')
+        conn = S3Connection(key, secret, host='s3-eu-west-1.amazonaws.com', calling_format=OrdinaryCallingFormat())
         bucket = conn.get_bucket(bucket_name)
         self.s3buckets[bucket_name] = bucket
         return bucket
@@ -1043,11 +1086,13 @@ instructions.configure=\
 
     def exec_env_command(self, arg_list, **kwargs):
         env = self._form_env()
-
         process = subprocess.Popen(arg_list, env = env, **kwargs)
-        process.wait()
+        output = process.communicate()[0]
+
         if process.returncode != 0:
+            self._log(output)
             sys.exit(process.returncode)
+        return output
 
 if __name__ == '__main__':
     boto_path = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../packages/boto-2.28.0-py2.7.egg'))

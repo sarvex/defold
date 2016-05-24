@@ -8,10 +8,10 @@
             [editor.gl :as gl]
             [editor.gl.shader :as shader]
             [editor.gl.vertex :as vtx]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.scene :as scene]
             [editor.workspace :as workspace]
-            [internal.render.pass :as pass])
+            [editor.gl.pass :as pass])
   (:import [com.dynamo.graphics.proto Graphics$Cubemap Graphics$TextureImage Graphics$TextureImage$Image Graphics$TextureImage$Type]
            [com.dynamo.mesh.proto Mesh$MeshDesc]
            [com.jogamp.opengl.util.awt TextRenderer]
@@ -21,6 +21,8 @@
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
            [javax.media.opengl.glu GLU]
            [javax.vecmath Matrix4d Point3d]))
+
+(set! *warn-on-reflection* true)
 
 (def mesh-icon "icons/32/Icons_27-AT-Mesh.png")
 
@@ -52,7 +54,7 @@
 
 (defn- source->floats [source]
   (let [floats (first (-> source (element :float_array) (:content)))]
-    (mapv #(Float/parseFloat %) (str/split floats #"\s"))))
+    (mapv #(Float/parseFloat %) (str/split (str/triml floats) #"\s+"))))
 
 (defn- extract [input source comp-count tri-count tri-indices stride factor default]
   (let [factor (or factor 1.0)
@@ -92,7 +94,7 @@
         normal-source (source sources-map normal-input)
         texcoord-source (source sources-map texcoord-input)
         tri-count (Integer/parseInt (get-in triangles [:attrs :count] "0"))
-        tri-indices (mapv #(Integer/parseInt %) (str/split (first (-> triangles (element :p) (:content))) #"\s"))
+        tri-indices (mapv #(Integer/parseInt %) (str/split (str/triml (first (-> triangles (element :p) (:content)))) #"\s+"))
         positions (extract vertex-input pos-source 3 tri-count tri-indices stride meter [0 0 0])
         normals (extract normal-input normal-source 3 tri-count tri-indices stride nil [0 0 1])
         texcoords (extract texcoord-input texcoord-source 2 tri-count tri-indices stride nil [0 0 1])]

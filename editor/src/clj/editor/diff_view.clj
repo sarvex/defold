@@ -77,7 +77,10 @@
         texts (mapv (fn [e] (make-text font lines (selector e))) edits)
         heights (reductions (fn [sum t] (+ sum (:height (ui/local-bounds t)))) 0 texts)]
     (doseq [[t y] (map vector texts heights)]
-      (.setY t (+ (- (:miny (ui/local-bounds t))) y)))
+      (let [y' (+ (- (:miny (ui/local-bounds t))) y)]
+        (if (instance? Text t)
+          (.setY ^Text t y')
+          (.setY ^Rectangle t y'))))
     (ui/children! box texts)
     texts))
 
@@ -115,7 +118,7 @@
     (.setVisibleAmount scroll (/ (* m w) total-width))))
 
 (defn make-diff-viewer [left-name str-left right-name str-right]
-  (let [root ^Parent (FXMLLoader/load (io/resource "diff.fxml"))
+  (let [root ^Parent (ui/load-fxml "diff.fxml")
         stage (Stage.)
         scene (Scene. root)
         lines-left (split-lines str-left)

@@ -6,15 +6,12 @@
            [java.nio ByteBuffer]
            [javax.vecmath Matrix4d Point3d Quat4d Vector3d Vector4d]))
 
-; ----------------------------------------
-; Basic property types
-; ----------------------------------------
-(g/defproperty NonNegativeInt g/Int
-  (validate positive? :message "must be equal to or greater than zero" (comp not neg?)))
+(set! *warn-on-reflection* true)
 
-; ----------------------------------------
-; Protocols here help avoid circular dependencies
-; ----------------------------------------
+;; ----------------------------------------
+;; Protocols here help avoid circular dependencies
+;; ----------------------------------------
+
 (defprotocol R3Min
   (min-p ^Point3d  [this]))
 
@@ -54,6 +51,9 @@
 (def Icon    g/Str)
 
 (def Color   [g/Num])
+
+(def Vec2    [(g/one g/Num "x")
+              (g/one g/Num "y")])
 
 (def Vec3    [(g/one g/Num "x")
               (g/one g/Num "y")
@@ -202,4 +202,4 @@
    :icon     Icon
    :node-ref Long
    :commands [OutlineCommand]
-   :children [(g/recursive #'OutlineItem)]})
+   :children [g/Any]})

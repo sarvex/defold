@@ -9,6 +9,7 @@
 #include <dlib/hash.h>
 #include <dlib/log.h>
 #include <dlib/math.h>
+#include <dlib/http_cache.h>
 
 #include "script.h"
 #include "http_ddf.h"
@@ -38,7 +39,9 @@ namespace dmScript
      * @param method HTTP method, e.g. GET/PUT/POST/DELETE/...
      * @param callback response callback
      * @param [headers] optional lua-table with custom headers
-     * @param [post_data] option data to send
+     * @param [post_data] optional data to send
+     * @param [options] optional lua-table with request parameters. Supported entries: 'timeout'=<number> (in seconds)
+     * @note If no timeout value is passed, the configuration value "network.http_timeout" is used. If that is not set, the timeout value is 0. (0 == blocks indefinitely)
      * @examples
      * <p>
      * Basic HTTP-GET request. The callback receives a table with the response
@@ -64,6 +67,12 @@ namespace dmScript
 
             const char* url = luaL_checkstring(L, 1);
             uint32_t url_len = strlen(url);
+
+            if (url_len > dmHttpCache::MAX_URI_LEN)
+            {
+                assert(top == lua_gettop(L));
+                return luaL_error(L, "http.request does not support URI longer than %d characters.", dmHttpCache::MAX_URI_LEN);
+            }
             const char* method = luaL_checkstring(L, 2);
             luaL_checktype(L, 3, LUA_TFUNCTION);
             lua_pushvalue(L, 3);
@@ -73,10 +82,11 @@ namespace dmScript
 
             char* headers = 0;
             int headers_length = 0;
-            if (top > 3) {
+            if (top > 3 && !lua_isnil(L, 4)) {
                 dmArray<char> h;
                 h.SetCapacity(4 * 1024);
 
+                luaL_checktype(L, 4, LUA_TTABLE);
                 lua_pushvalue(L, 4);
                 lua_pushnil(L);
                 while (lua_next(L, -2)) {
@@ -107,12 +117,29 @@ namespace dmScript
 
             char* request_data = 0;
             int request_data_length = 0;
-            if (top > 4) {
+            if (top > 4 && !lua_isnil(L, 5)) {
                 size_t len;
+                luaL_checktype(L, 5, LUA_TSTRING);
                 const char* r = luaL_checklstring(L, 5, &len);
                 request_data = (char*) malloc(len);
                 memcpy(request_data, r, len);
                 request_data_length = len;
+            }
+
+            uint64_t timeout = g_Timeout;
+            if (top > 5 && !lua_isnil(L, 6)) {
+                luaL_checktype(L, 6, LUA_TTABLE);
+                lua_pushvalue(L, 6);
+                lua_pushnil(L);
+                while (lua_next(L, -2)) {
+                    const char* attr = lua_tostring(L, -2);
+                    if( strcmp(attr, "timeout") == 0 )
+                    {
+                        timeout = luaL_checknumber(L, -1) * 1000000.0f;
+                    }
+                    lua_pop(L, 1);
+                }
+                lua_pop(L, 1);
             }
 
             // Really arbitrary length.
@@ -131,7 +158,7 @@ namespace dmScript
             request->m_HeadersLength = headers_length;
             request->m_Request = (uint64_t) request_data;
             request->m_RequestLength = request_data_length;
-            request->m_Timeout = g_Timeout;
+            request->m_Timeout = timeout;
 
             uint32_t post_len = sizeof(dmHttpDDF::HttpRequest) + max_method_len + url_len + 1;
             dmMessage::URL receiver;
@@ -156,6 +183,11 @@ namespace dmScript
         {"request", Http_Request},
         {0, 0}
     };
+
+    void SetHttpRequestTimeout(uint64_t timeout)
+    {
+        g_Timeout = timeout;
+    }
 
     void InitializeHttp(lua_State* L, dmConfigFile::HConfig config_file)
     {

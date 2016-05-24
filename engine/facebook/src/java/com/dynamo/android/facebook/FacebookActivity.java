@@ -44,6 +44,7 @@ public class FacebookActivity implements PseudoActivity {
     private Messenger messenger;
     private Activity parent;
     private CallbackManager callbackManager;
+    private Message onAbortedMessage;
 
     // Must match values from facebook.h
     private enum State {
@@ -125,7 +126,7 @@ public class FacebookActivity implements PseudoActivity {
     }
 
     private void respond(final String action, final Bundle data) {
-
+        onAbortedMessage = null; // only kept for when respond() never happens.
         this.parent.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -146,7 +147,7 @@ public class FacebookActivity implements PseudoActivity {
     private void UpdateUserData() {
         GraphRequest request = GraphRequest.newMeRequest(
             AccessToken.getCurrentAccessToken(),
-            new GraphRequest.GraphJSONObjectCallback() {
+             new GraphRequest.GraphJSONObjectCallback() {
                 @Override
                 public void onCompleted(JSONObject object, GraphResponse response) {
                    Bundle data = new Bundle();
@@ -309,8 +310,9 @@ public class FacebookActivity implements PseudoActivity {
                         .setPlaceId(dialogParams.getString("place_id", ""))
                         .setRef(dialogParams.getString("ref", ""));
 
-                    if (dialogParams.getStringArray("people_ids") != null) {
-                        content.setPeopleIds(Arrays.asList(dialogParams.getStringArray("people_ids")));
+                    String peopleIdsString = dialogParams.getString("people_ids", null);
+                    if (peopleIdsString != null) {
+                        content.setPeopleIds(Arrays.asList(peopleIdsString.split(",")));
                     }
 
                     shareDialog.registerCallback(callbackManager, new DefaultDialogCallback<Sharer.Result>() {
@@ -329,30 +331,30 @@ public class FacebookActivity implements PseudoActivity {
 
                     shareDialog.show(parent, content.build());
 
-                } else if (dialogType.equals("apprequests")) {
+                } else if (dialogType.equals("apprequests") || dialogType.equals("apprequest")) {
 
                     GameRequestDialog appInviteDialog = new GameRequestDialog(parent);
 
                     ArrayList<String> suggestionsArray = new ArrayList<String>();
-                    String[] suggestions = dialogParams.getStringArray("suggestions");
-                    if (suggestions != null) {
+                    String suggestionsString = dialogParams.getString("suggestions", null);
+                    if (suggestionsString != null) {
+                        String [] suggestions = suggestionsString.split(",");
                         suggestionsArray.addAll(Arrays.asList(suggestions));
                     }
 
                     // comply with JS way of specifying recipients/to
-                    String recipientsString = null;
-                    String[] recipients = null;
-                    // FB SDK is weird, special case on Android, recipients/to
-                    // can only be one person. We pick the first one in the list,
-                    // if multiple are supplied...
-                    if (dialogParams.getString("to") != null) {
-                        recipients = dialogParams.getString("to").split(",");
+                    String toString = null;
+
+                    // Recipients field does not exist in FB SDK 4.3 for Android.
+                    // For now we fill the "to" field with the comma separated user ids,
+                    // but when we upgrade to a newer version with the recipients field
+                    // we should fill the correct recipients field instead.
+                    if (dialogParams.getString("to", null) != null) {
+                        toString = dialogParams.getString("to");
                     }
-                    if (recipients != null) {
-                        recipientsString = recipients[0];
-                        if (recipients.length > 1) {
-                            Log.d(TAG, "Facebook SDK for Android only supports one recipient ('to' field) for GameRequestDialog, only the first one will be used.");
-                        }
+
+                    if (dialogParams.getString("recipients", null) != null) {
+                        toString = dialogParams.getString("recipients");
                     }
 
                     GameRequestContent.Builder content = new GameRequestContent.Builder()
@@ -371,8 +373,8 @@ public class FacebookActivity implements PseudoActivity {
 
                     // recipients, filters and suggestions are mutually exclusive
                     int filters = Integer.parseInt(dialogParams.getString("filters", "-1"));
-                    if (recipientsString != null) {
-                        content.setTo(recipientsString);
+                    if (toString != null) {
+                        content.setTo(toString);
                     } else if (filters != -1) {
                         content.setFilters(convertGameRequestFilters(filters));
                     } else {
@@ -418,6 +420,14 @@ public class FacebookActivity implements PseudoActivity {
         final String action = intent.getAction();
         this.messenger = (Messenger) extras.getParcelable(Facebook.INTENT_EXTRA_MESSENGER);
 
+        // Prepare a response to send in case we finish without having sent anything
+        // (activity shut down etc). This is cleared by respond()
+        Bundle abortedData = new Bundle();
+        abortedData.putString(Facebook.MSG_KEY_ACTION, action);
+        abortedData.putString(Facebook.MSG_KEY_ERROR, "Aborted");
+        onAbortedMessage = new Message();
+        onAbortedMessage.setData(abortedData);
+
         try {
             if (action.equals(Facebook.ACTION_LOGIN)) {
                 actionLogin();
@@ -432,10 +442,18 @@ public class FacebookActivity implements PseudoActivity {
             data.putString(Facebook.MSG_KEY_ERROR, e.getMessage());
             respond(action, data);
         }
-
     }
 
-    @Override
+    @Override public void onDestroy() {
+        if (onAbortedMessage != null) {
+            try {
+                messenger.send(onAbortedMessage);
+            } catch (RemoteException e) {
+                Log.wtf(TAG, e);
+            }
+        }
+    }
+
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         callbackManager.onActivityResult(requestCode, resultCode, data);
     }

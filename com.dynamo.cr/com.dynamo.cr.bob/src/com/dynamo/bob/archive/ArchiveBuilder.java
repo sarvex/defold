@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -12,69 +13,35 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 
-import net.jpountz.lz4.LZ4Factory;
+import com.dynamo.crypt.Crypt;
+
 import net.jpountz.lz4.LZ4Compressor;
+import net.jpountz.lz4.LZ4Factory;
 
 public class ArchiveBuilder {
 
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
 
-    class Entry implements Comparable<Entry> {
+    private static final byte[] KEY = "aQj8CScgNP4VsfXK".getBytes();
 
-        int size;
-        int compressedSize;
-        String relName;
-        private String fileName;
+    private static final List<String> ENCRYPTED_EXTS = Arrays.asList("luac", "scriptc", "gui_scriptc", "render_scriptc");
 
-        public Entry(String fileName, boolean compress) throws IOException {
-            File file = new File(fileName);
-            if (!file.exists()) {
-                throw new IOException(String.format("File %s doens't exists",
-                        fileName));
-            }
-
-            fileName = file.getAbsolutePath();
-            if (!fileName.startsWith(root)) {
-                throw new IOException(String.format(
-                        "File %s isn't relative to root directory %s",
-                        fileName, root));
-            }
-
-            this.size = (int) file.length();
-            if(compress) {
-                // Will be set to real value after compression
-                this.compressedSize = 0;
-            } else {
-                this.compressedSize = 0xFFFFFFFF;
-            }
-
-            this.relName = fileName.substring(root.length());
-            this.fileName = fileName;
-        }
-
-        @Override
-        public int compareTo(Entry other) {
-            return relName.compareTo(other.relName);
-        }
-
-    }
-
-    private List<Entry> entries = new ArrayList<ArchiveBuilder.Entry>();
+    private List<ArchiveEntry> entries = new ArrayList<ArchiveEntry>();
     private String root;
     private LZ4Compressor lz4Compressor;
 
     public ArchiveBuilder(String root) {
         this.root = new File(root).getAbsolutePath();
-        this.lz4Compressor = LZ4Factory.fastestInstance().fastCompressor();
+        this.lz4Compressor = LZ4Factory.fastestInstance().highCompressor();
     }
 
     public void add(String fileName, boolean doCompress) throws IOException {
-        Entry e = new Entry(fileName, doCompress);
+        ArchiveEntry e = new ArchiveEntry(root, fileName, doCompress);
         entries.add(e);
     }
 
     public void add(String fileName) throws IOException {
-        Entry e = new Entry(fileName, false);
+        ArchiveEntry e = new ArchiveEntry(root, fileName, false);
         entries.add(e);
     }
 
@@ -92,7 +59,7 @@ public class ArchiveBuilder {
         if(compRatio > 0.95) {
             // Store uncompressed if we gain less than 5%
             outFile.write(tmp_buf, 0, fileSize);
-            compressedSize = 0xFFFFFFFF;
+            compressedSize = ArchiveEntry.FLAG_UNCOMPRESSED;
         } else {
             outFile.write(compress_buf, 0, compressedSize);
         }
@@ -131,7 +98,7 @@ public class ArchiveBuilder {
 
         int stringPoolOffset = (int) outFile.getFilePointer();
         List<Integer> stringsOffset = new ArrayList<Integer>();
-        for (Entry e : entries) {
+        for (ArchiveEntry e : entries) {
             // Store offset to string
             stringsOffset.add((int) (outFile.getFilePointer() - stringPoolOffset));
             String normalisedPath = FilenameUtils.separatorsToUnix(e.relName);
@@ -142,10 +109,10 @@ public class ArchiveBuilder {
         int stringPoolSize = (int) (outFile.getFilePointer() - stringPoolOffset);
 
         List<Integer> resourcesOffset = new ArrayList<Integer>();
-        for (Entry e : entries) {
+        for (ArchiveEntry e : entries) {
             alignBuffer(outFile, 4);
             resourcesOffset.add((int) outFile.getFilePointer());
-            if(e.compressedSize != 0xFFFFFFFF) {
+            if(e.compressedSize != ArchiveEntry.FLAG_UNCOMPRESSED) {
                 e.compressedSize = compress(e.fileName, e.size, outFile);
             } else {
                 copy(e.fileName, outFile);
@@ -155,11 +122,34 @@ public class ArchiveBuilder {
         alignBuffer(outFile, 4);
         int entryOffset = (int) outFile.getFilePointer();
         int i = 0;
-        for (Entry e : entries) {
+        for (ArchiveEntry e : entries) {
             outFile.writeInt(stringsOffset.get(i));
             outFile.writeInt(resourcesOffset.get(i));
-            outFile.writeInt((int) e.size);
-            outFile.writeInt((int) e.compressedSize);
+            outFile.writeInt(e.size);
+            outFile.writeInt(e.compressedSize);
+            String ext = FilenameUtils.getExtension(e.fileName);
+            if (ENCRYPTED_EXTS.indexOf(ext) != -1) {
+                e.flags = ArchiveEntry.FLAG_ENCRYPTED;
+            }
+            outFile.writeInt(e.flags);
+            ++i;
+        }
+
+        i = 0;
+        for (ArchiveEntry e : entries) {
+            String ext = FilenameUtils.getExtension(e.fileName);
+            if ((e.flags & ArchiveEntry.FLAG_ENCRYPTED) == ArchiveEntry.FLAG_ENCRYPTED) {
+                outFile.seek(resourcesOffset.get(i));
+                int size = e.size;
+                if (e.compressedSize != ArchiveEntry.FLAG_UNCOMPRESSED) {
+                    size = e.compressedSize;
+                }
+                byte[] buf = new byte[size];
+                outFile.read(buf);
+                byte[] enc = Crypt.encryptCTR(buf, KEY);
+                outFile.seek(resourcesOffset.get(i));
+                outFile.write(enc);
+            }
             ++i;
         }
 

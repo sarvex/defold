@@ -1,18 +1,23 @@
 package com.dynamo.cr.guied.core;
 
 import javax.media.opengl.GL2;
+import javax.vecmath.Point2d;
+import javax.vecmath.Vector3d;
 import javax.vecmath.Vector4d;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.swt.graphics.Image;
 
 import com.dynamo.cr.guied.Activator;
+import com.dynamo.cr.guied.core.GuiTextureNode.UVTransform;
 import com.dynamo.cr.guied.util.GuiNodeStateBuilder;
 import com.dynamo.cr.properties.Property;
 import com.dynamo.cr.properties.Property.EditorType;
 import com.dynamo.cr.sceneed.core.ISceneModel;
 import com.dynamo.cr.sceneed.core.util.LoaderUtil;
+import com.dynamo.gui.proto.Gui.NodeDesc.SizeMode;
 import com.dynamo.proto.DdfMath.Vector4;
+import com.google.protobuf.Descriptors.EnumValueDescriptor;
 
 @SuppressWarnings("serial")
 public class BoxNode extends ClippingNode {
@@ -63,6 +68,26 @@ public class BoxNode extends ClippingNode {
         return textureNode;
     }
 
+    public void updateSize() {
+        if (this.guiTextureNode == null || getSizeMode() == SizeMode.SIZE_MODE_MANUAL) {
+            return;
+        }
+        Point2d textureSize = guiTextureNode.getTextureHandle().getTextureSize();
+        if(getSizeMode() == SizeMode.SIZE_MODE_AUTO) {
+            UVTransform uvTransform = this.guiTextureNode.getUVTransform();
+            Vector3d size = new Vector3d();
+            if(uvTransform.rotated) {
+                size.y = uvTransform.scale.x * textureSize.x;
+                size.x = uvTransform.scale.y * textureSize.y;
+            } else {
+                size.x = uvTransform.scale.x * textureSize.x;
+                size.y = uvTransform.scale.y * textureSize.y;
+            }
+            size.z = 0.0;
+            setSize(size);
+        }
+    }
+
     private void updateTexture() {
         if (!this.texture.isEmpty() && getModel() != null) {
             TextureNode textureNode = this.getTextureNode();
@@ -72,6 +97,7 @@ public class BoxNode extends ClippingNode {
                     this.guiTextureNode = new GuiTextureNode();
                 }
                 this.guiTextureNode.setTexture(this, textureNode.getTexture(), this.texture);
+                updateSize();
                 return;
             }
         }
@@ -139,4 +165,15 @@ public class BoxNode extends ClippingNode {
     public boolean isSlice9Overridden() {
         return GuiNodeStateBuilder.isFieldOverridden(this, "Slice9", LoaderUtil.toVector4(this.slice9));
     }
+
+    @Override
+    public void setSizeMode(SizeMode sizeMode) {
+        super.setSizeMode(sizeMode);
+        updateSize();
+    }
+
+    public boolean isSizeEditable() {
+        return getSizeMode() == SizeMode.SIZE_MODE_MANUAL;
+    }
+
 }

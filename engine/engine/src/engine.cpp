@@ -4,6 +4,8 @@
 #include <vectormath/cpp/vectormath_aos.h>
 #include <sys/stat.h>
 
+#include <algorithm>
+
 #include <dlib/dlib.h>
 #include <dlib/dstrings.h>
 #include <dlib/hash.h>
@@ -33,6 +35,16 @@ using namespace Vectormath::Aos;
 
 extern unsigned char CONNECT_PROJECT[];
 extern uint32_t CONNECT_PROJECT_SIZE;
+
+#if defined(__ANDROID__)
+// On Android we need to notify the activity which input method to use
+// before the keyboard is brought up. This choice is stored as a
+// game.project config and used in dmEngine::Init(), passed along to
+// the GLFW Android implementation.
+extern "C" {
+    extern void _glfwAndroidSetInputMethod(int);
+}
+#endif
 
 namespace dmEngine
 {
@@ -106,6 +118,17 @@ namespace dmEngine
     }
 
     void Dispatch(dmMessage::Message *message_object, void* user_ptr);
+
+    static void OnWindowFocus(void* user_data, uint32_t focus)
+    {
+        Engine* engine = (Engine*)user_data;
+        dmExtension::Params params;
+        params.m_ConfigFile = engine->m_Config;
+        params.m_L          = 0;
+        dmExtension::Event event;
+        event.m_Event = focus ? dmExtension::EVENT_ID_ACTIVATEAPP : dmExtension::EVENT_ID_DEACTIVATEAPP;
+        dmExtension::DispatchEvent( &params, &event );
+    }
 
     Stats::Stats()
     : m_FrameCount(0)
@@ -400,6 +423,25 @@ namespace dmEngine
             }
         }
 
+        // Catch engine specific arguments
+        bool verify_graphics_calls = dLib::IsDebugMode();
+        const char verify_graphics_calls_arg[] = "--verify-graphics-calls=";
+        for (int i = 0; i < argc; ++i)
+        {
+            const char* arg = argv[i];
+            if (strncmp(verify_graphics_calls_arg, arg, sizeof(verify_graphics_calls_arg)-1) == 0)
+            {
+                const char* eq = strchr(arg, '=');
+                if (strncmp("true", eq+1, sizeof("true")-1) == 0) {
+                    verify_graphics_calls = true;
+                } else if (strncmp("false", eq+1, sizeof("false")-1) == 0) {
+                    verify_graphics_calls = false;
+                } else {
+                    dmLogWarning("Invalid value used for %s%s.", verify_graphics_calls_arg, eq);
+                }
+            }
+        }
+
         dmExtension::AppParams app_params;
         app_params.m_ConfigFile = engine->m_Config;
         dmExtension::Result er = dmExtension::AppInitialize(&app_params);
@@ -428,6 +470,8 @@ namespace dmEngine
         dmGraphics::ContextParams graphics_context_params;
         graphics_context_params.m_DefaultTextureMinFilter = ConvertMinTextureFilter(dmConfigFile::GetString(engine->m_Config, "graphics.default_texture_min_filter", "linear"));
         graphics_context_params.m_DefaultTextureMagFilter = ConvertMagTextureFilter(dmConfigFile::GetString(engine->m_Config, "graphics.default_texture_mag_filter", "linear"));
+        graphics_context_params.m_VerifyGraphicsCalls = verify_graphics_calls;
+
         engine->m_GraphicsContext = dmGraphics::NewContext(graphics_context_params);
         if (engine->m_GraphicsContext == 0x0)
         {
@@ -443,12 +487,15 @@ namespace dmEngine
         window_params.m_ResizeCallbackUserData = engine;
         window_params.m_CloseCallback = OnWindowClose;
         window_params.m_CloseCallbackUserData = engine;
+        window_params.m_FocusCallback = OnWindowFocus;
+        window_params.m_FocusCallbackUserData = engine;
         window_params.m_Width = engine->m_Width;
         window_params.m_Height = engine->m_Height;
         window_params.m_Samples = dmConfigFile::GetInt(engine->m_Config, "display.samples", 0);
         window_params.m_Title = dmConfigFile::GetString(engine->m_Config, "project.title", "TestTitle");
         window_params.m_Fullscreen = (bool) dmConfigFile::GetInt(engine->m_Config, "display.fullscreen", 0);
         window_params.m_PrintDeviceInfo = false;
+        window_params.m_HighDPI = (bool) dmConfigFile::GetInt(engine->m_Config, "display.high_dpi", 0);
 
         dmGraphics::WindowResult window_result = dmGraphics::OpenWindow(engine->m_GraphicsContext, &window_params);
         if (window_result != dmGraphics::WINDOW_RESULT_OK)
@@ -751,6 +798,20 @@ namespace dmEngine
         }
         dmGameObject::SortComponentTypes(engine->m_Register);
 
+#if defined(__ANDROID__)
+        {
+            const char* input_method = dmConfigFile::GetString(engine->m_Config, "android.input_method", "KeyEvents");
+
+            int use_hidden_inputfield = 0;
+            if (!strcmp(input_method, "HiddenInputField"))
+                use_hidden_inputfield = 1;
+            else if (strcmp(input_method, "KeyEvents"))
+                dmLogWarning("Unknown Android input method [%s], defaulting to key events", input_method);
+
+            _glfwAndroidSetInputMethod(use_hidden_inputfield);
+        }
+#endif
+
         return true;
 
 bail:
@@ -796,6 +857,7 @@ bail:
         }
 
         input_action.m_TextCount = action->m_TextCount;
+        input_action.m_HasText = action->m_HasText;
         tc = action->m_TextCount;
         for (int i = 0; i < tc; ++i) {
             input_action.m_Text[i] = action->m_Text[i];
@@ -816,6 +878,15 @@ bail:
         }
     }
 
+    static int InputBufferOrderSort(const void * a, const void * b)
+    {
+        dmGameObject::InputAction *ipa = (dmGameObject::InputAction *)a;
+        dmGameObject::InputAction *ipb = (dmGameObject::InputAction *)b;
+        bool a_is_text = ipa->m_HasText || ipa->m_TextCount > 0;
+        bool b_is_text = ipb->m_HasText || ipb->m_TextCount > 0;
+        return a_is_text - b_is_text;
+    }
+
     void Step(HEngine engine)
     {
         engine->m_Alive = true;
@@ -826,8 +897,14 @@ bail:
         float fixed_dt = 1.0f / fps;
         float dt = fixed_dt;
         bool variable_dt = engine->m_UseVariableDt;
-        if (variable_dt) {
+        if (variable_dt && time > engine->m_PreviousFrameTime) {
             dt = (float)((time - engine->m_PreviousFrameTime) * 0.000001);
+            // safety mechanism for crazy; GetTime() is not guaranteed to always
+            // produce small deltas between calls, cap to 25 frames in one.
+            const float max = fixed_dt * 25.0f;
+            if (dt > max) {
+                dt = max;
+            }
         }
         engine->m_PreviousFrameTime = time;
 
@@ -931,6 +1008,14 @@ bail:
 
                     engine->m_InputBuffer.SetSize(0);
                     dmInput::ForEachActive(engine->m_GameInputBinding, GOActionCallback, engine);
+
+                    // Sort input so that text and marked text is triggered last
+                    // NOTE: Due to Korean keyboards on iOS will send a backspace sometimes to "replace" a character with a new one,
+                    //       we want to make sure these keypresses arrive to the input listeners before the "new" character.
+                    //       If the backspace arrive after the text, it will instead remove the new character that
+                    //       actually should replace the old one.
+                    qsort(engine->m_InputBuffer.Begin(), engine->m_InputBuffer.Size(), sizeof(dmGameObject::InputAction), InputBufferOrderSort);
+
                     dmArray<dmGameObject::InputAction>& input_buffer = engine->m_InputBuffer;
                     uint32_t input_buffer_size = input_buffer.Size();
                     if (input_buffer_size > 0)
@@ -945,6 +1030,14 @@ bail:
                     // Make the render list that will be used later.
                     dmRender::RenderListBegin(engine->m_RenderContext);
                     dmGameObject::Render(engine->m_MainCollection);
+
+                    // Make sure we dispatch messages to the render script
+                    // since it could have some "draw_text" messages waiting.
+                    if (engine->m_RenderScriptPrototype)
+                    {
+                        dmRender::DispatchRenderScriptInstance(engine->m_RenderScriptPrototype->m_Instance);
+                    }
+
                     dmRender::RenderListEnd(engine->m_RenderContext);
 
                     if (engine->m_RenderScriptPrototype)
@@ -963,10 +1056,11 @@ bail:
 
                     dmRender::ClearRenderObjects(engine->m_RenderContext);
 
+
                     dmMessage::Dispatch(engine->m_SystemSocket, Dispatch, engine);
                 }
 
-                if (engine->m_ShowProfile)
+                if (dLib::IsDebugMode() && engine->m_ShowProfile)
                 {
                     DM_PROFILE(Profile, "Draw");
                     dmProfile::Pause(true);
@@ -980,6 +1074,7 @@ bail:
                     dmRender::ClearRenderObjects(engine->m_RenderContext);
                     dmProfile::Pause(false);
                 }
+
                 dmGraphics::Flip(engine->m_GraphicsContext);
 
                 RecordData* record_data = &engine->m_RecordData;
@@ -1272,4 +1367,3 @@ bail:
         return engine->m_Stats.m_FrameCount;
     }
 }
-

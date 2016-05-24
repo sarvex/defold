@@ -106,8 +106,10 @@ namespace dmRender
 
     /*# create a new constant buffer.
      *
-     * Constant buffers are used to set shader program variables and are optionally passed to the render.draw function. The buffer's constant elements can be indexed like an ordinary Lua table, but you can't iterate
+     * Constant buffers are used to set shader program variables and are optionally passed to the <code>render.draw()</code> 
+     * function. The buffer's constant elements can be indexed like an ordinary Lua table, but you can't iterate
      * over them with pairs() or ipairs().
+     * 
      * @name render.constant_buffer
      * @return new constant buffer
      * @examples
@@ -877,9 +879,15 @@ namespace dmRender
      */
 
     /*# clears the active render target
+     * Clear buffers in the currently enabled render target with specified value.
      *
      * @name render.clear
-     * @param buffers Table specifying which buffers to clear. Available keys are: render.BUFFER_COLOR_BIT, render.BUFFER_DEPTH_BIT and render.BUFFER_STENCIL_BIT.
+     * @param buffers Table with keys specifying which buffers to clear and values set to clear values. Available keys are:
+     * <ul>
+     *     <li><code>render.BUFFER_COLOR_BIT</code></li>
+     *     <li><code>render.BUFFER_DEPTH_BIT</code></li>
+     *     <li><code>render.BUFFER_STENCIL_BIT</code></li>
+     * </ul>
      * @examples
      * <pre>
      * render.clear({[render.BUFFER_COLOR_BIT] = vmath.vector4(0, 0, 0, 0), [render.BUFFER_DEPTH_BIT] = 1})
@@ -940,10 +948,27 @@ namespace dmRender
     }
 
     /*# draws all objects matching a predicate
-     *
+     * Draws all objects that match a specified predicate. An optional constants buffer can be
+     * provided to override the default constants. If no constants buffer is provided, a default
+     * system constants buffer is used containing constants as defined in materials and set through
+     * <code>*.set_constant()</code> and <code>*.reset_constant()</code> on visual components.
+     * 
      * @name render.draw
      * @param predicate predicate to draw for (predicate)
-     * @param constants constants to use while rendering (constants buffer)
+     * @param constants optional constants to use while rendering (constants buffer)
+     * @examples
+     * <pre>
+     * function init(self)
+     *     self.tile_pred = render.predicate({"tile"})
+     *     ...
+     * end
+     *
+     * function update(self)
+     *     ...
+     *     render.draw(self.tile_pred)
+     *     ...
+     * end
+     * </pre>
      */
     int RenderScript_Draw(lua_State* L)
     {
@@ -1271,6 +1296,47 @@ namespace dmRender
      * @name render.COMPARE_FUNC_ALWAYS
      * @variable
      */
+
+    /*# sets the depth test function
+    *
+    * @name render.set_depth_func
+    * @param func depth test function (constant)
+    * <ul>
+    *   <li><code>render.COMPARE_FUNC_NEVER</code></li>
+    *   <li><code>render.COMPARE_FUNC_LESS</code></li>
+    *   <li><code>render.COMPARE_FUNC_LEQUAL</code></li>
+    *   <li><code>render.COMPARE_FUNC_GREATER</code></li>
+    *   <li><code>render.COMPARE_FUNC_GEQUAL</code></li>
+    *   <li><code>render.COMPARE_FUNC_EQUAL</code></li>
+    *   <li><code>render.COMPARE_FUNC_NOTEQUAL</code></li>
+    *   <li><code>render.COMPARE_FUNC_ALWAYS</code></li>
+    * </ul>
+    */
+    int RenderScript_SetDepthFunc(lua_State* L)
+    {
+        RenderScriptInstance* i = RenderScriptInstance_Check(L);
+        uint32_t func = luaL_checknumber(L, 1);
+        switch (func)
+        {
+            case dmGraphics::COMPARE_FUNC_NEVER:
+            case dmGraphics::COMPARE_FUNC_LESS:
+            case dmGraphics::COMPARE_FUNC_LEQUAL:
+            case dmGraphics::COMPARE_FUNC_GREATER:
+            case dmGraphics::COMPARE_FUNC_GEQUAL:
+            case dmGraphics::COMPARE_FUNC_EQUAL:
+            case dmGraphics::COMPARE_FUNC_NOTEQUAL:
+            case dmGraphics::COMPARE_FUNC_ALWAYS:
+                break;
+            default:
+                return luaL_error(L, "Invalid depth func: %s.set_depth_func(self, %d)", RENDER_SCRIPT_LIB_NAME, func);
+        }
+
+        if (InsertCommand(i, Command(COMMAND_TYPE_SET_DEPTH_FUNC, func)))
+            return 0;
+        else
+            return luaL_error(L, "Command buffer is full (%d).", i->m_CommandBuffer.Capacity());
+    }
+
 
     /*# sets the stencil test function
     *
@@ -1637,6 +1703,7 @@ namespace dmRender
         {"set_blend_func",                  RenderScript_SetBlendFunc},
         {"set_color_mask",                  RenderScript_SetColorMask},
         {"set_depth_mask",                  RenderScript_SetDepthMask},
+        {"set_depth_func",                  RenderScript_SetDepthFunc},
         {"set_stencil_mask",                RenderScript_SetStencilMask},
         {"set_stencil_func",                RenderScript_SetStencilFunc},
         {"set_stencil_op",                  RenderScript_SetStencilOp},
@@ -2098,22 +2165,25 @@ bail:
         context->m_Result = RunScript(instance, RENDER_SCRIPT_FUNCTION_ONMESSAGE, message);
     }
 
-    RenderScriptResult UpdateRenderScriptInstance(HRenderScriptInstance instance)
+    RenderScriptResult DispatchRenderScriptInstance(HRenderScriptInstance instance)
     {
-        DM_PROFILE(RenderScript, "UpdateRSI");
+        DM_PROFILE(RenderScript, "DispatchRSI");
         DispatchContext context;
         context.m_Instance = instance;
         context.m_Result = RENDER_SCRIPT_RESULT_OK;
         dmMessage::Dispatch(instance->m_RenderContext->m_Socket, DispatchCallback, (void*)&context);
+        return context.m_Result;
+    }
+
+    RenderScriptResult UpdateRenderScriptInstance(HRenderScriptInstance instance)
+    {
+        DM_PROFILE(RenderScript, "UpdateRSI");
         instance->m_CommandBuffer.SetSize(0);
         RenderScriptResult result = RunScript(instance, RENDER_SCRIPT_FUNCTION_UPDATE, 0x0);
 
         if (instance->m_CommandBuffer.Size() > 0)
             ParseCommands(instance->m_RenderContext, &instance->m_CommandBuffer.Front(), instance->m_CommandBuffer.Size());
-        if (result == RENDER_SCRIPT_RESULT_OK)
-            return context.m_Result;
-        else
-            return result;
+        return result;
     }
 
     void OnReloadRenderScriptInstance(HRenderScriptInstance render_script_instance)

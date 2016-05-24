@@ -101,9 +101,14 @@ namespace dmLoadQueue
                     assert(current->m_Buffer.Size() == size);
                     if (current->m_PreloadInfo.m_Function)
                     {
-                        result.m_PreloadResult = current->m_PreloadInfo.m_Function(queue->m_Factory, &current->m_PreloadInfo.m_HintInfo,
-                                                                                    current->m_PreloadInfo.m_Context, current->m_Buffer.Begin(), current->m_Buffer.Size(), &result.m_PreloadData,
-                                                                                    current->m_Name);
+                        dmResource::ResourcePreloadParams params;
+                        params.m_Factory = queue->m_Factory;
+                        params.m_Context = current->m_PreloadInfo.m_Context;
+                        params.m_Buffer = current->m_Buffer.Begin();
+                        params.m_BufferSize = current->m_Buffer.Size();
+                        params.m_HintInfo = &current->m_PreloadInfo.m_HintInfo;
+                        params.m_PreloadData = &result.m_PreloadData;
+                        result.m_PreloadResult = current->m_PreloadInfo.m_Function(params);
                     }
                     else
                     {
@@ -127,6 +132,7 @@ namespace dmLoadQueue
         q->m_Back = 0;
         q->m_Loaded = 0;
         q->m_Shutdown = false;
+        q->m_BytesWaiting = 0;
         q->m_Mutex = dmMutex::New();
         q->m_Thread = dmThread::New(&LoadThread, 65536, q, "AsyncLoad");
         return q;

@@ -24,6 +24,8 @@ namespace dmGraphics
 
     typedef void (*WindowResizeCallback)(void* user_data, uint32_t width, uint32_t height);
 
+    typedef void (*WindowFocusCallback)(void* user_data, uint32_t focus);
+
     /**
      * Callback function called when the window is requested to close.
      * @param user_data user data that was supplied when opening the window
@@ -266,19 +268,19 @@ namespace dmGraphics
 
     struct TextureCreationParams {
 
-    	TextureCreationParams() :
-    	    m_Type(TEXTURE_TYPE_2D),
-    		m_Width(0),
-    		m_Height(0),
-    		m_OriginalWidth(0),
-    		m_OriginalHeight(0)
-    	{}
+        TextureCreationParams() :
+            m_Type(TEXTURE_TYPE_2D),
+            m_Width(0),
+            m_Height(0),
+            m_OriginalWidth(0),
+            m_OriginalHeight(0)
+        {}
 
         TextureType   m_Type;
-		uint16_t m_Width;
-		uint16_t m_Height;
-		uint16_t m_OriginalWidth;
-		uint16_t m_OriginalHeight;
+        uint16_t m_Width;
+        uint16_t m_Height;
+        uint16_t m_OriginalWidth;
+        uint16_t m_OriginalHeight;
     };
 
     struct TextureParams
@@ -294,6 +296,9 @@ namespace dmGraphics
         , m_MipMap(0)
         , m_Width(0)
         , m_Height(0)
+        , m_SubUpdate(false)
+        , m_X(0)
+        , m_Y(0)
         {}
 
         TextureFormat m_Format;
@@ -306,6 +311,11 @@ namespace dmGraphics
         uint16_t m_MipMap;
         uint16_t m_Width;
         uint16_t m_Height;
+
+        // For sub texture updates
+        bool m_SubUpdate;
+        uint32_t m_X;
+        uint32_t m_Y;
     };
 
     // Parameters structure for OpenWindow
@@ -318,9 +328,13 @@ namespace dmGraphics
         /// User data supplied to the callback function
         void*                   m_ResizeCallbackUserData;
         /// Window close callback
-        WindowCloseCallback    m_CloseCallback;
+        WindowCloseCallback     m_CloseCallback;
         /// User data supplied to the callback function
         void*                   m_CloseCallbackUserData;
+        /// Window focus callback
+        WindowFocusCallback     m_FocusCallback;
+        /// User data supplied to the callback function
+        void*                   m_FocusCallbackUserData;
         /// Window width, 640 by default
         uint32_t                m_Width;
         /// Window height, 480 by default
@@ -333,6 +347,8 @@ namespace dmGraphics
         bool                    m_Fullscreen;
         /// Log info about the graphics device being used, false by default
         bool                    m_PrintDeviceInfo;
+
+        bool                    m_HighDPI;
     };
 
     // Parameters structure for NewContext
@@ -342,6 +358,7 @@ namespace dmGraphics
 
         TextureFilter m_DefaultTextureMinFilter;
         TextureFilter m_DefaultTextureMagFilter;
+        bool          m_VerifyGraphicsCalls;
     };
 
     /** Creates a graphics context
@@ -549,6 +566,7 @@ namespace dmGraphics
      * @param params
      */
     void SetTexture(HTexture texture, const TextureParams& params);
+    uint8_t* GetTextureData(HTexture texture);
     void SetTextureParams(HTexture texture, TextureFilter minfilter, TextureFilter magfilter, TextureWrap uwrap, TextureWrap vwrap);
     uint16_t GetTextureWidth(HTexture texture);
     uint16_t GetTextureHeight(HTexture texture);
@@ -556,6 +574,7 @@ namespace dmGraphics
     uint16_t GetOriginalTextureHeight(HTexture texture);
     void EnableTexture(HContext context, uint32_t unit, HTexture texture);
     void DisableTexture(HContext context, uint32_t unit, HTexture texture);
+    uint32_t GetMaxTextureSize(HContext context);
 
     /**
      * Read frame buffer pixels in BGRA format

@@ -41,6 +41,10 @@ protected:
         dmScript::Initialize(m_ScriptContext);
         m_GraphicsContext = dmGraphics::NewContext(dmGraphics::ContextParams());
         dmRender::FontMapParams font_map_params;
+        font_map_params.m_CacheWidth = 128;
+        font_map_params.m_CacheHeight = 128;
+        font_map_params.m_CacheCellWidth = 8;
+        font_map_params.m_CacheCellHeight = 8;
         font_map_params.m_Glyphs.SetCapacity(128);
         font_map_params.m_Glyphs.SetSize(128);
         memset((void*)&font_map_params.m_Glyphs[0], 0, sizeof(dmRender::Glyph)*128);
@@ -206,6 +210,7 @@ TEST_F(dmRenderScriptTest, TestRenderScriptMessage)
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_FAILED, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmRenderDDF::WindowResized window_resize;
@@ -221,6 +226,7 @@ TEST_F(dmRenderScriptTest, TestRenderScriptMessage)
     dmMessage::ResetURL(receiver);
     ASSERT_EQ(dmMessage::RESULT_OK, dmMessage::GetSocket(dmRender::RENDER_SOCKET_NAME, &receiver.m_Socket));
     ASSERT_EQ(dmMessage::RESULT_OK, dmMessage::Post(&sender, &receiver, message_id, 0, descriptor, &window_resize, data_size));
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmRender::DeleteRenderScriptInstance(render_script_instance);
@@ -246,9 +252,11 @@ TEST_F(dmRenderScriptTest, TestRenderScriptUserMessage)
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_FAILED, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::InitRenderScriptInstance(render_script_instance));
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmRender::DeleteRenderScriptInstance(render_script_instance);
@@ -264,6 +272,7 @@ TEST_F(dmRenderScriptTest, TestLuaState)
     "    render.set_blend_func(render.BLEND_ONE, render.BLEND_SRC_COLOR)\n"
     "    render.set_color_mask(true, true, true, true)\n"
     "    render.set_depth_mask(true)\n"
+    "    render.set_depth_func(render.COMPARE_FUNC_GEQUAL)\n"
     "    render.set_stencil_mask(1)\n"
     "    render.set_stencil_func(render.COMPARE_FUNC_ALWAYS, 1, 2)\n"
     "    render.set_stencil_op(render.STENCIL_OP_REPLACE, render.STENCIL_OP_KEEP, render.STENCIL_OP_INVERT)\n"
@@ -273,10 +282,11 @@ TEST_F(dmRenderScriptTest, TestLuaState)
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmArray<dmRender::Command>& commands = render_script_instance->m_CommandBuffer;
-    ASSERT_EQ(10u, commands.Size());
+    ASSERT_EQ(11u, commands.Size());
 
     dmRender::Command* command = &commands[0];
     ASSERT_EQ(dmRender::COMMAND_TYPE_ENABLE_STATE, command->m_Type);
@@ -303,26 +313,30 @@ TEST_F(dmRenderScriptTest, TestLuaState)
     ASSERT_EQ(1u, command->m_Operands[0]);
 
     command = &commands[5];
+    ASSERT_EQ(dmRender::COMMAND_TYPE_SET_DEPTH_FUNC, command->m_Type);
+    ASSERT_EQ(dmGraphics::COMPARE_FUNC_GEQUAL, (int32_t)command->m_Operands[0]);
+
+    command = &commands[6];
     ASSERT_EQ(dmRender::COMMAND_TYPE_SET_STENCIL_MASK, command->m_Type);
     ASSERT_EQ(1u, command->m_Operands[0]);
 
-    command = &commands[6];
+    command = &commands[7];
     ASSERT_EQ(dmRender::COMMAND_TYPE_SET_STENCIL_FUNC, command->m_Type);
     ASSERT_EQ(dmGraphics::COMPARE_FUNC_ALWAYS, (int32_t)command->m_Operands[0]);
     ASSERT_EQ(1, (int32_t)command->m_Operands[1]);
     ASSERT_EQ(2, (int32_t)command->m_Operands[2]);
 
-    command = &commands[7];
+    command = &commands[8];
     ASSERT_EQ(dmRender::COMMAND_TYPE_SET_STENCIL_OP, command->m_Type);
     ASSERT_EQ(dmGraphics::STENCIL_OP_REPLACE, (int32_t)command->m_Operands[0]);
     ASSERT_EQ(dmGraphics::STENCIL_OP_KEEP, (int32_t)command->m_Operands[1]);
     ASSERT_EQ(dmGraphics::STENCIL_OP_INVERT, (int32_t)command->m_Operands[2]);
 
-    command = &commands[8];
+    command = &commands[9];
     ASSERT_EQ(dmRender::COMMAND_TYPE_SET_CULL_FACE, command->m_Type);
     ASSERT_EQ(dmGraphics::FACE_TYPE_BACK, (int32_t)command->m_Operands[0]);
 
-    command = &commands[9];
+    command = &commands[10];
     ASSERT_EQ(dmRender::COMMAND_TYPE_SET_POLYGON_OFFSET, command->m_Type);
     ASSERT_EQ(1u, command->m_Operands[0]);
     ASSERT_EQ(2u, command->m_Operands[1]);
@@ -373,6 +387,7 @@ TEST_F(dmRenderScriptTest, TestLuaRenderTarget)
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmArray<dmRender::Command>& commands = render_script_instance->m_CommandBuffer;
@@ -398,6 +413,7 @@ TEST_F(dmRenderScriptTest, TestLuaClear)
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmArray<dmRender::Command>& commands = render_script_instance->m_CommandBuffer;
@@ -513,6 +529,7 @@ TEST_F(dmRenderScriptTest, TestLuaWindowSize)
     dmRender::HRenderScript render_script = dmRender::NewRenderScript(m_Context, LuaSourceFromString(script));
     dmRender::HRenderScriptInstance render_script_instance = dmRender::NewRenderScriptInstance(m_Context, render_script);
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmRender::DeleteRenderScriptInstance(render_script_instance);
@@ -572,6 +589,7 @@ TEST_F(dmRenderScriptTest, TestPostToSelf)
 
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::InitRenderScriptInstance(render_script_instance));
 
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
 
     dmRender::DeleteRenderScriptInstance(render_script_instance);
@@ -581,7 +599,7 @@ TEST_F(dmRenderScriptTest, TestPostToSelf)
 TEST_F(dmRenderScriptTest, TestDrawText)
 {
     const char* script =
-        "function init(self)\n"
+        "function update(self, dt)\n"
         "    msg.post(\".\", \"draw_text\", {position = vmath.vector3(0, 0, 0), text = \"Hello world!\"})\n"
         "end\n";
 
@@ -592,6 +610,21 @@ TEST_F(dmRenderScriptTest, TestDrawText)
 
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::InitRenderScriptInstance(render_script_instance));
 
+    // We do three updates here,
+    // First update: A "draw_text" message is sent
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
+    dmRender::FlushTexts(m_Context, 0, true);
+
+    // Second update: "draw_text" is processed, but no glyphs are in font cache,
+    //                they are marked as missing and uploaded. A new "draw_text" also is sent.
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
+    dmRender::FlushTexts(m_Context, 0, true);
+
+    // Third update: The second "draw_text" is processed, this time the glyphs are uploaded
+    //               and the text is drawn.
+    ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::DispatchRenderScriptInstance(render_script_instance));
     ASSERT_EQ(dmRender::RENDER_SCRIPT_RESULT_OK, dmRender::UpdateRenderScriptInstance(render_script_instance));
     dmRender::FlushTexts(m_Context, 0, true);
 

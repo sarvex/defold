@@ -19,6 +19,16 @@
 
 namespace dmSys
 {
+    static inline void PatchSystemName(char *system_name, uint32_t buffer_size)
+    {
+        // Apple have in iOS 9.1 beta changed from "iPhone OS" to "iOS" as part of their rebranding sceme.
+        // In case this beta reached a public release, we patch "iOS" to "iPhone OS" as system name to guarantee continuity on existing products.
+        if(dmStrCaseCmp(system_name, "iOS")==0)
+        {
+            dmStrlCpy(system_name, "iPhone OS", buffer_size);
+        }
+    }
+
 #if defined(__arm__) || defined(__arm64__)
 
     static NetworkConnectivity g_NetworkConnectivity = NETWORK_DISCONNECTED;
@@ -47,26 +57,25 @@ namespace dmSys
 
         if (reachability_ref)
         {
-            SCNetworkReachabilityUnscheduleFromRunLoop(reachability_ref, [[NSRunLoop currentRunLoop] getCFRunLoop], kCFRunLoopCommonModes);
+            SCNetworkReachabilityUnscheduleFromRunLoop(reachability_ref, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+            CFRelease(reachability_ref);
         }
         reachability_ref = SCNetworkReachabilityCreateWithName(NULL, host);
-
-        SCNetworkConnectionFlags flags;
-        if (SCNetworkReachabilityGetFlags(reachability_ref, &flags))
-        {
-            dmSys::ReachabilityCallback(reachability_ref, flags, 0);
-        }
 
         SCNetworkReachabilityContext context = {0, (void*) 0, NULL, NULL, NULL};
         if(!SCNetworkReachabilitySetCallback(reachability_ref, dmSys::ReachabilityCallback, &context))
         {
             dmLogError("Could not set reachability callback.");
+            CFRelease(reachability_ref);
+            reachability_ref = 0;
             return;
         }
 
-        if(!SCNetworkReachabilityScheduleWithRunLoop(reachability_ref, [[NSRunLoop currentRunLoop] getCFRunLoop], kCFRunLoopCommonModes))
+        if(!SCNetworkReachabilityScheduleWithRunLoop(reachability_ref, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode))
         {
             dmLogError("Could not schedule reachability callback.");
+            CFRelease(reachability_ref);
+            reachability_ref = 0;
             return;
         }
     }
@@ -147,7 +156,9 @@ namespace dmSys
         dmStrlCpy(info->m_Manufacturer, "Apple", sizeof(info->m_Manufacturer));
         dmStrlCpy(info->m_DeviceModel, uts.machine, sizeof(info->m_DeviceModel));
         dmStrlCpy(info->m_SystemName, [d.systemName UTF8String], sizeof(info->m_SystemName));
+        PatchSystemName(info->m_SystemName, sizeof(info->m_SystemName));
         dmStrlCpy(info->m_SystemVersion, [d.systemVersion UTF8String], sizeof(info->m_SystemVersion));
+        dmStrlCpy(info->m_ApiVersion, [d.systemVersion UTF8String], sizeof(info->m_ApiVersion));
 
         NSLocale* locale = [NSLocale currentLocale];
         const char* lang = [locale.localeIdentifier UTF8String];
@@ -163,6 +174,20 @@ namespace dmSys
         dmStrlCpy(info->m_DeviceLanguage, [device_language UTF8String], sizeof(info->m_DeviceLanguage));
     }
 
+    bool GetApplicationInfo(const char* id, ApplicationInfo* info)
+    {
+        memset(info, 0, sizeof(*info));
+
+        NSString* ns_url = [NSString stringWithUTF8String: id];
+        if (!([[UIApplication sharedApplication] canOpenURL:[NSURL URLWithString: ns_url ]]))
+        {
+            return false;
+        }
+
+        info->m_Installed = true;
+        return true;
+    }
+
     NetworkConnectivity GetNetworkConnectivity()
     {
         if (!reachability_ref)
@@ -173,7 +198,7 @@ namespace dmSys
         return g_NetworkConnectivity;
     }
 
-#else
+#else // osx
 
     void GetSystemInfo(SystemInfo* info)
     {
@@ -182,6 +207,7 @@ namespace dmSys
         uname(&uts);
 
         dmStrlCpy(info->m_SystemName, uts.sysname, sizeof(info->m_SystemName));
+        PatchSystemName(info->m_SystemName, sizeof(info->m_SystemName));
         dmStrlCpy(info->m_SystemVersion, uts.release, sizeof(info->m_SystemVersion));
         info->m_DeviceModel[0] = '\0';
 
@@ -201,6 +227,13 @@ namespace dmSys
 
         FillLanguageTerritory(lang, info);
         FillTimeZone(info);
+    }
+
+    bool GetApplicationInfo(const char* id, ApplicationInfo* info)
+    {
+        // only on iOS for now
+        memset(info, 0, sizeof(*info));
+        return false;
     }
 
     Result OpenURL(const char* url)

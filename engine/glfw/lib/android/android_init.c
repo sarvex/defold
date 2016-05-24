@@ -183,6 +183,7 @@ static void computeIconifiedState()
 
 static void handleCommand(struct android_app* app, int32_t cmd) {
     LOGV("handleCommand: %s", GetCmdName(cmd));
+
     switch (cmd)
     {
     case APP_CMD_SAVE_STATE:
@@ -231,6 +232,8 @@ static void handleCommand(struct android_app* app, int32_t cmd) {
             ASensorEventQueue_enableSensor(g_sensorEventQueue, g_accelerometer);
         }
         computeIconifiedState();
+        if(_glfwWin.windowFocusCallback)
+            _glfwWin.windowFocusCallback(1);
         break;
     case APP_CMD_WINDOW_RESIZED:
     case APP_CMD_CONFIG_CHANGED:
@@ -242,6 +245,8 @@ static void handleCommand(struct android_app* app, int32_t cmd) {
             ASensorEventQueue_disableSensor(g_sensorEventQueue, g_accelerometer);
         }
         computeIconifiedState();
+        if(_glfwWin.windowFocusCallback)
+            _glfwWin.windowFocusCallback(0);
         break;
     case APP_CMD_DESTROY:
         _glfwWin.opened = 0;
@@ -313,6 +318,12 @@ inline void *pointerIdToRef(int32_t id)
     return (void*)(0x1 + id);
 }
 
+static void updateGlfwMousePos(int32_t x, int32_t y)
+{
+    _glfwInput.MousePosX = x;
+    _glfwInput.MousePosY = y;
+}
+
 // return 1 to handle the event, 0 for default handling
 static int32_t handleInput(struct android_app* app, AInputEvent* event)
 {
@@ -334,32 +345,37 @@ static int32_t handleInput(struct android_app* app, AInputEvent* event)
 
         int32_t x = AMotionEvent_getX(event, pointer_index);
         int32_t y = AMotionEvent_getY(event, pointer_index);
-        _glfwInput.MousePosX = x;
-        _glfwInput.MousePosY = y;
 
         int32_t action_action = action & AMOTION_EVENT_ACTION_MASK;
 
         switch (action_action)
         {
             case AMOTION_EVENT_ACTION_DOWN:
+                updateGlfwMousePos(x,y);
                 _glfwInputMouseClick( GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS );
                 touchStart(pointer_ref, x, y);
                 break;
             case AMOTION_EVENT_ACTION_UP:
+                updateGlfwMousePos(x,y);
                 _glfwInputMouseClick( GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE );
                 touchUpdate(pointer_ref, x, y, GLFW_PHASE_ENDED);
                 break;;
             case AMOTION_EVENT_ACTION_POINTER_DOWN:
+                updateGlfwMousePos(x,y);
                 touchStart(pointer_ref, x, y);
                 break;
             case AMOTION_EVENT_ACTION_POINTER_UP:
+                updateGlfwMousePos(x,y);
                 touchUpdate(pointer_ref, x, y, GLFW_PHASE_ENDED);
                 break;
             case AMOTION_EVENT_ACTION_CANCEL:
+                updateGlfwMousePos(x,y);
                 touchUpdate(pointer_ref, x, y, GLFW_PHASE_CANCELLED);
                 break;
             case AMOTION_EVENT_ACTION_MOVE:
                 {
+                    updateGlfwMousePos(x,y);
+
                     // these events contain updates for all pointers.
                     int i, max = AMotionEvent_getPointerCount(event);
                     for (i=0;i<max;i++)
@@ -516,7 +532,16 @@ static int LooperCallback(int fd, int events, void* data)
     struct Command cmd;
     if (read(_glfwWin.m_Pipefd[0], &cmd, sizeof(cmd)) == sizeof(cmd)) {
         if (cmd.m_Command == CMD_INPUT_CHAR) {
+            // Trick to "fool" glfw. Otherwise repeated characters will be filtered due to repeat
+            _glfwInputChar( (int)cmd.m_Data, GLFW_RELEASE );
             _glfwInputChar( (int)cmd.m_Data, GLFW_PRESS );
+
+        } else if (cmd.m_Command == CMD_INPUT_MARKED_TEXT) {
+            _glfwSetMarkedText( (char*)cmd.m_Data );
+
+            // Need to free marked text string thas was
+            // allocated in android_window.c
+            free(cmd.m_Data);
         }
     } else {
         LOGF("read error in looper callback");
@@ -667,4 +692,3 @@ int _glfwPlatformTerminate( void )
 
     return GL_TRUE;
 }
-

@@ -57,22 +57,25 @@ TEST_P(ResourceTest, Test)
 }
 
 TEST_P(ResourceTest, TestPreload)
-{    
+{
     const char* resource_name = GetParam();
     void* resource;
     dmResource::HPreloader pr = dmResource::NewPreloader(m_Factory, resource_name);
     dmResource::Result r;
-    for (uint32_t i=0;i<50;i++)
+
+    uint64_t stop_time = dmTime::GetTime() + 30*10e6;
+    while (dmTime::GetTime() < stop_time)
     {
-        r = dmResource::UpdatePreloader(pr, 10*1000);
+        // Simulate running at 30fps
+        r = dmResource::UpdatePreloader(pr, 33*1000);
         if (r != dmResource::RESULT_PENDING)
             break;
-        dmTime::Sleep(10*1000);
+        dmTime::Sleep(33*1000);
     }
-    
+
     ASSERT_EQ(dmResource::RESULT_OK, r);
     ASSERT_EQ(dmResource::RESULT_OK, dmResource::Get(m_Factory, resource_name, &resource));
-    
+
     dmResource::DeletePreloader(pr);
     dmResource::Release(m_Factory, resource);
 }
@@ -180,6 +183,45 @@ TEST_P(ComponentFailTest, Test)
 
     dmGameObject::HInstance go = dmGameObject::New(m_Collection, go_name);
     ASSERT_EQ((void*)0, go);
+}
+
+// Test that go.delete() does not influence other sprite animations in progress
+TEST_F(SpriteAnimTest, GoDeletion)
+{
+    // Spawn 3 dumy game objects with one sprite in each
+    dmGameObject::HInstance go1 = dmGameObject::Spawn(m_Collection, "/sprite/valid_sprite.goc", dmHashString64("/go1"), 0, 0, Point3(0, 0, 0), Quat(0, 0, 0, 1), Vector3(1, 1, 1));
+    dmGameObject::HInstance go2 = dmGameObject::Spawn(m_Collection, "/sprite/valid_sprite.goc", dmHashString64("/go2"), 0, 0, Point3(0, 0, 0), Quat(0, 0, 0, 1), Vector3(1, 1, 1));
+    dmGameObject::HInstance go3 = dmGameObject::Spawn(m_Collection, "/sprite/valid_sprite.goc", dmHashString64("/go3"), 0, 0, Point3(0, 0, 0), Quat(0, 0, 0, 1), Vector3(1, 1, 1));
+    ASSERT_NE((void*)0, go1);
+    ASSERT_NE((void*)0, go2);
+    ASSERT_NE((void*)0, go3);
+
+    // Spawn one go with a script that will initiate animations on the above sprites
+    dmGameObject::HInstance go_animater = dmGameObject::Spawn(m_Collection, "/sprite/sprite_anim.goc", dmHashString64("/go_animater"), 0, 0, Point3(0, 0, 0), Quat(0, 0, 0, 1), Vector3(1, 1, 1));
+    ASSERT_NE((void*)0, go_animater);
+
+    // 1st iteration:
+    //  - go1 animation start
+    ASSERT_TRUE(dmGameObject::Update(m_Collection, &m_UpdateContext));
+    ASSERT_TRUE(dmGameObject::PostUpdate(m_Collection));
+
+    // 2nd iteration:
+    //  - go1 animation is over and removed
+    //  - go2+go3 animations start
+    ASSERT_TRUE(dmGameObject::Update(m_Collection, &m_UpdateContext));
+    ASSERT_TRUE(dmGameObject::PostUpdate(m_Collection));
+
+    // 3rd iteration:
+    //  - go2 animation is over and removed
+    ASSERT_TRUE(dmGameObject::Update(m_Collection, &m_UpdateContext));
+    ASSERT_TRUE(dmGameObject::PostUpdate(m_Collection));
+
+    // 4th iteration:
+    //  - go3 should still be animating (not be influenced by the deletion of go1/go2)
+    ASSERT_TRUE(dmGameObject::Update(m_Collection, &m_UpdateContext));
+    ASSERT_TRUE(dmGameObject::PostUpdate(m_Collection));
+
+    ASSERT_TRUE(dmGameObject::Final(m_Collection));
 }
 
 /* Camera */
@@ -520,7 +562,7 @@ INSTANTIATE_TEST_CASE_P(TileSet, ComponentTest, ::testing::ValuesIn(valid_tilese
 
 /* Texture */
 
-const char* valid_texture_resources[] = {"/texture/valid_png.texturec"};
+const char* valid_texture_resources[] = {"/texture/valid_png.texturec", "/texture/blank_4096_png.texturec"};
 INSTANTIATE_TEST_CASE_P(Texture, ResourceTest, ::testing::ValuesIn(valid_texture_resources));
 
 ResourceFailParams invalid_texture_resources[] =

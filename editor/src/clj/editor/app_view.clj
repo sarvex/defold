@@ -5,9 +5,14 @@
             [editor.handler :as handler]
             [editor.jfx :as jfx]
             [editor.login :as login]
-            [editor.project :as project]
+            [editor.defold-project :as project]
+            [editor.prefs-dialog :as prefs-dialog]
+            [editor.progress :as progress]
             [editor.ui :as ui]
-            [editor.workspace :as workspace])
+            [editor.workspace :as workspace]
+            [editor.resource :as resource]
+            [util.profiler :as profiler]
+            [util.http-server :as http-server])
   (:import [com.defold.editor EditorApplication]
            [com.defold.editor Start]
            [com.jogamp.opengl.util.awt Screenshot]
@@ -20,17 +25,19 @@
            [javafx.fxml FXMLLoader]
            [javafx.geometry Insets]
            [javafx.scene Scene Node Parent]
-           [javafx.scene.control Button ColorPicker Label TextField TitledPane TextArea TreeItem Menu MenuItem MenuBar TabPane Tab ProgressBar]
+           [javafx.scene.control Button ColorPicker Label TextField TitledPane TextArea TreeItem Menu MenuItem MenuBar TabPane Tab ProgressBar Tooltip]
            [javafx.scene.image Image ImageView WritableImage PixelWriter]
            [javafx.scene.input MouseEvent]
            [javafx.scene.layout AnchorPane GridPane StackPane HBox Priority]
            [javafx.scene.paint Color]
            [javafx.stage Stage FileChooser]
            [javafx.util Callback]
-           [java.io File]
+           [java.io File ByteArrayOutputStream]
            [java.nio.file Paths]
            [java.util.prefs Preferences]
            [javax.media.opengl GL GL2 GLContext GLProfile GLDrawableFactory GLCapabilities]))
+
+(set! *warn-on-reflection* true)
 
 (g/defnode AppView
   (property stage Stage)
@@ -42,7 +49,7 @@
 
   (output active-tab Tab (g/fnk [^TabPane tab-pane] (-> tab-pane (.getSelectionModel) (.getSelectedItem))))
   (output active-outline g/Any :cached (g/fnk [outline] outline))
-  (output active-resource (g/protocol workspace/Resource) (g/fnk [^Tab active-tab]
+  (output active-resource (g/protocol resource/Resource) (g/fnk [^Tab active-tab]
                                                                  (when active-tab
                                                                    (ui/user-data active-tab ::resource))))
   (output active-view g/NodeID (g/fnk [^Tab active-tab]
@@ -66,7 +73,7 @@
 
 (defn- on-selected-tab-changed [app-view resource-node]
   (g/transact
-    (replace-connection resource-node :outline app-view :outline))
+    (replace-connection resource-node :node-outline app-view :outline))
   (invalidate app-view :active-tab))
 
 (defn- on-tabs-changed [app-view]
@@ -87,19 +94,27 @@
   (run [app-view] (g/transact (g/set-property app-view :active-tool :rotate)))
   (state [app-view]  (= (g/node-value app-view :active-tool) :rotate)))
 
-(ui/extend-menu ::toolbar nil
-                [{:icon "icons/Icons_T_01_Select.png"
+(ui/extend-menu :toolbar nil
+                [{:id :select
+                  :icon "icons/Icons_T_01_Select.png"
                   :command :select-tool}
-                 {:icon "icons/Icons_T_02_Move.png"
+                 {:id :move
+                  :icon "icons/Icons_T_02_Move.png"
                   :command :move-tool}
-                 {:icon "icons/Icons_T_03_Rotate.png"
+                 {:id :rotate
+                  :icon "icons/Icons_T_03_Rotate.png"
                   :command :rotate-tool}
-                 {:icon "icons/Icons_T_04_Scale.png"
+                 {:id :scale
+                  :icon "icons/Icons_T_04_Scale.png"
                   :command :scale-tool}])
 
 (handler/defhandler :quit :global
   (enabled? [] true)
-  (run [] (Platform/exit)))
+  (run [project]
+    (when (or (not (workspace/version-on-disk-outdated? (project/workspace project)))
+              (and (workspace/version-on-disk-outdated? (project/workspace project))
+                   (dialogs/make-confirm-dialog "Unsaved changes exists, are you sure you want to quit?")))
+      (Platform/exit))))
 
 (handler/defhandler :new :global
   (enabled? [] true)
@@ -114,17 +129,56 @@
   (enabled? [] true)
   (run [prefs] (login/logout prefs)))
 
-(handler/defhandler :close :global
+(handler/defhandler :preferences :global
   (enabled? [] true)
-  (run [app-view] (let [tab-pane ^TabPane (g/node-value app-view :tab-pane)]
-                    (when-let [tab (-> tab-pane (.getSelectionModel) (.getSelectedItem))]
-                      (.remove (.getTabs tab-pane) tab)
-                      ; TODO: Workaround as there's currently no API to close tabs programatically with identical semantics to close manually
-                      ; See http://stackoverflow.com/questions/17047000/javafx-closing-a-tab-in-tabpane-dynamically
-                      (Event/fireEvent tab (Event. Tab/CLOSED_EVENT))))))
+  (run [prefs] (prefs-dialog/open-prefs prefs)))
+
+(defn- remove-tab [^TabPane tab-pane ^Tab tab]
+  (.remove (.getTabs tab-pane) tab)
+  ;; TODO: Workaround as there's currently no API to close tabs programatically with identical semantics to close manually
+  ;; See http://stackoverflow.com/questions/17047000/javafx-closing-a-tab-in-tabpane-dynamically
+  (Event/fireEvent tab (Event. Tab/CLOSED_EVENT)))
+
+(defn- collect-resources [{:keys [children] :as resource}]
+  (if (empty? children)
+    #{resource}
+    (set (concat [resource] (mapcat collect-resources children)))))
+
+(defn remove-resource-tab [^TabPane tab-pane resource]
+  (let [tabs      (.getTabs tab-pane)
+        resources (collect-resources resource)]
+    (doseq [tab (filter #(contains? resources (ui/user-data % ::resource)) tabs)]
+      (remove-tab tab-pane tab))))
+
+(defn- get-tabs [app-view]
+  (let [tab-pane ^TabPane (g/node-value app-view :tab-pane)]
+    (.getTabs tab-pane)))
+
+(handler/defhandler :close :global
+  (enabled? [app-view] (not-empty (get-tabs app-view)))
+  (run [app-view]
+    (let [tab-pane ^TabPane (g/node-value app-view :tab-pane)]
+      (when-let [tab (-> tab-pane (.getSelectionModel) (.getSelectedItem))]
+        (remove-tab tab-pane tab)))))
+
+(handler/defhandler :close-other :global
+  (enabled? [app-view] (not-empty (get-tabs app-view)))
+  (run [app-view]
+    (let [tab-pane ^TabPane (g/node-value app-view :tab-pane)]
+      (when-let [selected-tab (-> tab-pane (.getSelectionModel) (.getSelectedItem))]
+        (doseq [tab (.getTabs tab-pane)]
+          (when (not= tab selected-tab)
+            (remove-tab tab-pane tab)))))))
+
+(handler/defhandler :close-all :global
+  (enabled? [app-view] (not-empty (get-tabs app-view)))
+  (run [app-view]
+    (let [tab-pane ^TabPane (g/node-value app-view :tab-pane)]
+      (doseq [tab (.getTabs tab-pane)]
+        (remove-tab tab-pane tab)))))
 
 (defn make-about-dialog []
-  (let [root ^Parent (FXMLLoader/load (io/resource "about.fxml"))
+  (let [root ^Parent (ui/load-fxml "about.fxml")
         stage (Stage.)
         scene (Scene. root)
         controls (ui/collect-controls root ["version" "sha1"])]
@@ -137,6 +191,10 @@
 (handler/defhandler :about :global
   (enabled? [] true)
   (run [] (make-about-dialog)))
+
+(handler/defhandler :reload-stylesheet :global
+  (enabled? [] true)
+  (run [] (ui/reload-root-styles!)))
 
 (ui/extend-menu ::menubar nil
                 [{:label "File"
@@ -153,13 +211,24 @@
                              {:label "Open Asset"
                               :acc "Shift+Shortcut+R"
                               :command :open-asset}
+                             {:label "Search in Files"
+                              :acc "Shift+Shortcut+F"
+                              :command :search-in-files}
                              {:label :separator}
                              {:label "Close"
                               :acc "Shortcut+W"
                               :command :close}
+                             {:label "Close All"
+                              :acc "Shift+Shortcut+W"
+                              :command :close-all}
+                             {:label "Close Others"
+                              :command :close-other}
                              {:label :separator}
                              {:label "Logout"
                               :command :logout}
+                             {:label "Preferences..."
+                              :command :preferences
+                              :acc "Shortcut+,"}
                              {:label "Quit"
                               :acc "Shortcut+Q"
                               :command :quit}]}
@@ -187,10 +256,36 @@
                               :acc "Shortcut+BACKSPACE"
                               :icon_ "icons/redo.png"
                               :command :delete}
-                             ]}
+                             {:label :separator}
+                             {:label "Move Up"
+                              :acc "Alt+UP"
+                              :command :move-up}
+                             {:label "Move Down"
+                              :acc "Alt+DOWN"
+                              :command :move-down}]}
                  {:label "Help"
-                  :children [{:label "About"
+                  :children [{:label "Profiler"
+                              :children [{:label "Measure"
+                                          :command :profile
+                                          :acc "Shortcut+P"}
+                                         {:label "Measure and Show"
+                                          :command :profile-show
+                                          :acc "Shift+Shortcut+P"}]}
+                             {:label "Reload Stylesheet"
+                              :acc "F5"
+                              :command :reload-stylesheet}
+                             {:label "About"
                               :command :about}]}])
+
+(ui/extend-menu ::tab-menu nil
+                [{:label "Close"
+                  :acc "Shortcut+W"
+                  :command :close}
+                 {:label "Close Others"
+                  :command :close-other}
+                 {:label "Close All"
+                  :acc "Shift+Shortcut+W"
+                  :command :close-all}])
 
 (defrecord DummySelectionProvider []
   workspace/SelectionProvider
@@ -199,6 +294,20 @@
 (defn- make-title
   ([] "Defold Editor 2.0")
   ([project-title] (str (make-title) " - " project-title)))
+
+(defn- refresh-ui! [^Stage stage project]
+  (ui/refresh (.getScene stage))
+  (let [settings      (g/node-value project :settings)
+        project-title (settings ["project" "title"])
+        new-title     (make-title project-title)]
+    (when (not= (.getTitle stage) new-title)
+      (.setTitle stage new-title))))
+
+(defn- refresh-views! [app-view]
+  (let [auto-pulls (g/node-value app-view :auto-pulls)]
+    (doseq [[node label] auto-pulls]
+      (profiler/profile "view" (:name (g/node-type* node))
+                        (g/node-value node label)))))
 
 (defn make-app-view [view-graph project-graph project ^Stage stage ^MenuBar menu-bar ^TabPane tab-pane prefs]
   (.setUseSystemMenuBar menu-bar true)
@@ -216,56 +325,129 @@
       (.addListener
         (reify ListChangeListener
           (onChanged [this change]
+            (ui/restyle-tabs! tab-pane)
             (on-tabs-changed app-view)))))
 
-    (ui/register-toolbar (.getScene stage) "#toolbar" ::toolbar)
+    (ui/register-toolbar (.getScene stage) "#toolbar" :toolbar)
     (ui/register-menubar (.getScene stage) "#menu-bar" ::menubar)
-    (let [refresh-timer (ui/->timer 2 (fn [dt]
-                                        (ui/refresh (.getScene stage))
-                                        (let [settings (g/node-value project :settings)
-                                              project-title (settings ["project" "title"])
-                                              new-title (make-title project-title)]
-                                          (when (not= (.getTitle stage) new-title)
-                                            (.setTitle stage new-title)))
-                                        (let [auto-pulls (g/node-value app-view :auto-pulls)]
-                                          (doseq [[node label] auto-pulls]
-                                            (g/node-value node label)))))]
-      (ui/timer-stop-on-close! stage refresh-timer)
-      (ui/timer-start! refresh-timer))
+
+    (let [refresh-timers [(ui/->timer 2 "refresh-ui" (fn [dt] (refresh-ui! stage project)))
+                          (ui/->timer 10 "refresh-views" (fn [dt] (refresh-views! app-view)))]]
+      (doseq [timer refresh-timers]
+        (ui/timer-stop-on-close! stage timer)
+        (ui/timer-start! timer)))
     app-view))
 
-(defn open-resource [app-view workspace project resource]
-  (let [resource-type (workspace/resource-type resource)
+(defn- create-new-tab [app-view workspace project resource resource-node
+                       resource-type view-type make-view-fn ^ObservableList tabs opts]
+  (let [parent     (AnchorPane.)
+        tab        (doto (Tab. (resource/resource-name resource))
+                     (.setContent parent)
+                     (ui/user-data! ::resource resource)
+                     (ui/user-data! ::resource-node resource-node)
+                     (ui/user-data! ::view-type view-type))
+        _          (.add tabs tab)
+        view-graph (g/make-graph! :history false :volatility 2)
+        opts       (merge opts
+                          (get (:view-opts resource-type) (:id view-type))
+                          {:app-view  app-view
+                           :project   project
+                           :workspace workspace
+                           :tab       tab})
+        view       (make-view-fn view-graph parent resource-node opts)]
+    (ui/user-data! tab ::view view)
+    (.setGraphic tab (jfx/get-image-view (:icon resource-type "icons/cog.png") 16))
+    (ui/register-tab-context-menu tab ::tab-menu)
+    (let [close-handler (.getOnClosed tab)]
+      (.setOnClosed tab (ui/event-handler
+                         event
+                         (g/delete-graph! view-graph)
+                         (when close-handler
+                           (.handle close-handler event)))))
+    tab))
+
+(defn open-resource
+  ([app-view workspace project resource]
+   (open-resource app-view workspace project resource {}))
+  ([app-view workspace project resource opts]
+   (let [resource-type (resource/resource-type resource)
+         view-type     (or (:selected-view-type opts)
+                           (first (:view-types resource-type))
+                           (workspace/get-view-type workspace :text))]
+     (if-let [make-view-fn (:make-view-fn view-type)]
+       (let [resource-node     (project/get-resource-node project resource)
+             ^TabPane tab-pane (g/node-value app-view :tab-pane)
+             tabs              (.getTabs tab-pane)
+             tab               (or (first (filter #(and (= resource (ui/user-data % ::resource))
+                                                        (= view-type (ui/user-data % ::view-type)))
+                                                  tabs))
+                                   (create-new-tab app-view workspace project resource resource-node
+                                                   resource-type view-type make-view-fn tabs opts))]
+         (.select (.getSelectionModel tab-pane) tab)
+         (when-let [focus (:focus-fn view-type)]
+           (focus (ui/user-data tab ::view) opts))
+         (project/select! project [resource-node]))
+       (let [path (resource/abs-path resource)]
+         (try
+           (.open (Desktop/getDesktop) (File. path))
+           (catch Exception _
+             (dialogs/make-alert-dialog (str "Unable to open external editor for " path)))))))))
+
+(defn- gen-tooltip [workspace project app-view resource]
+  (let [resource-type (resource/resource-type resource)
         view-type (or (first (:view-types resource-type)) (workspace/get-view-type workspace :text))]
-    (if-let [make-view-fn (:make-view-fn view-type)]
-      (let [resource-node (project/get-resource-node project resource)
-            ^TabPane tab-pane   (g/node-value app-view :tab-pane)
-            parent     (AnchorPane.)
-            tab        (doto (Tab. (workspace/resource-name resource))
-                         (.setContent parent)
-                         (ui/user-data! ::resource resource)
-                         (ui/user-data! ::resource-node resource-node))
-            tabs       (doto (.getTabs tab-pane) (.add tab))
-            view-graph (g/make-graph! :history false :volatility 2)
-            opts       (assoc ((:id view-type) (:view-opts resource-type))
-                              :app-view app-view
-                              :project project
-                              :workspace workspace
-                              :tab tab)
-            view       (make-view-fn view-graph parent resource-node opts)]
-        (ui/user-data! tab ::view view)
-        (.setGraphic tab (jfx/get-image-view (:icon resource-type "icons/cog.png") 16))
-        (let [close-handler (.getOnClosed tab)]
-          (.setOnClosed tab (ui/event-handler
-                             event
-                             (g/delete-graph! view-graph)
-                             (when close-handler
-                               (.handle close-handler event)))))
-        (.select (.getSelectionModel tab-pane) tab)
-        (project/select! project [resource-node]))
-      (.open (Desktop/getDesktop) (File. ^String (workspace/abs-path resource))))))
+    (when-let [make-preview-fn (:make-preview-fn view-type)]
+      (let [tooltip (Tooltip.)]
+        (doto tooltip
+          (.setGraphic (doto (ImageView.)
+                         (.setScaleY -1.0)))
+          (.setOnShowing (ui/event-handler
+                           e
+                           (let [image-view ^ImageView (.getGraphic tooltip)]
+                             (when-not (.getImage image-view)
+                               (let [resource-node (project/get-resource-node project resource)
+                                         view-graph (g/make-graph! :history false :volatility 2)
+                                         opts (assoc ((:id view-type) (:view-opts resource-type))
+                                                     :app-view app-view
+                                                     :project project
+                                                     :workspace workspace)
+                                         preview (make-preview-fn view-graph resource-node opts 256 256)]
+                                     (.setImage image-view ^Image (g/node-value preview :image))
+                                     (ui/user-data! image-view :graph view-graph))))))
+          (.setOnHiding (ui/event-handler
+                          e
+                          (let [image-view ^ImageView (.getGraphic tooltip)]
+                            (when-let [graph (ui/user-data image-view :graph)]
+                              (g/delete-graph! graph))))))))))
+
+(defn- make-resource-dialog [workspace project app-view]
+  (when-let [resource (first (dialogs/make-resource-dialog workspace {:tooltip-gen (partial gen-tooltip workspace project app-view)}))]
+    (open-resource app-view workspace project resource)))
 
 (handler/defhandler :open-asset :global
   (enabled? [] true)
-  (run [workspace project app-view] (when-let [resource (first (dialogs/make-resource-dialog workspace {}))]
-                                      (open-resource app-view workspace project resource))))
+  (run [workspace project app-view] (make-resource-dialog workspace project app-view)))
+
+(defn- make-search-in-files-dialog [workspace project app-view]
+  (let [[resource opts] (dialogs/make-search-in-files-dialog
+                         workspace
+                         (fn [exts term]
+                           (project/search-in-files project exts term)))]
+    (when resource
+      (open-resource app-view workspace project resource opts))))
+
+(handler/defhandler :search-in-files :global
+  (enabled? [] true)
+  (run [workspace project app-view] (make-search-in-files-dialog workspace project app-view)))
+
+(defn- fetch-libraries [workspace project]
+  (workspace/set-project-dependencies! workspace (project/project-dependencies project))
+  (future
+    (ui/with-disabled-ui
+      (ui/with-progress [render-fn ui/default-render-progress!]
+        (workspace/update-dependencies! workspace render-fn)
+        (workspace/resource-sync! workspace true [] render-fn)))))
+
+(handler/defhandler :fetch-libraries :global
+  (enabled? [] true)
+  (run [workspace project] (fetch-libraries workspace project)))

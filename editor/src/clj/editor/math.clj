@@ -61,7 +61,7 @@
         (doto (Point3d. line-dir) (.scaleAdd (- (Math/sqrt (- radius-sq dist-sq))) closest))
         (Point3d. (doto (Vector3d. closest) (.sub circle-pos) (.normalize) (.scaleAdd (Math/sqrt radius-sq) circle-pos)))))))
 
-(defn euler->quat [euler]
+(defn euler->quat ^Quat4d [euler]
   ; Implementation based on:
   ; http://ntrs.nasa.gov/archive/nasa/casi.ntrs.nasa.gov/19770024290.pdf
   ; Rotation sequence: 231 (YZX)
@@ -98,7 +98,7 @@
             attitude (* sign Math/PI 0.5)
             bank 0]
         (map rad->deg [bank heading attitude]))
-      
+
       :default
       (let [sqx (* x x)
             sqy (* y y)
@@ -108,7 +108,7 @@
             bank (Math/atan2 (- (* 2.0 x w) (* 2.0 y z)) (- 1.0 (* 2.0 sqx) (* 2.0 sqz)))]
         (mapv rad->deg [bank heading attitude])))))
 
-(defn rotate [^Quat4d rotation ^Vector3d v]
+(defn ^Vector3d rotate [^Quat4d rotation ^Vector3d v]
   (let [q (doto (Quat4d.) (.set (Vector4d. v)))
         _ (.mul q rotation q)
         _ (.mulInverse q rotation)]
@@ -154,6 +154,16 @@
         (.setColumn mat3 col axis))
       (.set out-rotation mat3)
       (.set out-scale scale))))
+
+(defn affine-inverse ^Matrix4d [^Matrix4d mat]
+  (let [t (Vector3d.)
+        rs (Matrix3d.)]
+    (.get mat t)
+    (.getRotationScale mat rs)
+    (.transpose rs)
+    (.negate t)
+    (.transform rs t)
+    (doto (Matrix4d.) (.set t) (.setRotationScale rs))))
 
 (defprotocol VecmathConverter
   (clj->vecmath [this v])

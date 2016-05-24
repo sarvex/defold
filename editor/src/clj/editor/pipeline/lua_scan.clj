@@ -4,6 +4,8 @@
             [editor.protobuf :as protobuf])
   (:import [com.defold.editor.pipeline LuaScanner  LuaScanner$Property LuaScanner$Property$Status]))
 
+(set! *warn-on-reflection* true)
+
 (defn src->modules [source]
   (LuaScanner/scan source))
 
@@ -21,7 +23,9 @@
 
 (defn- prop->clj [^LuaScanner$Property property]
   (let [status (status->clj (.status property))
-        type (protobuf/pb-enum->val (.getValueDescriptor (.type property)))]
+        type (some-> (.type property)
+               (.getValueDescriptor)
+               (protobuf/pb-enum->val))]
     {:name (.name property)
      :type type
      :raw-value (.rawValue property)

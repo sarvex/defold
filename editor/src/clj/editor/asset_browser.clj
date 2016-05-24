@@ -15,7 +15,7 @@
            [javafx.application Platform]
            [javafx.collections FXCollections ObservableList]
            [javafx.embed.swing SwingFXUtils]
-           [javafx.event ActionEvent EventHandler]
+           [javafx.event ActionEvent Event EventHandler]
            [javafx.fxml FXMLLoader]
            [javafx.geometry Insets]
            [javafx.scene.input Clipboard ClipboardContent]
@@ -58,7 +58,7 @@
   (let [cached (atom false)]
     (proxy [TreeItem] [parent]
       (isLeaf []
-        (or (not= :folder (workspace/source-type (.getValue ^TreeItem this)))
+        (or (not= :folder (resource/source-type (.getValue ^TreeItem this)))
             (empty? (:children (.getValue ^TreeItem this)))))
       (getChildren []
         (let [this ^TreeItem this
@@ -71,6 +71,8 @@
 (ui/extend-menu ::resource-menu nil
                 [{:label "Open"
                   :command :open}
+                 {:label "Open As"
+                  :command :open-as}
                  {:label "Copy"
                   :command :copy
                   :acc "Shortcut+C"}
@@ -80,6 +82,8 @@
                  {:label "Paste"
                   :command :paste
                   :acc "Shortcut+V"}
+                 {:label "Rename"
+                  :command :rename}
                  {:label "Delete"
                   :command :delete
                   :icon "icons/cross.png"
@@ -94,21 +98,37 @@
                   :command :new-folder
                   :icon "icons/32/Icons_01-Folder-closed.png"}])
 
-(defn- is-resource [x] (satisfies? workspace/Resource x))
-(defn- is-deletable-resource [x] (and (satisfies? workspace/Resource x)
-                                      (not (workspace/read-only? x))
-                                      (not (#{"/" "/game.project"} (workspace/proj-path x)))))
-(defn- is-file-resource [x] (and (satisfies? workspace/Resource x)
-                                 (= :file (workspace/source-type x))))
+(defn- is-resource [x] (satisfies? resource/Resource x))
+(defn- is-deletable-resource [x] (and (satisfies? resource/Resource x)
+                                      (not (resource/read-only? x))
+                                      (not (#{"/" "/game.project"} (resource/proj-path x)))))
+(defn- is-resource-file [x] (and (satisfies? resource/Resource x)
+                                 (= :file (resource/source-type x))))
 
 (handler/defhandler :open :asset-browser
-  (enabled? [selection] (every? is-file-resource selection))
+  (enabled? [selection] (every? is-resource-file selection))
   (run [selection open-fn]
        (doseq [resource selection]
          (open-fn resource))))
 
+(handler/defhandler :open-as :asset-browser
+  (enabled? [selection] (= 1 (count selection)))
+  (run [selection open-fn user-data]
+    (let [resource (first selection)]
+      (open-fn resource (when-let [view-type (:selected-view-type user-data)]
+                          {:selected-view-type view-type}))))
+  (options [workspace selection user-data]
+           (when-not user-data
+             (let [resource      (first selection)
+                   resource-type (resource/resource-type resource)]
+               (map (fn [vt]
+                      {:label     (or (:label vt) "External Editor")
+                       :command   :open-as
+                       :user-data {:selected-view-type vt}})
+                    (:view-types resource-type))))))
+
 (defn- roots [resources]
-  (let [resources (into {} (map (fn [resource] [(->path (workspace/proj-path resource)) resource]) resources))
+  (let [resources (into {} (map (fn [resource] [(->path (resource/proj-path resource)) resource]) resources))
         roots (loop [paths (keys resources)
                      roots []]
                 (if-let [^Path path (first paths)]
@@ -120,8 +140,8 @@
     (mapv #(resources %) roots)))
 
 (defn tmp-file [^File dir resource]
-  (let [f (File. dir ^String (workspace/resource-name resource))]
-    (if (= :file (workspace/source-type resource))
+  (let [f (File. dir (resource/resource-name resource))]
+    (if (= :file (resource/source-type resource))
       (with-open [out (io/writer f)]
         (IOUtils/copy (io/input-stream resource) out))
       (do
@@ -135,19 +155,42 @@
                     (.toFile))
               (.deleteOnExit))]
     (mapv (fn [r]
-            (let [^String abs-path (or (workspace/abs-path r) (.getAbsolutePath ^File (tmp-file tmp r)))]
+            (let [abs-path (or (resource/abs-path r) (.getAbsolutePath ^File (tmp-file tmp r)))]
               (File. abs-path)))
           resources)))
 
-(defn- delete [resources]
+(defn- rename [resource]
+  (when resource
+    (let [workspace        (resource/workspace resource)
+          srcf             (File. (resource/abs-path resource))
+          dir?             (.isDirectory srcf)
+          ext              (:ext (resource/resource-type resource))
+          ^String new-name (dialogs/make-rename-dialog
+                            (if dir? "Rename folder" "Rename file")
+                            (if dir? "New folder name" "New file name")
+                            (if dir?
+                              (resource/resource-name resource)
+                              (string/replace (resource/resource-name resource)
+                                              (re-pattern (str "." ext))
+                                              ""))
+                            ext)
+          dstf             (and new-name (File. (.getParent srcf) new-name))]
+      (when dstf
+        (if dir?
+          (FileUtils/moveDirectory srcf dstf)
+          (FileUtils/moveFile srcf dstf))
+        (workspace/resource-sync! workspace [[srcf dstf]])))))
+
+(defn- delete [resources on-delete-resource-fn]
   (when (not (empty? resources))
-    (let [workspace (workspace/workspace (first resources))]
+    (let [workspace (resource/workspace (first resources))]
       (doseq [resource resources]
-        (let [f (File. ^String (workspace/abs-path resource))]
+        (let [f (File. (resource/abs-path resource))]
           (if (.isDirectory f)
             (FileUtils/deleteDirectory f)
-            (.delete (File. ^String (workspace/abs-path resource))))))
-      (workspace/fs-sync workspace))))
+            (.delete (File. (resource/abs-path resource))))
+          (on-delete-resource-fn resource)))
+      (workspace/resource-sync! workspace))))
 
 (defn- copy [files]
   (let [cb (Clipboard/getSystemClipboard)
@@ -162,12 +205,12 @@
 
 (handler/defhandler :cut :asset-browser
   (enabled? [selection] (every? is-deletable-resource selection))
-  (run [selection]
+  (run [selection on-delete-resource-fn]
        (let [tmp (doto (-> (Files/createTempDirectory "asset-cut" (into-array FileAttribute []))
                          (.toFile))
                    (.deleteOnExit))]
          (copy (mapv #(tmp-file tmp %) (roots selection))))
-       (delete selection)))
+    (delete selection on-delete-resource-fn)))
 
 (defn- unique [^File f]
   (if (.exists f)
@@ -180,23 +223,19 @@
       (recur (File. path)))
     f))
 
-(defn- to-folder [^File file]
+(defn- to-folder ^File [^File file]
   (if (.isFile file) (.getParentFile file) file))
 
-(defn- file-resource [workspace ^File file]
-  (let [children (mapv #(file-resource workspace %) (.listFiles file))]
-    (FileResource. workspace file children)))
-
 (defn- select-files! [workspace tree-view files]
-  (let [selection (mapv #(file-resource workspace %) files)]
-    (ui/user-data! tree-view ::pending-selection selection)))
+  (let [selected-paths (mapv (partial resource/file->proj-path (workspace/project-path workspace)) files)]
+    (ui/user-data! tree-view ::pending-selection selected-paths)))
 
 (handler/defhandler :paste :asset-browser
   (enabled? [selection]
             (let [cb (Clipboard/getSystemClipboard)]
               (and (.hasFiles cb)
                    (= 1 (count selection))
-                   (empty? (filter workspace/read-only? selection)))))
+                   (empty? (filter resource/read-only? selection)))))
   (run [selection workspace tree-view]
        (let [resource (first selection)
              src-files (.getFiles (Clipboard/getSystemClipboard))
@@ -204,23 +243,32 @@
                                      (if (= tgt src)
                                        (.getParentFile ^File tgt)
                                        tgt))
-                                   (to-folder (File. ^String (workspace/abs-path resource))) src-files)
+                                   (to-folder (File. (resource/abs-path resource))) src-files)
              pairs (mapv (fn [^File f] [f (unique (File. tgt-dir (FilenameUtils/getName (.toString f))))]) src-files)]
          (doseq [[^File src-file ^File tgt-file] pairs]
            (if (.isDirectory src-file)
              (FileUtils/copyDirectory src-file tgt-file)
              (FileUtils/copyFile src-file tgt-file)))
          (select-files! workspace tree-view (mapv second pairs))
-         (workspace/fs-sync (workspace/workspace resource)))))
+         (workspace/resource-sync! (resource/workspace resource)))))
+
+(handler/defhandler :rename :asset-browser
+  (enabled? [selection]
+            (and (= 1 (count selection))
+                 (not (resource/read-only? (first selection)))))
+  (run [selection]
+    (rename (first selection))))
 
 (handler/defhandler :delete :asset-browser
   (enabled? [selection] (every? is-deletable-resource selection))
-  (run [selection]
-       (delete selection)))
+  (run [selection on-delete-resource-fn]
+    (let [names (apply str (interpose ", " (map resource/resource-name selection)))]
+      (and (dialogs/make-confirm-dialog (format "Are you sure you want to delete %s?" names))
+           (delete selection on-delete-resource-fn)))))
 
 (handler/defhandler :show-in-desktop :asset-browser
-  (enabled? [selection] (and (= 1 (count selection)) (not= nil (workspace/abs-path (first selection)))) )
-  (run [selection] (let [f (File. ^String (workspace/abs-path (first selection)))]
+  (enabled? [selection] (and (= 1 (count selection)) (not= nil (resource/abs-path (first selection)))) )
+  (run [selection] (let [f (File. (resource/abs-path (first selection)))]
                      (.open (Desktop/getDesktop) (to-folder f)))))
 
 (def update-tree-view nil)
@@ -230,17 +278,19 @@
                        "New"
                        (let [rt (:resource-type user-data)]
                          (or (:label rt) (:ext rt)))))
-  (enabled? [selection] (and (= (count selection) 1) (not= nil (workspace/abs-path (first selection)))))
+  (enabled? [selection] (and (= (count selection) 1) (not= nil (resource/abs-path (first selection)))))
   (run [selection user-data workspace tree-view open-fn]
        (let [resource (first selection)
-             f (File. ^String (workspace/abs-path resource))
-             base-folder (to-folder f)
-             rt (:resource-type user-data)]
-         (when-let [f (dialogs/make-new-file-dialog (File. ^String (g/node-value workspace :root)) base-folder (or (:label rt) (:ext rt)) (:ext rt))]
-           (spit f (workspace/template rt))
-           (workspace/fs-sync workspace)
-           (let [resource (FileResource. workspace f [])]
-             (update-tree-view tree-view (g/node-value workspace :resource-tree) [resource])
+             base-folder (to-folder (File. (resource/abs-path resource)))
+             rt (:resource-type user-data)
+             project-path (workspace/project-path workspace)]
+         (when-let [new-file (dialogs/make-new-file-dialog project-path base-folder (or (:label rt) (:ext rt)) (:ext rt))]
+           (spit new-file (workspace/template rt))
+           (workspace/resource-sync! workspace)
+           (let [resource-map (g/node-value workspace :resource-map)
+                 new-resource-path (resource/file->proj-path project-path new-file)
+                 resource (resource-map new-resource-path)]
+             (update-tree-view tree-view (g/node-value workspace :resource-tree) (filter some? [resource]))
              (open-fn resource)))))
   (options [workspace selection user-data]
            (when (not user-data)
@@ -254,15 +304,15 @@
   (.toFile (.resolve (.toPath base-folder) new-folder-name)))
 
 (handler/defhandler :new-folder :asset-browser
-  (enabled? [selection] (and (= (count selection) 1) (not= nil (workspace/abs-path (first selection)))))
-  (run [selection workspace] (let [f (File. ^String (workspace/abs-path (first selection)))
+  (enabled? [selection] (and (= (count selection) 1) (not= nil (resource/abs-path (first selection)))))
+  (run [selection workspace] (let [f (File. (resource/abs-path (first selection)))
                                    base-folder (to-folder f)]
                                (when-let [new-folder-name (dialogs/make-new-folder-dialog base-folder)]
                                  (.mkdir ^File (resolve-sub-folder base-folder new-folder-name))
-                                 (workspace/fs-sync workspace)))))
+                                 (workspace/resource-sync! workspace)))))
 
 (defn- item->path [^TreeItem item]
-  (-> item (.getValue) (workspace/proj-path)))
+  (-> item (.getValue) (resource/proj-path)))
 
 (defn- sync-tree [old-root new-root]
   (let [item-seq (ui/tree-item-seq old-root)
@@ -280,9 +330,9 @@
                                                         (when expanded (.setExpanded item expanded))
                                                         selected)) items)))
 
-(defn- sync-selection [^TreeView tree-view ^TreeItem root selection]
-  (when (and root (not (empty? selection)))
-    (let [selected-paths (set selection)]
+(defn- sync-selection [^TreeView tree-view ^TreeItem root selected-paths]
+  (when (and root (seq selected-paths))
+    (let [selected-paths (set selected-paths)]
       (auto-expand (.getChildren root) selected-paths)
       (let [count (.getExpandedItemCount tree-view)
             selected-indices (filter #(selected-paths (item->path (.getTreeItem tree-view %))) (range count))]
@@ -290,7 +340,7 @@
           (doto (-> tree-view (.getSelectionModel))
             (.selectIndices (int (first selected-indices)) (int-array (rest selected-indices)))))))))
 
-(defn update-tree-view [^TreeView tree-view resource-tree selection]
+(defn update-tree-view [^TreeView tree-view resource-tree selected-paths]
   (let [root (.getRoot tree-view)
         ^TreeItem new-root (->>
                              (tree-item resource-tree)
@@ -298,23 +348,27 @@
     (when new-root
       (.setExpanded new-root true))
     (.setRoot tree-view new-root)
-    (sync-selection tree-view new-root (mapv workspace/proj-path selection))
+    (sync-selection tree-view new-root selected-paths)
     tree-view))
 
-(g/defnk produce-tree-view [tree-view resource-tree]
-  (let [selection (or (ui/user-data tree-view ::pending-selection) (workspace/selection tree-view))]
-    (update-tree-view tree-view resource-tree selection)
+(g/defnk produce-tree-view [_node-id tree-view resource-tree]
+  (let [selected-paths (or (ui/user-data tree-view ::pending-selection)
+                           (mapv resource/proj-path (workspace/selection tree-view)))]
+    (update-tree-view tree-view resource-tree selected-paths)
     (ui/user-data! tree-view ::pending-selection nil)
     tree-view))
 
 (defn- drag-detected [^MouseEvent e selection]
   (let [resources (roots selection)
         files (fileify resources)
-        mode (if (empty? (filter workspace/read-only? resources))
+        mode (if (empty? (filter resource/read-only? resources))
                TransferMode/MOVE
                TransferMode/COPY)
         db (.startDragAndDrop ^Node (.getSource e) (into-array TransferMode [mode]))
         content (ClipboardContent.)]
+    (when (= 1 (count resources))
+      (.setDragView db (jfx/get-image (workspace/resource-icon (first resources)) 16)
+                    0 16))
     (.putFiles content files)
     (.setContent db content)
     (.consume e)))
@@ -326,6 +380,17 @@
       (target (.getParent node)))))
 
 (defn- drag-done [^DragEvent e selection])
+
+(defn- drag-entered [^DragEvent e]
+  (when-let [^TreeCell cell (target (.getTarget e))]
+    (let [resource (.getValue (.getTreeItem cell))]
+      (when (and (= :folder (resource/source-type resource))
+                 (not (resource/read-only? resource)))
+        (ui/add-style! cell "drop-target")))))
+
+(defn- drag-exited [^DragEvent e]
+  (when-let [cell (target (.getTarget e))]
+    (ui/remove-style! cell "drop-target")))
 
 (defn- drag-over [^DragEvent e]
   (let [db (.getDragboard e)]
@@ -341,8 +406,8 @@
          (when (> view-y (- height 15))
            (.scrollTo view (inc (.getIndex cell)))))
        (let [tgt-resource (-> cell (.getTreeItem) (.getValue))]
-         (when (not (workspace/read-only? tgt-resource))
-           (let [^Path tgt-path (-> tgt-resource ^String resource/abs-path File. ^File to-folder .getAbsolutePath ->path)
+         (when (not (resource/read-only? tgt-resource))
+           (let [^Path tgt-path (-> tgt-resource resource/abs-path File. to-folder .getAbsolutePath ->path)
                  tgt-descendant? (not (empty? (filter (fn [^Path p] (or
                                                                       (.equals tgt-path (.getParent p))
                                                                       (.startsWith tgt-path p))) (map (fn [^File f] (-> f .getAbsolutePath ->path)) (.getFiles db)))))]
@@ -366,7 +431,7 @@
       (let [target (-> e (.getTarget) ^TreeCell (target))
             tree-view (.getTreeView target)
             resource (-> target (.getTreeItem) (.getValue))
-            ^File tgt-dir (to-folder (File. ^String (workspace/abs-path resource)))
+            ^File tgt-dir (to-folder (File. (resource/abs-path resource)))
             move? (and (= (.getGestureSource e) tree-view)
                        (= (.getTransferMode e) TransferMode/MOVE))
             pairs (mapv (fn [^File f] [f (File. tgt-dir (FilenameUtils/getName (.toString f)))]) (.getFiles db))
@@ -374,7 +439,7 @@
                     (vec (mapcat (fn [[^File src ^File tgt]]
                                    (find-files src tgt)) pairs))
                     [])
-            workspace (workspace/workspace resource)]
+            workspace (resource/workspace resource)]
         (doseq [[^File src-file ^File tgt-file] pairs]
           (if (= (.getTransferMode e) TransferMode/MOVE)
             (if (.isDirectory src-file)
@@ -384,7 +449,7 @@
              (FileUtils/copyDirectory src-file tgt-file)
              (FileUtils/copyFile src-file tgt-file))))
         (select-files! workspace tree-view (mapv second pairs))
-        (workspace/fs-sync workspace true moved)))
+        (workspace/resource-sync! workspace true moved)))
     (.setDropCompleted e true)
     (.consume e)))
 
@@ -395,12 +460,14 @@
                     (when (= 2 (.getClickCount ^MouseEvent e))
                       (let [item (-> tree-view (.getSelectionModel) (.getSelectedItem))
                             resource (.getValue ^TreeItem item)]
-                        (when (= :file (workspace/source-type resource))
+                        (when (= :file (resource/source-type resource))
                           (open-resource-fn resource))))))
         over-handler (ui/event-handler e (drag-over e))
         done-handler (ui/event-handler e (drag-done e (workspace/selection tree-view)))
         dropped-handler (ui/event-handler e (drag-dropped e))
-        detected-handler (ui/event-handler e (drag-detected e (workspace/selection tree-view)))]
+        detected-handler (ui/event-handler e (drag-detected e (workspace/selection tree-view)))
+        entered-handler (ui/event-handler e (drag-entered e))
+        exited-handler (ui/event-handler e (drag-exited e))]
     (.setOnDragDetected tree-view detected-handler)
     (.setOnDragDone tree-view done-handler)
     (.setOnMouseClicked tree-view handler)
@@ -408,14 +475,16 @@
                                                  (let [cell (proxy [TreeCell] []
                                                             (updateItem [resource empty]
                                                               (let [this ^TreeCell this]
-                                                                ; TODO - fix reflection warning
                                                                 (proxy-super updateItem resource empty)
-                                                                   (let [name (or (and (not empty) (not (nil? resource)) (workspace/resource-name resource)) nil)]
-                                                                     (proxy-super setText name))
+                                                                (ui/update-tree-cell-style! this)
+                                                                (let [name (or (and (not empty) (not (nil? resource)) (resource/resource-name resource)) nil)]
+                                                                  (proxy-super setText name))
                                                                    (proxy-super setGraphic (jfx/get-image-view (workspace/resource-icon resource) 16)))))]
                                                    (doto cell
                                                      (.setOnDragOver over-handler)
-                                                     (.setOnDragDropped dropped-handler))))))
+                                                     (.setOnDragDropped dropped-handler)
+                                                     (.setOnDragEntered entered-handler)
+                                                     (.setOnDragExited exited-handler))))))
 
     (ui/register-context-menu tree-view ::resource-menu)))
 
@@ -426,13 +495,14 @@
 
   (output tree-view TreeView :cached produce-tree-view))
 
-(defn make-asset-browser [graph workspace tree-view open-resource-fn]
+(defn make-asset-browser [graph workspace tree-view open-resource-fn on-delete-resource-fn]
   (let [asset-browser (first
                         (g/tx-nodes-added
                           (g/transact
                             (g/make-nodes graph
                                           [asset-browser [AssetBrowser :tree-view tree-view]]
                                           (g/connect workspace :resource-tree asset-browser :resource-tree)))))]
-    (ui/context! tree-view :asset-browser {:tree-view tree-view :workspace workspace :open-fn open-resource-fn} tree-view)
+    (ui/context! tree-view :asset-browser {:tree-view tree-view :workspace workspace :open-fn open-resource-fn
+                                           :on-delete-resource-fn on-delete-resource-fn} tree-view)
     (setup-asset-browser workspace tree-view open-resource-fn)
     asset-browser))

@@ -1,22 +1,19 @@
 (ns suite
   (:require [clojure.java.io :as io]
-            [clojure.test :as test]
-            [editor.messages :as m])
-  (:import [clojure.lang Compiler]))
+            [clojure.test :as test])
+  (:import clojure.lang.Compiler))
 
-(def test-namespaces '[dynamo.defnode-test
-                       dynamo.integration.defective-nodes
+(def test-namespaces '[dynamo.integration.defective-nodes
                        dynamo.integration.dependencies
                        dynamo.integration.error-substitute-values
                        dynamo.integration.garbage-collection
                        dynamo.integration.graph-functions
                        dynamo.integration.node-become
+                       dynamo.integration.node-value-options
                        dynamo.integration.property-setters
                        dynamo.integration.schema-validation
-                       dynamo.integration.value-disposal
+                       dynamo.integration.validation
                        dynamo.integration.visibility-enablement
-                       dynamo.transaction-test
-                       dynamo.util-test
                        editor.buffers-test
                        editor.camera-test
                        editor.diff-view-test
@@ -31,14 +28,15 @@
                        editor.math-test
                        editor.pipeline.tex-gen-test
                        editor.prefs-test
-                       editor.project-test
+                       editor.progress-test
+                       editor.defold-project-test
                        editor.properties-test
                        editor.protobuf-test
                        editor.texture.math-test
                        editor.texture.packing-test
-                       editor.project-test
                        editor.ui-test
                        editor.updater-test
+                       editor.workspace-test
                        integration.asset-browser-test
                        integration.benchmark-test
                        integration.build-test
@@ -47,6 +45,7 @@
                        integration.outline-test
                        integration.reload-test
                        integration.save-test
+                       integration.search-in-files-test
                        integration.scene-test
                        integration.scope-test
                        integration.tex-packing-test
@@ -57,12 +56,15 @@
                        internal.dependency-test
                        internal.graph.graph-test
                        internal.graph.types-test
+                       internal.graph.error-values-test
                        internal.node-test
                        internal.paper-tape-test
                        internal.property-test
                        internal.system-test
-                       internal.type-test
                        internal.value-test
+                       internal.defnode-test
+                       internal.transaction-test
+                       internal.util-test
                        potemkin.imports-test
                        potemkin.namespaces-test])
 

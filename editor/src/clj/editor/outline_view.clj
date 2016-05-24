@@ -4,8 +4,8 @@
             [editor.handler :as handler]
             [editor.jfx :as jfx]
             [editor.ui :as ui]
-            [editor.project :as project]
-            [editor.workspace :as workspace]
+            [editor.defold-project :as project]
+            [editor.resource :as resource]
             [editor.outline :as outline])
   (:import [com.defold.editor Start]
            [editor.outline ItemIterator]
@@ -42,8 +42,6 @@
 ; TreeItem creator
 (defn- ^ObservableList list-children [parent]
   (let [children (:children parent)
-        sort-by-fn (:sort-by-fn parent)
-        children (if sort-by-fn (sort-by sort-by-fn children) children)
         items (into-array TreeItem (map tree-item children))]
     (if (empty? children)
       (FXCollections/emptyObservableList)
@@ -120,9 +118,9 @@
 
 (g/defnk update-tree-view [_node-id ^TreeView tree-view root-cache active-resource active-outline open-resources selection selection-listener]
   (let [resource-set (set open-resources)
-       root (get root-cache active-resource)
-       ^TreeItem new-root (when active-outline (sync-tree root (tree-item (pathify active-outline))))
-       new-cache (assoc (map-filter (fn [[resource _]] (contains? resource-set resource)) root-cache) active-resource new-root)]
+        root (get root-cache active-resource)
+        ^TreeItem new-root (when active-outline (sync-tree root (tree-item (pathify active-outline))))
+        new-cache (assoc (map-filter (fn [[resource _]] (contains? resource-set resource)) root-cache) active-resource new-root)]
     (binding [*programmatic-selection* true]
       (when new-root
         (.setExpanded new-root true))
@@ -137,7 +135,7 @@
   (property selection-listener ListChangeListener)
 
   (input active-outline g/Any :substitute {})
-  (input active-resource (g/protocol workspace/Resource) :substitute nil)
+  (input active-resource (g/protocol resource/Resource) :substitute nil)
   (input open-resources g/Any :substitute [])
   (input selection g/Any :substitute [])
 
@@ -160,15 +158,6 @@
                   :icon "icons/cross.png"
                   :command :delete}])
 
-(handler/defhandler :delete :global
-    (enabled? [selection] (< 0 (count selection)))
-    (run [selection]
-         (g/transact
-           (concat
-             (g/operation-label "Delete")
-             (for [node-id selection]
-               (g/delete-node node-id))))))
-
 (defn- item->path [^TreeItem item]
   (:path (.getValue item)))
 
@@ -177,6 +166,19 @@
 
 (defn- root-iterators [^TreeView tree-view]
   (mapv ->iterator (ui/selection-roots tree-view item->path item->id)))
+
+(handler/defhandler :delete :global
+  (enabled? [selection outline-view]
+            (and (< 0 (count selection))
+                 (let [tree-view (g/node-value outline-view :tree-view)
+                       item-iterators (root-iterators tree-view)]
+                   (outline/delete? item-iterators))))
+  (run [selection]
+       (g/transact
+         (concat
+           (g/operation-label "Delete")
+           (for [node-id selection]
+             (g/delete-node node-id))))))
 
 (defn- project [^TreeView tree-view]
   (project/get-project (:node-id (.getValue (.getRoot tree-view)))))
@@ -213,14 +215,14 @@
                   data-format (data-format-fn)]
               (and target-item-it
                    (.hasContent cb data-format)
-                   (outline/paste? (project tree-view) target-item-it (.getContent cb data-format)))))
+                   (outline/paste? (project/graph (project tree-view)) target-item-it (.getContent cb data-format)))))
   (run [outline-view]
        (let [tree-view (g/node-value outline-view :tree-view)
              target-item-it (paste-target-it tree-view)
              project (project tree-view)
              cb (Clipboard/getSystemClipboard)
              data-format (data-format-fn)]
-         (outline/paste! project target-item-it (.getContent cb data-format)))))
+         (outline/paste! (project/graph project) target-item-it (.getContent cb data-format) (partial project/select project)))))
 
 (handler/defhandler :cut :global
   (enabled? [selection outline-view]
@@ -251,9 +253,12 @@
 (defn- drag-detected [tree-view ^MouseEvent e]
   (let [item-iterators (root-iterators tree-view)
         project (project tree-view)]
-    (when (outline/drag? project item-iterators)
+    (when (outline/drag? (project/graph project) item-iterators)
       (let [db (.startDragAndDrop ^Node (.getSource e) (into-array TransferMode TransferMode/COPY_OR_MOVE))
             data (outline/copy item-iterators)]
+        (when-let [icon (and (= 1 (count item-iterators))
+                             (:icon (outline/value (first item-iterators))))]
+          (.setDragView db (jfx/get-image icon 16) 0 16))
         (.setContent db {(data-format-fn) data})
         (.consume e)))))
 
@@ -289,7 +294,7 @@
                                  (root-iterators tree-view)
                                  [])
                 project (project tree-view)]
-            (when (outline/drop? project item-iterators (->iterator (.getTreeItem cell))
+            (when (outline/drop? (project/graph project) item-iterators (->iterator (.getTreeItem cell))
                                  (.getContent db (data-format-fn)))
               (let [modes (if (ui/drag-internal? e)
                             [TransferMode/MOVE]
@@ -304,13 +309,22 @@
                            (root-iterators tree-view)
                            [])
           project (project tree-view)]
-      (when (outline/drop! project item-iterators (->iterator (.getTreeItem cell))
-                           (.getContent db (data-format-fn)))
+      (when (outline/drop! (project/graph project) item-iterators (->iterator (.getTreeItem cell))
+                           (.getContent db (data-format-fn)) (partial project/select project))
         (.setDropCompleted e true)
         (.consume e)))))
 
 (defn- drag-entered [tree-view ^DragEvent e]
   (when-let [^TreeCell cell (target (.getTarget e))]
+    (let [project        (project tree-view)
+          item-iterators (if (ui/drag-internal? e)
+                           (root-iterators tree-view)
+                           [])
+          db             (.getDragboard e)]
+      (when (outline/drop? (project/graph project) item-iterators (->iterator (.getTreeItem cell))
+                           (.getContent db (data-format-fn)))
+        (ui/add-style! cell "drop-target")))
+
     (let [future (ui/->future 0.5 (fn []
                                     (-> cell (.getTreeItem) (.setExpanded true))
                                     (ui/user-data! cell :future-expand nil)))]
@@ -318,6 +332,7 @@
 
 (defn- drag-exited [tree-view ^DragEvent e]
   (when-let [cell (target (.getTarget e))]
+    (ui/remove-style! cell "drop-target")
     (when-let [future (ui/user-data cell :future-expand)]
       (ui/cancel future)
       (ui/user-data! cell :future-expand nil))))
@@ -343,14 +358,18 @@
                                                               (updateItem [item empty]
                                                                 (let [this ^TreeCell this]
                                                                   (proxy-super updateItem item empty)
+                                                                  (ui/update-tree-cell-style! this)
                                                                   (if empty
                                                                     (do
                                                                       (proxy-super setText nil)
                                                                       (proxy-super setGraphic nil)
                                                                       (proxy-super setContextMenu nil))
-                                                                    (let [{:keys [label icon]} item]
+                                                                    (let [{:keys [label icon outline-overridden?]} item]
                                                                       (proxy-super setText label)
-                                                                      (proxy-super setGraphic (jfx/get-image-view icon 16)))))))]
+                                                                      (proxy-super setGraphic (jfx/get-image-view icon 16))
+                                                                      (if outline-overridden?
+                                                                        (ui/add-style! this "overridden")
+                                                                        (ui/remove-style! this "overridden")))))))]
                                                    (doto cell
                                                      (.setOnDragEntered drag-entered-handler)
                                                      (.setOnDragExited drag-exited-handler))))))))

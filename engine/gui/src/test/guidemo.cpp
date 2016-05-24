@@ -25,7 +25,7 @@ void OnWindowResize(int width, int height)
 void MyRenderNodes(dmGui::HScene scene,
                   const dmGui::RenderEntry* nodes,
                   const Vectormath::Aos::Matrix4* node_transforms,
-                  const Vectormath::Aos::Vector4* node_colors,
+                  const float* node_opacities,
                   const dmGui::StencilScope** stencil_scopes,
                   uint32_t node_count,
                   void* context)
@@ -34,6 +34,7 @@ void MyRenderNodes(dmGui::HScene scene,
     {
         dmGui::HNode node = nodes[i].m_Node;
         Vector4 color = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_COLOR);
+        color = Vector4(color.getXYZ(), node_opacities[i]);
         glColor4fv((const GLfloat*)&color);
 
         dmGui::BlendMode blend_mode = dmGui::GetNodeBlendMode(scene, node);
@@ -197,7 +198,7 @@ int main(void)
         fread(buf, 1, file_size, f);
         fclose(f);
 
-        dmGui::AddTexture(scene, "checker", (void*) checker_texture, 0);
+        dmGui::AddTexture(scene, "checker", (void*) checker_texture, 0, 2, 2);
 
         dmLuaDDF::LuaSource luaSource;
         memset(&luaSource, 0x00, sizeof(luaSource));

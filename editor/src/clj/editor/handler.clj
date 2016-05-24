@@ -1,5 +1,8 @@
 (ns editor.handler
-  (:require [plumbing.core :refer [fnk]]))
+  (:require [plumbing.core :refer [fnk]]
+            [dynamo.graph :as g]))
+
+(set! *warn-on-reflection* true)
 
 (defonce ^:dynamic *handlers* (atom {}))
 
@@ -38,7 +41,8 @@
 
 (defn state [command command-contexts user-data]
   (when-let [[handler command-context] (get-active command command-contexts user-data)]
-    (invoke-fnk (get-fnk handler :state) command-context)))
+    (when-let [state-fn (get-fnk handler :state)]
+      (invoke-fnk state-fn command-context))))
 
 (defn enabled? [command command-contexts user-data]
   (when-let [[handler command-context] (get-active command command-contexts user-data)]
@@ -57,3 +61,13 @@
   (when-let [[handler command-context] (get-active command command-contexts user-data)]
     (when-let [f (get-fnk handler :options)]
       (invoke-fnk f command-context))))
+
+(defn single-selection?
+  ([selection] (= 1 (count selection)))
+  ([selection type]
+   (and (single-selection? selection)
+        (g/node-instance? type (first selection)))))
+
+(defn get-single-selection [selection type]
+  (and (single-selection? selection type)
+       (first selection)))

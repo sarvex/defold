@@ -30,6 +30,8 @@
 
 #include "internal.h"
 
+#include <windows.h>
+
 
 
 //************************************************************************
@@ -40,6 +42,8 @@
 // between applications using different versions of GLFW
 #define _GLFW_WNDCLASSNAME "GLFW27"
 
+// Resource ID that holds the application icon.
+#define _GLFW_ICON_RES_ID 100
 
 //========================================================================
 // Enable/disable minimize/restore animations
@@ -729,6 +733,8 @@ static LRESULT CALLBACK windowProc( HWND hWnd, UINT uMsg,
             }
 
             _glfwWin.iconified = iconified;
+            if(_glfwWin.windowFocusCallback)
+                _glfwWin.windowFocusCallback( _glfwWin.active ? 1 : 0 );
             return 0;
         }
 
@@ -1082,7 +1088,7 @@ static ATOM registerWindowClass( void )
     wc.lpszClassName = _GLFW_WNDCLASSNAME;            // Set class name
 
     // Load user-provided icon if available
-    wc.hIcon = LoadIcon( _glfwLibrary.instance, "GLFW_ICON" );
+    wc.hIcon = LoadIcon( _glfwLibrary.instance, MAKEINTRESOURCE(_GLFW_ICON_RES_ID));
     if( !wc.hIcon )
     {
         // Load default icon
@@ -1307,7 +1313,33 @@ int _glfwPlatformOpenWindow( int width, int height,
                              const _GLFWwndconfig *wndconfig,
                              const _GLFWfbconfig *fbconfig )
 {
+    const float baseDPI = 96.0f; // 96 is the baseline DPI on Windows
     GLboolean recreateContext = GL_FALSE;
+    HDC screen;
+    int dpiX;
+    int dpiY;
+    float dX,dY;
+
+    _glfwWin.highDPI = 0;
+    if (wndconfig->highDPI) {
+        if (_glfwLibrary.Libs.SetProcessDPIAware != NULL && _glfwLibrary.Libs.GetDeviceCaps != NULL) {
+            _glfwLibrary.Libs.SetProcessDPIAware();
+            _glfwWin.highDPI = 1;
+
+            // Get DPI for screen
+            screen = GetDC(0);
+            dpiX = _glfwLibrary.Libs.GetDeviceCaps(screen, LOGPIXELSX);
+            dpiY = _glfwLibrary.Libs.GetDeviceCaps(screen, LOGPIXELSY);
+            ReleaseDC(0, screen);
+
+            dX = (float)dpiX / baseDPI;
+            dY = (float)dpiY / baseDPI;
+            width = ((float)width * dX);
+            height = ((float)height * dY);
+            _glfwWin.width = width;
+            _glfwWin.height = height;
+        }
+    }
 
     // Clear platform specific GLFW window state
     _glfwWin.classAtom         = 0;
@@ -1889,6 +1921,10 @@ void _glfwPlatformSetMouseCursorPos( int x, int y )
 }
 
 void _glfwShowKeyboard( int show, int type, int auto_close )
+{
+}
+
+void _glfwResetKeyboard( void )
 {
 }
 

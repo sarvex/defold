@@ -9,9 +9,9 @@
             [editor.gl.shader :as shader]
             [editor.gl.texture :as texture]
             [editor.gl.vertex :as vtx]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.workspace :as workspace]
-            [internal.render.pass :as pass])
+            [editor.gl.pass :as pass])
   (:import [com.dynamo.graphics.proto Graphics$Cubemap Graphics$TextureImage Graphics$TextureImage$Image Graphics$TextureImage$Type]
            [com.jogamp.opengl.util.awt TextRenderer]
            [editor.types Region Animation Camera Image TexturePacking Rect EngineFormatTexture AABB TextureSetAnimationFrame TextureSetAnimation TextureSet]
@@ -20,6 +20,8 @@
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
            [javax.media.opengl.glu GLU]
            [javax.vecmath Point3d Matrix4d]))
+
+(set! *warn-on-reflection* true)
 
 (def platformer-icon "icons/diagramm.png")
 
@@ -48,10 +50,10 @@
 (def platformer-shader (shader/make-shader ::platformer-shader pos-uv-vert pos-uv-frag))
 
 (defn render-platformer
-  [^GL2 gl base-texture vertex-buffer]
+  [^GL2 gl render-args base-texture vertex-buffer]
   (let [vcount (count vertex-buffer)
         vertex-binding (vtx/use-with ::platformer vertex-buffer platformer-shader)]
-    (gl/with-gl-bindings gl [base-texture platformer-shader vertex-binding]
+    (gl/with-gl-bindings gl render-args [base-texture platformer-shader vertex-binding]
       (shader/set-uniform platformer-shader gl "texture" 0)
       (gl/gl-draw-arrays gl GL/GL_TRIANGLES 0 vcount))))
 
@@ -149,7 +151,7 @@
         vertex-buffer (gen-vertex-buffer control-points)]
     (if vertex-buffer
       (assoc scene :renderable {:render-fn (fn [gl render-args renderables count]
-                                             (render-platformer gl base-texture-tex vertex-buffer))
+                                             (render-platformer gl render-args base-texture-tex vertex-buffer))
                                 :passes [pass/transparent]})
      scene)))
 
@@ -172,13 +174,13 @@
   (output save-data     g/Any :cached produce-save-data)
   (output scene         g/Any :cached produce-scene))
 
-(defn load-level [project self input]
-  (with-open [reader (PushbackReader. (io/reader (g/node-value self :resource)))]
+(defn load-level [project self resource]
+  (with-open [reader (PushbackReader. (io/reader resource))]
     (let [level (edn/read reader)]
       (concat
         (g/set-property self :control-points (:control-points level))
         (g/set-property self :base-texture (:base-texture level))
-        (if-let [img-resource (workspace/resolve-resource (g/node-value self :resource) (:base-texture level))]
+        (if-let [img-resource (workspace/resolve-resource resource (:base-texture level))]
           (project/connect-resource-node project img-resource self [[:content :base-texture-img]])
           [])))))
 
@@ -188,5 +190,5 @@
                                     :node-type PlatformerNode
                                     :load-fn load-level
                                     :icon platformer-icon
-                                    :view-types [:scene]
+                                    :view-types [:scene :text]
                                     :view-opts {:scene {:grid true}}))

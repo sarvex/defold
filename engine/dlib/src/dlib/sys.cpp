@@ -9,6 +9,7 @@
 #include "log.h"
 #include "dstrings.h"
 #include "path.h"
+#include "math.h"
 
 #ifdef _WIN32
 #include <Shlobj.h>
@@ -51,6 +52,8 @@ extern struct android_app* __attribute__((weak)) g_AndroidApp ;
 // Implemented in library_sys.js
 extern "C" const char* dmSysGetUserPersistentDataRoot();
 extern "C" void dmSysPumpMessageQueue();
+extern "C" const char* dmSysGetUserPreferredLanguage(const char* defaultlang);
+extern "C" const char* dmSysGetUserAgent();
 
 #endif
 
@@ -471,25 +474,45 @@ namespace dmSys
 
     void FillLanguageTerritory(const char* lang, struct SystemInfo* info)
     {
-        const char* default_lang = "en_US";
+        // find first separator ("-" or "_")
+        size_t lang_len = lang ? strlen(lang) : 0;
+        if(lang_len == 0)
+        {
+            lang = "en_US";
+            lang_len = strlen(lang);
+            dmLogWarning("Invalid language parameter (empty field), using default: \"%s\"", lang);
+        }
+        const char* sep_first = lang;
+        while((*sep_first) && (*sep_first != '-') && (*sep_first != '_'))
+            ++sep_first;
+        const char* sep_last = lang + lang_len;
+        while((sep_last != sep_first) && (*sep_last != '-') && (*sep_last != '_'))
+            --sep_last;
 
-        if (strlen(lang) < 5) {
-            dmLogWarning("Unknown language format: '%s'", lang);
-            lang = default_lang;
-        } else if(lang[2] != '_') {
-            dmLogWarning("Unknown language format: '%s'", lang);
-            lang = default_lang;
+        dmStrlCpy(info->m_Language, lang, dmMath::Min((size_t)(sep_first+1 - lang), sizeof(info->m_Language)));
+
+        if(sep_first != sep_last)
+        {
+            // Language script. If there is more than one separator, this is what is up to the last separator (<language>-<script>-<territory> format)
+            dmStrlCpy(info->m_DeviceLanguage, lang, dmMath::Min((size_t)(sep_last+1 - lang), sizeof(info->m_DeviceLanguage)));
+            info->m_DeviceLanguage[sep_first - lang] = '-';
+        }
+        else
+        {
+            // No language script, default to language
+            dmStrlCpy(info->m_DeviceLanguage, info->m_Language, dmMath::Min(sizeof(info->m_DeviceLanguage), sizeof(info->m_Language)));
         }
 
-        info->m_Language[0] = lang[0];
-        info->m_Language[1] = lang[1];
-        info->m_Language[2] = '\0';
-        info->m_DeviceLanguage[0] = lang[0];
-        info->m_DeviceLanguage[1] = lang[1];
-        info->m_DeviceLanguage[2] = '\0';
-        info->m_Territory[0] = lang[3];
-        info->m_Territory[1] = lang[4];
-        info->m_Territory[2] = '\0';
+        if(sep_last != lang + lang_len)
+        {
+            dmStrlCpy(info->m_Territory, sep_last + 1, dmMath::Min((size_t)((lang + lang_len) - sep_last), sizeof(info->m_Territory)));
+        }
+        else
+        {
+            info->m_Territory[0] = '\0';
+            dmLogWarning("No territory detected in language string: \"%s\"", lang);
+        }
+
     }
 
     void FillTimeZone(struct SystemInfo* info)
@@ -514,19 +537,31 @@ namespace dmSys
         struct utsname uts;
         uname(&uts);
 
+#if defined(__EMSCRIPTEN__)
+        dmStrlCpy(info->m_SystemName, "HTML5", sizeof(info->m_SystemName));
+#else
         dmStrlCpy(info->m_SystemName, uts.sysname, sizeof(info->m_SystemName));
+#endif
         dmStrlCpy(info->m_SystemVersion, uts.release, sizeof(info->m_SystemVersion));
         info->m_DeviceModel[0] = '\0';
 
-        const char* lang = getenv("LANG");
         const char* default_lang = "en_US";
-
+#if defined(__EMSCRIPTEN__)
+        info->m_UserAgent = dmSysGetUserAgent(); // transfer ownership to SystemInfo struct
+        const char* const lang = dmSysGetUserPreferredLanguage(default_lang);
+#else
+        const char* lang = getenv("LANG");
         if (!lang) {
             dmLogWarning("Variable LANG not set");
             lang = default_lang;
         }
+#endif
         FillLanguageTerritory(lang, info);
         FillTimeZone(info);
+
+#if defined(__EMSCRIPTEN__)
+        free((void*)lang);
+#endif
     }
 
 #elif defined(__ANDROID__)
@@ -548,17 +583,20 @@ namespace dmSys
         jstring countryObj = (jstring) env->CallObjectMethod(locale, get_country_method);
         jstring languageObj = (jstring) env->CallObjectMethod(locale, get_language_method);
 
-        if (countryObj) {
-            const char* country = env->GetStringUTFChars(countryObj, NULL);
-            dmStrlCpy(info->m_Territory, country, sizeof(info->m_Territory));
-            env->ReleaseStringUTFChars(countryObj, country);
-        }
+        char lang[32] = {0};
         if (languageObj) {
             const char* language = env->GetStringUTFChars(languageObj, NULL);
-            dmStrlCpy(info->m_Language, language, sizeof(info->m_Language));
-            dmStrlCpy(info->m_DeviceLanguage, language, sizeof(info->m_DeviceLanguage));
+            dmStrlCpy(lang, language, sizeof(lang));
             env->ReleaseStringUTFChars(languageObj, language);
         }
+        if (countryObj) {
+            dmStrlCat(lang, "_", sizeof(lang));
+            const char* country = env->GetStringUTFChars(countryObj, NULL);
+            dmStrlCat(lang, country, sizeof(lang));
+            env->ReleaseStringUTFChars(countryObj, country);
+        }
+        FillLanguageTerritory(lang, info);
+        FillTimeZone(info);
 
         jclass build_class = env->FindClass("android/os/Build");
         jstring manufacturerObj = (jstring) env->GetStaticObjectField(build_class, env->GetStaticFieldID(build_class, "MANUFACTURER", "Ljava/lang/String;"));
@@ -566,6 +604,9 @@ namespace dmSys
 
         jclass build_version_class = env->FindClass("android/os/Build$VERSION");
         jstring releaseObj = (jstring) env->GetStaticObjectField(build_version_class, env->GetStaticFieldID(build_version_class, "RELEASE", "Ljava/lang/String;"));
+        jint sdkint = (jint) env->GetStaticIntField(build_version_class, env->GetStaticFieldID(build_version_class, "SDK_INT", "I")); // supported from api level 4
+
+        DM_SNPRINTF(info->m_ApiVersion, sizeof(info->m_ApiVersion), "%d", sdkint);
 
         if (manufacturerObj) {
             const char* manufacturer = env->GetStringUTFChars(manufacturerObj, NULL);
@@ -642,10 +683,6 @@ namespace dmSys
             GetUserDefaultLocaleName(tmp, max_len);
             WideCharToMultiByte(CP_UTF8, 0, tmp, -1, lang, max_len, 0, 0);
         }
-        char* index = strchr(lang, '-');
-        if (index) {
-            *index = '_';
-        }
         FillLanguageTerritory(lang, info);
         FillTimeZone(info);
     }
@@ -663,6 +700,39 @@ namespace dmSys
         copied = dmStrlCpy(g_EngineInfo.m_VersionSHA1, info.m_VersionSHA1, sizeof(g_EngineInfo.m_VersionSHA1));
         assert(copied < sizeof(g_EngineInfo.m_VersionSHA1));
       }
+
+#if (__ANDROID__)
+    bool GetApplicationInfo(const char* id, ApplicationInfo* info)
+    {
+        memset(info, 0, sizeof(*info));
+
+        ANativeActivity* activity = g_AndroidApp->activity;
+        JNIEnv* env = 0;
+        activity->vm->AttachCurrentThread( &env, 0);
+
+        jclass native_activity_class = env->FindClass("android/app/NativeActivity");
+        jmethodID methodID_func = env->GetMethodID(native_activity_class, "getPackageManager", "()Landroid/content/pm/PackageManager;");
+        jobject package_manager = env->CallObjectMethod(activity->clazz, methodID_func);
+        jclass pm_class = env->GetObjectClass(package_manager);
+        jmethodID methodID_pm = env->GetMethodID(pm_class, "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;");
+        jstring str_url = env->NewStringUTF(id);
+        env->CallObjectMethod(package_manager, methodID_pm, str_url);
+        jthrowable exception = env->ExceptionOccurred();
+        env->ExceptionClear();
+        env->DeleteLocalRef(str_url);
+        activity->vm->DetachCurrentThread();
+
+        bool installed = exception == NULL;
+        info->m_Installed = installed;
+        return installed;
+    }
+#elif !defined(__MACH__) // OS X and iOS implementations in sys_cocoa.mm
+    bool GetApplicationInfo(const char* id, ApplicationInfo* info)
+    {
+        memset(info, 0, sizeof(*info));
+        return false;
+    }
+#endif
 
 #ifdef __ANDROID__
     const char* FixAndroidResourcePath(const char* path)

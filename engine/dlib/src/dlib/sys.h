@@ -2,6 +2,7 @@
 #define DM_SYS_H
 
 #include <string.h>
+#include <stdlib.h> // free
 
 namespace dmSys
 {
@@ -61,6 +62,18 @@ namespace dmSys
      */
     struct SystemInfo
     {
+        SystemInfo()
+        {
+            memset(this, 0, sizeof(*this));
+        }
+        ~SystemInfo()
+        {
+            if(m_UserAgent)
+            {
+                free((void*)m_UserAgent); // Allocated in dmSysGetUserAgent
+            }
+        }
+
         /// Device model where applicable, e.g. iPhone3,1
         char m_DeviceModel[32];
         /// Device manufacturer if available
@@ -69,10 +82,12 @@ namespace dmSys
         char m_SystemName[32];
         /// System version, e.g. 12.0.1
         char m_SystemVersion[32];
+        /// Api version, e.g. 23 for android, 9.1 for iOS, empty for platforms with no concept of an api or sdk
+        char m_ApiVersion[32];
         /// ISO 639 language code
         char m_Language[8];
-        /// ISO 639 device language code. Reflects UI language and typically same as m_Language.
-        char m_DeviceLanguage[8];
+        /// ISO 639 device language code and optional dash (–) followed by an ISO 15924 script code. Reflects UI language and typically same as m_Language.
+        char m_DeviceLanguage[16];
         ///  ISO 3166 country code
         char m_Territory[8];
         /// Offset to GMT in minutes
@@ -83,6 +98,8 @@ namespace dmSys
         char m_AdIdentifier[64];
         /// True if advertising is enabled, e.g. "advertisingTrackingEnabled" on iOS
         bool m_AdTrackingEnabled;
+        /// The string returned from the browser (allocated, has to be free'd)
+        const char* m_UserAgent;
     };
 
     /**
@@ -108,6 +125,20 @@ namespace dmSys
     {
         const char* m_Version;
         const char* m_VersionSHA1;
+    };
+
+    /**
+     * App information
+     */
+    struct ApplicationInfo
+    {
+        ApplicationInfo()
+        {
+            memset(this, 0, sizeof(ApplicationInfo));
+        }
+
+        /// True if the app is installed on this platform device
+        bool m_Installed;
     };
 
     /**
@@ -184,6 +215,14 @@ namespace dmSys
      * @param info input data
      */
     void GetEngineInfo(EngineInfo* info);
+
+    /**
+     * Get information of application with id if this is installed on this platform device
+     * @param id appliaction id. Platform specific format
+     * @param info input data
+     * @return true if the application with id is installed on this platform device and information could successfully be retreived
+     */
+    bool GetApplicationInfo(const char* id, ApplicationInfo* info);
 
     /**
      * Set engine information

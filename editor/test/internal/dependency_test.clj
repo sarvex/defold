@@ -3,7 +3,7 @@
             [clojure.test :refer :all]
             [dynamo.graph :as g]
             [support.test-support :as ts]
-            [dynamo.util :refer :all]
+            [internal.util :refer :all]
             [internal.system :as is]))
 
 (defn- dependencies
@@ -176,10 +176,6 @@
 (g/defnode BadlyWrittenSelfDependent
   (input string-value g/Str)
   (output string-value g/Str (g/fnk [string-value] (str/upper-case string-value))))
-
-(g/defnode PropertyShadowingInput
-  (input string-value g/Str)
-  (property string-value g/Str (default "Hey there!")))
 
 (deftest with-self-dependencies
   (testing "dependencies propagate through fnks"

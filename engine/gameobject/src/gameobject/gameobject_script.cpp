@@ -275,6 +275,7 @@ namespace dmGameObject
             {
                 luaL_error(L, "function called can only access instances within the same collection.");
             }
+
             instance = GetInstanceFromIdentifier(instance->m_Collection, receiver.m_Path);
             if (!instance)
             {
@@ -694,7 +695,7 @@ namespace dmGameObject
     /*# sets the scale factor of the instance
      * The scale factor is relative to the parent (if any). The global world scale factor cannot be manually set.
      *
-     * NOTE! Physics are currently not affected when setting scale from this function.
+     * <b>NOTE!</b> Physics are currently not affected when setting scale from this function.
      *
      * @name go.set_scale
      * @param scale vector or uniform scale factor, must be greater than 0 (number|vector3)
@@ -859,6 +860,10 @@ namespace dmGameObject
         int ref = (int) (((uintptr_t) curve->userdata2) & 0xffffffff);
         luaL_unref(L, LUA_REGISTRYINDEX, ref);
 
+        curve->release_callback = 0x0;
+        curve->userdata1 = 0x0;
+        curve->userdata2 = 0x0;
+
         assert(top == lua_gettop(L));
     }
 
@@ -887,6 +892,7 @@ namespace dmGameObject
 
             dmScript::PushURL(L, url);
             dmScript::PushHash(L, property_id);
+            assert(lua_type(L, -4) == LUA_TFUNCTION);
             dmScript::PCall(L, 3, 0);
 
             lua_pushnil(L);
@@ -906,6 +912,9 @@ namespace dmGameObject
      * <p>
      * If a <code>complete_function</code> (lua function) is specified, that function will be called when the animation has completed.
      * By starting a new animation in that function, several animations can be sequenced together. See the examples for more information.
+     *
+     * <b>NOTE!</b> If you call <code>go.animate()</code> from a game object's <code>final()</code> function, any passed
+     * <code>complete_function</code> will be ignored and never called upon animation completion.
      * </p>
      * <p>
      * See the <a href="/doc/properties">properties guide</a> for which properties can be animated and how.
@@ -927,7 +936,7 @@ namespace dmGameObject
      * @param easing easing to use during animation. Either specify a constant, see the <a href="/doc/properties">properties guide</a> for a complete list, or a vmath.vector with a curve. (constant|vector)
      * @param duration duration of the animation in seconds (number)
      * @param [delay] delay before the animation starts in seconds (number)
-     * @param [complete_function] function to call when the animation has completed (function)
+     * @param [complete_function] function with parameters (self, url, property) to call when the animation has completed (function)
      * @examples
      * <p>Animate the position of a game object to x = 10 during 1 second, then y = 20 during 1 second:</p>
      * <pre>
@@ -1477,7 +1486,7 @@ namespace dmGameObject
             lua_rawgeti(L, LUA_REGISTRYINDEX, script->m_InstanceReference);
             dmScript::SetInstance(L);
 
-            ret = dmScript::PCall(L, 0, LUA_MULTRET);
+            ret = dmScript::PCall(L, 0, 0);
             if (ret == 0)
             {
                 for (uint32_t i = 0; i < MAX_SCRIPT_FUNCTION_COUNT; ++i)
@@ -1865,10 +1874,8 @@ const char* TYPE_NAMES[PROPERTY_TYPE_COUNT] = {
 
     /*# called when a script component is finalized
      * <div>This is a callback-function, which is called by the engine when a script component is finalized (destroyed). It can
-     * be used to e.g. take some last action, report the finalization to other game object instances
+     * be used to e.g. take some last action, report the finalization to other game object instances, delete spawned objects
      * or release user input focus (see <code>release_input_focus</code>).</div>
-     *
-     * <div><b>NOTE!</b> Don't call <a href="#go.delete">go.delete</a> from this function or in any <a href="#on_message">on_message</a> resulting from a message posted from this function. This will currently result in undefined behaviour.</div>
      *
      * @name final
      * @param self reference to the script state to be used for storing data (script_ref)

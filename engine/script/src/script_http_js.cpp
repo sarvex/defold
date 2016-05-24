@@ -96,8 +96,9 @@ namespace dmScript
 
             dmArray<char> h;
             h.SetCapacity(4 * 1024);
-            if (top > 3) {
+            if (top > 3 && !lua_isnil(L, 4)) {
 
+                luaL_checktype(L, 4, LUA_TTABLE);
                 lua_pushvalue(L, 4);
                 lua_pushnil(L);
                 while (lua_next(L, -2)) {
@@ -120,12 +121,29 @@ namespace dmScript
 
             char* request_data = 0;
             int request_data_length = 0;
-            if (top > 4) {
+            if (top > 4 && !lua_isnil(L, 5)) {
                 size_t len;
+                luaL_checktype(L, 5, LUA_TSTRING);
                 const char* r = luaL_checklstring(L, 5, &len);
                 request_data = (char*) malloc(len);
                 memcpy(request_data, r, len);
                 request_data_length = len;
+            }
+
+            uint64_t timeout = g_Timeout;
+            if (top > 5 && !lua_isnil(L, 6)) {
+                luaL_checktype(L, 6, LUA_TTABLE);
+                lua_pushvalue(L, 6);
+                lua_pushnil(L);
+                while (lua_next(L, -2)) {
+                    const char* attr = lua_tostring(L, -2);
+                    if( strcmp(attr, "timeout") == 0 )
+                    {
+                        timeout = luaL_checknumber(L, -1) * 1000000.0f;
+                    }
+                    lua_pop(L, 1);
+                }
+                lua_pop(L, 1);
             }
 
             dmMessage::URL* requester = new dmMessage::URL;

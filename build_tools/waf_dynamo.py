@@ -8,10 +8,11 @@ from Constants import RUN_ME
 from BuildUtility import BuildUtility, BuildUtilityException, create_build_utility
 
 ANDROID_ROOT=os.path.join(os.environ['HOME'], 'android')
-ANDROID_BUILD_TOOLS_VERSION = '20.0.0'
-ANDROID_NDK_VERSION='10b'
+ANDROID_BUILD_TOOLS_VERSION = '23.0.2'
+ANDROID_NDK_VERSION='10e'
 ANDROID_NDK_API_VERSION='14'
-ANDROID_API_VERSION='17'
+ANDROID_TARGET_API_LEVEL='23'
+ANDROID_MIN_API_LEVEL='9'
 ANDROID_GCC_VERSION='4.8'
 
 
@@ -43,7 +44,7 @@ def new_copy_task(name, input_ext, output_ext):
 
 IOS_TOOLCHAIN_ROOT='/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain'
 ARM_DARWIN_ROOT='/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer'
-IOS_SDK_VERSION="8.1"
+IOS_SDK_VERSION="9.1"
 # NOTE: Minimum iOS-version is also specified in Info.plist-files
 # (MinimumOSVersion and perhaps DTPlatformVersion)
 # Need 5.1 as minimum for fat/universal binaries (armv7 + arm64) to work
@@ -109,6 +110,7 @@ def default_flags(self):
                                       '-Wno-psabi', '-march=armv7-a', '-mfloat-abi=softfp', '-mfpu=vfp',
                                       '-fomit-frame-pointer', '-fno-strict-aliasing', '-finline-limit=64', '-fno-exceptions', '-funwind-tables',
                                       '-I%s/android-ndk-r%s/sources/android/native_app_glue' % (ANDROID_ROOT, ANDROID_NDK_VERSION),
+                                      '-I%s/android-ndk-r%s/sources/android/cpufeatures' % (ANDROID_ROOT, ANDROID_NDK_VERSION),
                                       '-I%s/tmp/android-ndk-r%s/platforms/android-%s/arch-arm/usr/include' % (ANDROID_ROOT, ANDROID_NDK_VERSION, ANDROID_NDK_API_VERSION),
                                       '-I%s' % stl,
                                       '-I%s' % stl_arch,
@@ -120,13 +122,14 @@ def default_flags(self):
         # -lgnustl_static -lsupc++
         self.env.append_value('LINKFLAGS', [
                 '--sysroot=%s' % sysroot,
-                '-Wl,--fix-cortex-a8', '-Wl,--no-undefined', '-Wl,-z,noexecstack', '-landroid',
+                '-Wl,--fix-cortex-a8', '-Wl,--no-undefined', '-Wl,-z,noexecstack', '-landroid', '-fpic', '-z', 'text',
                 '-L%s' % stl_lib])
     elif 'web' == build_util.get_target_os() and 'js' == build_util.get_target_architecture():
         for f in ['CCFLAGS', 'CXXFLAGS']:
             self.env.append_value(f, ['-O3', '-DGL_ES_VERSION_2_0', '-fno-exceptions', '-Wno-warn-absolute-paths', '-D__STDC_LIMIT_MACROS', '-DDDF_EXPOSE_DESCRIPTORS', '-DGTEST_USE_OWN_TR1_TUPLE=1', '-Wall'])
 
-        self.env.append_value('LINKFLAGS', ['-O3', '--llvm-lto', '1', '-s', 'PRECISE_F32=2', '-s', 'AGGRESSIVE_VARIABLE_ELIMINATION=1', '-s', 'DISABLE_EXCEPTION_CATCHING=1', '-Wno-warn-absolute-paths', '-s', 'TOTAL_MEMORY=268435456', '--memory-init-file', '0'])
+        # NOTE: Disabled lto for when upgrading to 1.35.23, see https://github.com/kripken/emscripten/issues/3616
+        self.env.append_value('LINKFLAGS', ['-O3', '--llvm-lto', '0', '-s', 'PRECISE_F32=2', '-s', 'AGGRESSIVE_VARIABLE_ELIMINATION=1', '-s', 'DISABLE_EXCEPTION_CATCHING=1', '-Wno-warn-absolute-paths', '-s', 'TOTAL_MEMORY=268435456', '--memory-init-file', '0'])
 
     elif 'as3' == build_util.get_target_architecture() and 'web' == build_util.get_target_os():
         # NOTE: -g set on both C*FLAGS and LINKFLAGS
@@ -368,7 +371,7 @@ def codesign(task):
     entitlements_path = os.path.join(task.env['DYNAMO_HOME'], 'share', entitlements)
     resource_rules_plist_file = task.resource_rules_plist.bldpath(task.env)
 
-    ret = bld.exec_command('CODESIGN_ALLOCATE=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/codesign_allocate codesign -f -s "%s" --resource-rules=%s --entitlements %s %s' % (identity, resource_rules_plist_file, entitlements_path, signed_exe_dir))
+    ret = bld.exec_command('CODESIGN_ALLOCATE=%s/usr/bin/codesign_allocate codesign -f -s "%s" --resource-rules=%s --entitlements %s %s' % (IOS_TOOLCHAIN_ROOT, identity, resource_rules_plist_file, entitlements_path, signed_exe_dir))
     if ret != 0:
         error('Error running codesign')
         return 1
@@ -486,7 +489,7 @@ ANDROID_MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
         android:installLocation="auto">
 
     <uses-feature android:required="true" android:glEsVersion="0x00020000" />
-    <uses-sdk android:minSdkVersion="9" />
+    <uses-sdk android:minSdkVersion="%(min_api_level)s" android:targetSdkVersion="%(target_api_level)s" />
     <application android:label="%(app_name)s" android:hasCode="true" android:debuggable="true">
 
         <!-- For Local Notifications -->
@@ -600,7 +603,7 @@ def android_package(task):
         package = task.android_package
 
     manifest_file = open(task.manifest.bldpath(task.env), 'wb')
-    manifest_file.write(ANDROID_MANIFEST % { 'package' : package, 'app_name' : task.exe_name, 'lib_name' : task.exe_name, 'extra_activities' : activities })
+    manifest_file.write(ANDROID_MANIFEST % { 'package' : package, 'app_name' : task.exe_name, 'lib_name' : task.exe_name, 'extra_activities' : activities, 'min_api_level' : ANDROID_MIN_API_LEVEL, 'target_api_level' : ANDROID_TARGET_API_LEVEL })
     manifest_file.close()
 
     aapt = '%s/android-sdk/build-tools/%s/aapt' % (ANDROID_ROOT, ANDROID_BUILD_TOOLS_VERSION)
@@ -827,7 +830,8 @@ def embed_build(task):
 
     cpp_str = """
 #include <stdint.h>
-unsigned char %s[] =
+#include "dlib/align.h"
+unsigned char DM_ALIGNED(16) %s[] =
 """
     cpp_out_file.write(cpp_str % (symbol))
     cpp_out_file.write('{\n    ')
@@ -991,7 +995,7 @@ def js_web_web_link_flags(self):
             lib_dirs = self.env['JS_LIB_PATHS']
         else:
             lib_dirs = {}
-        libs = ["library_glfw.js", "library_sys.js", "library_script.js", "library_facebook.js", "library_sound.js"]
+        libs = getattr(self, 'web_libs', ["library_glfw.js", "library_sys.js", "library_script.js", "library_facebook.js", "library_facebook_iap.js", "library_sound.js"])
         jsLibHome = os.path.join(self.env['DYNAMO_HOME'], 'lib', 'js-web', 'js')
         for lib in libs:
             js = ''
@@ -1080,10 +1084,7 @@ def detect(conf):
         conf.env['LD'] = '%s/usr/bin/ld' % (IOS_TOOLCHAIN_ROOT)
     elif 'android' == build_util.get_target_os() and 'armv7' == build_util.get_target_architecture():
         # TODO: No windows support yet (unknown path to compiler when wrote this)
-        if build_platform == 'linux':
-            arch = 'x86'
-        else:
-            arch = 'x86_64'
+        arch = 'x86_64'
 
         bin='%s/android-ndk-r%s/toolchains/arm-linux-androideabi-%s/prebuilt/%s-%s/bin' % (ANDROID_ROOT, ANDROID_NDK_VERSION, ANDROID_GCC_VERSION, build_platform, arch)
         conf.env['CC'] = '%s/arm-linux-androideabi-gcc' % (bin)

@@ -86,16 +86,19 @@ There are some examples in the testcases in dynamo.shader.translate-test."
           [clojure.walk :as walk]
           [dynamo.graph :as g]
           [editor.buffers :refer [bbuf->string]]
+          [editor.code :as code]
           [editor.geom :as geom]
           [editor.gl :as gl]
           [editor.gl.protocols :refer [GlBind]]
           [editor.types :as types]
           [editor.workspace :as workspace]
-          [editor.project :as project]
+          [editor.defold-project :as project]
           [editor.scene-cache :as scene-cache])
 (:import [java.nio IntBuffer ByteBuffer]
          [javax.media.opengl GL GL2 GLContext]
          [javax.vecmath Matrix4d Vector4f Point3d]))
+
+(set! *warn-on-reflection* true)
 
 ;; ======================================================================
 ;; shader translation comes from https://github.com/overtone/shadertone.
@@ -370,30 +373,38 @@ This must be submitted to the driver for compilation before you can use it. See
   (when (not= 0 shader)
     (.glDeleteShader gl shader)))
 
-(defrecord ShaderLifecycle [request-id verts frags]
+(defrecord ShaderLifecycle [request-id verts frags uniforms]
   GlBind
-  (bind [this gl]
-    (let [program (scene-cache/request-object! ::shader request-id gl [verts frags])]
-      (.glUseProgram ^GL2 gl program)))
+  (bind [this gl render-args]
+    (let [[program uniform-locs] (scene-cache/request-object! ::shader request-id gl [verts frags uniforms])]
+      (.glUseProgram ^GL2 gl program)
+      (doseq [[name val] uniforms
+              :let [val (if (keyword? val)
+                          (get render-args val)
+                          val)
+                    loc (uniform-locs name (.glGetUniformLocation ^GL2 gl program name))]]
+        (set-uniform-at-index gl program loc val))))
 
   (unbind [this gl]
     (.glUseProgram ^GL2 gl 0))
 
   ShaderVariables
   (get-attrib-location [this gl name]
-    (when-let [program (scene-cache/request-object! ::shader request-id gl [verts frags])]
+    (when-let [[program _] (scene-cache/request-object! ::shader request-id gl [verts frags uniforms])]
       (gl/gl-get-attrib-location ^GL2 gl program name)))
 
   (set-uniform [this gl name val]
-    (when-let [program (scene-cache/request-object! ::shader request-id gl [verts frags])]
-      (let [loc (.glGetUniformLocation ^GL2 gl program name)]
+    (when-let [[program uniform-locs] (scene-cache/request-object! ::shader request-id gl [verts frags uniforms])]
+      (let [loc (uniform-locs name (.glGetUniformLocation ^GL2 gl program name))]
         (set-uniform-at-index gl program loc val)))))
 
 (defn make-shader
   "Ready a shader program for use by compiling and linking it. Takes a collection
 of GLSL strings and returns an object that satisfies GlBind and GlEnable."
-  [request-id verts frags]
-  (->ShaderLifecycle request-id verts frags))
+  ([request-id verts frags]
+    (make-shader request-id verts frags {}))
+  ([request-id verts frags uniforms]
+    (->ShaderLifecycle request-id verts frags uniforms)))
 
 (defn load-shaders
   "Load a shader from files. Takes a PathManipulation that can be used to
@@ -404,9 +415,91 @@ locate the .vp and .fp files. Returns an object that satisifies GlBind and GlEna
     (slurp (types/replace-extension sdef "vp"))
     (slurp (types/replace-extension sdef "fp"))))
 
+(defn- is-word-start [^Character c] (or (Character/isLetter c) (#{\_} c)))
+(defn- is-word-part [^Character c] (or (is-word-start c) (Character/isDigit c)))
+
+(defn- match-multi-comment [charseq]
+  (when-let [match-open (code/match-string charseq "/*")]
+    (when-let [match-body (code/match-until-string (:body match-open) "*/")]
+      (code/combine-matches match-open match-body))))
+
+(defn- match-single-comment [charseq]
+  (when-let [match-open (code/match-string charseq "//")]
+    (when-let [match-body (code/match-until-eol (:body match-open))]
+      (code/combine-matches match-open match-body))))
+
+
+(def ^:private basic-types ["void" "bool" "int" "float"])
+
+(def ^:private vec-types (for [tp ["" "i" "b"]
+                               n (range 2 4)]
+                           (str tp "vec" n)))
+
+(def ^:private mat-types (for [n (range 2 4)]
+                            (str "mat" n)))
+
+(def ^:private literals ["true" "false"])
+
+(def ^:private extension-behaviors ["require" "enable" "warn" "disable"])
+
+(def ^:private pp-directives (map (partial str "#") (string/split "define undef if ifdef ifndef else elif endif error pragma extension version line" #" ")))
+
+(def ^:private storage-qualifiers ["const" "attribute" "uniform" "varying"])
+
+(def ^:private parameter-qualifiers ["in" "out" "inout"])
+
+(def ^:private precision-qualifiers ["lowp" "mediump" "highp"])
+
+(def ^:private other-keywords (string/split "break continue do for while if else precision invariant discard return sampler2D samplerCube struct" #" "))
+
+(def ^:private reserved (string/split "asm class union enum typedef template this packed goto switch default inline noinline volatile public static extern external interface flat long short double half fixed unsigned superp input output hvec2 hvec3 hvec4 dvec2 dvec3 dvec4 fvec2 fvec3 fvec4 sampler1D sampler3D sampler1DShadow sampler2dShadow sampler2DRect sampler3DRect sampler2DRectShadow sizeof cast namespace using" #" "))
+
+(def ^:private keywords (concat basic-types
+                                vec-types
+                                mat-types
+                                literals
+                                extension-behaviors
+                                storage-qualifiers
+                                parameter-qualifiers
+                                precision-qualifiers
+                                other-keywords
+                                reserved))
+
+(def ^:private operators (string/split "( ) [ ] . ++ -- + - ~ ! * / % << >> < > <= >= == != & ^ | && ^^ || ? : = += -= *= /= %= <<= >>= &= ^= |= ," #" "))
+
+
+(def glsl-opts {:code {:language "glsl"
+                       :syntax
+                       {:line-comment "// "
+                        :scanner
+                        ;; see note in lua.clj on why we put multiline comments in the default partition
+                        [#_{:partition "__multicomment"
+                            :type :multiline
+                            :start "/*" :end "*/"
+                            :eof true
+                            :rules
+                            [{:type :default :class "comment"}]
+                            }
+                         {:partition :default
+                          :type :default
+                          :rules
+                          [{:type :multiline :start "\"" :end "\"" :eof false :class "string"}
+                           {:type :custom :scanner match-multi-comment :class "comment-multi"}
+                           {:type :custom :scanner match-single-comment :class "comment"}
+                           {:type :whitespace}
+                           {:type :keyword :start? is-word-start :part? is-word-part :keywords keywords :class "keyword"}
+                           {:type :word :start? is-word-start :part? is-word-part :class "default"}
+                           {:type :number :class "number"}
+                           {:type :default :class "default"}]
+                          }
+                         ]}
+                       }})
+
 (def shader-defs [{:ext "vp"
                    :label "Vertex Program"
                    :icon "icons/32/Icons_32-Vertex-shader.png"
+                   :view-types [:code :default]
+                   :view-opts glsl-opts
                    :prefix (string/join "\n" ["#ifndef GL_ES"
                                               "#define lowp"
                                               "#define mediump"
@@ -416,6 +509,8 @@ locate the .vp and .fp files. Returns an object that satisifies GlBind and GlEna
                   {:ext "fp"
                    :label "Fragment Program"
                    :icon "icons/32/Icons_33-Fragment-shader.png"
+                   :view-types [:code :default]
+                   :view-opts glsl-opts
                    :prefix (string/join "\n" ["#ifdef GL_ES"
                                               "precision mediump float;"
                                               "#endif"
@@ -427,27 +522,29 @@ locate the .vp and .fp files. Returns an object that satisifies GlBind and GlEna
                                               ""])}])
 
 (defn- build-shader [self basis resource dep-resources user-data]
-  {:resource resource :content (.getBytes (str (get-in user-data [:def :prefix]) (:source user-data)))})
+  {:resource resource :content (.getBytes ^String (:source user-data))})
 
-(g/defnk produce-build-targets [_node-id resource source def]
+(g/defnk produce-build-targets [_node-id resource full-source def]
   [{:node-id _node-id
     :resource (workspace/make-build-resource resource)
     :build-fn build-shader
-    :user-data {:source source
+    :user-data {:source full-source
                 :def def}}])
 
 (g/defnode ShaderNode
   (inherits project/ResourceNode)
 
-  (property source g/Str)
-  (property def g/Any)
+  (property code g/Str (dynamic visible (g/always false)))
+  (property def g/Any (dynamic visible (g/always false)))
+  (property caret-position g/Int (dynamic visible (g/always false)) (default 0))
 
-  (output build-targets g/Any produce-build-targets))
+  (output build-targets g/Any produce-build-targets)
+  (output full-source g/Str (g/fnk [code def] (str (get def :prefix) code))))
 
 (defn- load-shader [project self input def]
   (let [source (slurp input)]
     (concat
-      (g/set-property self :source source)
+      (g/set-property self :code source)
       (g/set-property self :def def))))
 
 (defn- register [workspace def]
@@ -455,27 +552,30 @@ locate the .vp and .fp files. Returns an object that satisifies GlBind and GlEna
                                    :ext (:ext def)
                                    :label (:label def)
                                    :node-type ShaderNode
-                                   :load-fn (fn [project self input] (load-shader project self input def))
-                                   :icon (:icon def)))
+                                   :load-fn (fn [project self resource] (load-shader project self resource def))
+                                   :icon (:icon def)
+                                   :view-types (:view-types def)
+                                   :view-opts (:view-opts def)))
 
 (defn register-resource-types [workspace]
   (for [def shader-defs]
     (register workspace def)))
 
-(defn- make-shader-program [^GL2 gl [verts frags]]
+(defn- make-shader-program [^GL2 gl [verts frags uniforms]]
   (let [vs     (make-vertex-shader gl verts)
         fs      (make-fragment-shader gl frags)
-        program (make-program gl vs fs)]
+        program (make-program gl vs fs)
+        uniform-locs (into {} (map (fn [[name val]] [name (.glGetUniformLocation ^GL2 gl program name)]) uniforms))]
     (delete-shader gl vs)
     (delete-shader gl fs)
-    program))
+    [program uniform-locs]))
 
-(defn- update-shader-program [^GL2 gl program data]
+(defn- update-shader-program [^GL2 gl [program uniform-locs] data]
   (delete-shader gl program)
   (make-shader-program gl data))
 
-(defn- destroy-shader-programs [^GL2 gl programs]
-  (doseq [program programs]
+(defn- destroy-shader-programs [^GL2 gl programs _]
+  (doseq [[program _] programs]
     (delete-shader gl program)))
 
 (scene-cache/register-object-cache! ::shader make-shader-program update-shader-program destroy-shader-programs)

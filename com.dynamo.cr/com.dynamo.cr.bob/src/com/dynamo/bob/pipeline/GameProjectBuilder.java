@@ -8,6 +8,7 @@ import java.io.RandomAccessFile;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -25,6 +26,7 @@ import com.dynamo.bob.CopyCustomResourcesBuilder;
 import com.dynamo.bob.Project;
 import com.dynamo.bob.Platform;
 import com.dynamo.bob.Task;
+import com.dynamo.bob.Project.OutputFlags;
 import com.dynamo.bob.Task.TaskBuilder;
 import com.dynamo.bob.archive.ArchiveBuilder;
 import com.dynamo.bob.fs.IResource;
@@ -193,13 +195,22 @@ public class GameProjectBuilder extends Builder<Void> {
         String root = FilenameUtils.concat(project.getRootDirectory(), project.getBuildDirectory());
         ArchiveBuilder ab = new ArchiveBuilder(root);
         boolean doCompress = project.getProjectProperties().getBooleanValue("project", "compress_archive", true);
+        HashMap<String, EnumSet<Project.OutputFlags>> outputs = project.getOutputs();
+        boolean compress;
 
         for (String s : resources) {
             // 2:d argument is true to use compression.
             // We then try to compress all entries.
-            // If the compressed/uncompressed ratio > 0.95 we do not compress
+            // If the compressed/uncompressed ratio > 0.95 or the uncompressed output flag is set we do not compress
             // to save on load time...
-            ab.add(s, doCompress);
+            EnumSet<Project.OutputFlags> flags = outputs.get(s);
+            if(flags != null && flags.contains(Project.OutputFlags.UNCOMPRESSED)) {
+                compress = false;
+            } else {
+                compress = doCompress;
+            }
+
+            ab.add(s, compress);
         }
 
         ab.write(outFile);
@@ -228,7 +239,6 @@ public class GameProjectBuilder extends Builder<Void> {
                         findResources(project, project.getResource((String) v), resources);
                     }
                 }
-
             } else if (isResource && value instanceof String) {
                 findResources(project, project.getResource((String) value), resources);
             }
@@ -263,7 +273,7 @@ public class GameProjectBuilder extends Builder<Void> {
                 builder = (GeneratedMessage.Builder<?>) newBuilder.invoke(null);
                 final byte[] content = resource.output().getContent();
                 if(content == null) {
-                	throw new CompileExceptionError(resource, 0, "Unable to find resource " + resource.getPath());
+                    throw new CompileExceptionError(resource, 0, "Unable to find resource " + resource.getPath());
                 }
                 builder.mergeFrom(content);
                 Object message = builder.build();
@@ -286,14 +296,14 @@ public class GameProjectBuilder extends Builder<Void> {
         if (project.option("keep-unused", "false").equals("true")) {
 
             // All outputs of the project should be considered resources
-            for (String path : project.getOutputs()) {
+            for (String path : project.getOutputs().keySet()) {
                 resources.add(path);
             }
 
         } else {
 
             // Root nodes to follow
-            for (String[] pair : new String[][] { {"bootstrap", "main_collection"}, {"bootstrap", "render"}, {"input", "game_binding"}, {"display", "display_profiles"}}) {
+            for (String[] pair : new String[][] { {"bootstrap", "main_collection"}, {"bootstrap", "render"}, {"input", "game_binding"}, {"input", "gamepads"}, {"display", "display_profiles"}}) {
                 String path = project.getProjectProperties().getStringValue(pair[0], pair[1]);
                 if (path != null) {
                     findResources(project, project.getResource(path), resources);
@@ -355,4 +365,3 @@ public class GameProjectBuilder extends Builder<Void> {
         }
     }
 }
-

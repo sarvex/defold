@@ -113,6 +113,8 @@ namespace dmRender
         uint16_t            m_RenderOrder;
         float               m_Width;
         float               m_Height;
+        float               m_Leading;
+        float               m_Tracking;
         bool                m_LineBreak;
         int32_t             m_Next;
         int32_t             m_Tail;
@@ -135,6 +137,7 @@ namespace dmRender
         // Map from batch id (hash of font-map etc) to index into m_TextEntries
         dmHashTable64<int32_t>              m_Batches;
         dmArray<TextEntry>                  m_TextEntries;
+        uint32_t                            m_Frame;
     };
 
     struct RenderTargetSetup

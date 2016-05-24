@@ -27,12 +27,14 @@ var LibraryGLFW = {
 
     keyFunc: null,
     charFunc: null,
+    markedTextFunc: null,
     mouseButtonFunc: null,
     mousePosFunc: null,
     mouseWheelFunc: null,
     resizeFunc: null,
     closeFunc: null,
     refreshFunc: null,
+    focusFunc: null,
     params: null,
     initTime: null,
     wheelPos: 0,
@@ -44,6 +46,11 @@ var LibraryGLFW = {
     windowY: 0,
     windowWidth: 0,
     windowHeight: 0,
+    prevWidth: 0,
+    prevHeight: 0,
+    prevNonFSWidth: 0,
+    prevNonFSHeight: 0,
+    isFullscreen: false,
 
 /*******************************************************************************
  * DOM EVENT CALLBACKS
@@ -101,7 +108,7 @@ var LibraryGLFW = {
         case 104 : return 310 ; // GLFW_KEY_KP_8
         case 105 : return 311 ; // GLFW_KEY_KP_9
         default  : return keycode;
-      };
+      }
     },
 
     // UCS-2 to UTF16 (ISO 10646)
@@ -130,8 +137,6 @@ var LibraryGLFW = {
 
     onKeyPress: function(event) {
       // charCode is only available whith onKeyPress event
-      var char = GLFW.getUnicodeChar(event.charCode);
-
       if (event.charCode) {
         var char = GLFW.getUnicodeChar(event.charCode);
         if (char !== null && GLFW.charFunc) {
@@ -283,34 +288,37 @@ var LibraryGLFW = {
       }
     },
 
-    // TODO add fullscreen API ala:
-    // http://johndyer.name/native-fullscreen-javascript-api-plus-jquery-plugin/
     onFullScreenEventChange: function(event) {
       var width;
       var height;
-      if (document["fullScreen"] || document["mozFullScreen"] || document["webkitIsFullScreen"]) {
-        width = screen["width"];
-        height = screen["height"];
+      GLFW.isFullscreen = document["fullScreen"] || document["mozFullScreen"] || document["webkitIsFullScreen"] || document["msIsFullScreen"];
+      if (GLFW.isFullscreen) {
+        GLFW.prevNonFSWidth = GLFW.prevWidth;
+        GLFW.prevNonFSHeight = GLFW.prevHeight;
+        width = window.innerWidth;
+        height = window.innerHeight;
       } else {
-        width = GLFW.windowWidth;
-        height = GLFW.windowHeight;
-        // TODO set position
+        width = GLFW.prevNonFSWidth;
+        height = GLFW.prevNonFSHeight;
         document.removeEventListener('fullscreenchange', GLFW.onFullScreenEventChange, true);
         document.removeEventListener('mozfullscreenchange', GLFW.onFullScreenEventChange, true);
         document.removeEventListener('webkitfullscreenchange', GLFW.onFullScreenEventChange, true);
+        document.removeEventListener('msfullscreenchange', GLFW.onFullScreenEventChange, true);
       }
-      Browser.setCanvasSize(width, height);
-
-      if (GLFW.resizeFunc) {
-        Runtime.dynCall('vii', GLFW.resizeFunc, [width, height]);
-      }
+      Module["canvas"].width = width;
+      Module["canvas"].height = height;
     },
 
     requestFullScreen: function() {
+      document.addEventListener('fullscreenchange', GLFW.onFullScreenEventChange, true);
+      document.addEventListener('mozfullscreenchange', GLFW.onFullScreenEventChange, true);
+      document.addEventListener('webkitfullscreenchange', GLFW.onFullScreenEventChange, true);
+      document.addEventListener('msfullscreenchange', GLFW.onFullScreenEventChange, true);
       var RFS = Module["canvas"]['requestFullscreen'] ||
                 Module["canvas"]['requestFullScreen'] ||
                 Module["canvas"]['mozRequestFullScreen'] ||
                 Module["canvas"]['webkitRequestFullScreen'] ||
+                Module["canvas"]['msRequestFullScreen'] ||
                 (function() {});
       RFS.apply(Module["canvas"], []);
     },
@@ -320,43 +328,10 @@ var LibraryGLFW = {
                 document['cancelFullScreen'] ||
                 document['mozCancelFullScreen'] ||
                 document['webkitCancelFullScreen'] ||
+                document['msExitFullscreen'] ||
           (function() {});
       CFS.apply(document, []);
-    },
-
-    webResizeScreenToAspectRatio: function() {
-        if (typeof window != 'undefined') {
-          var canvas = document.getElementById('canvas');
-          var x = canvas.width;
-          var y = canvas.height;
-          // The total screen size in device pixels in integers.
-          var screenWidth = Math.round(window.innerWidth*window.devicePixelRatio);
-          var screenHeight = Math.round(window.innerHeight*window.devicePixelRatio);
-          // Compute (w,h) that will be the target CSS pixel size of the canvas.
-          var w = screenWidth;
-          var h = screenHeight;
-          // Make sure aspect ratio remains after the resize
-          if (w*y < x*h) {
-            h = (w * y / x) | 0;
-          } else if (w*y > x*h) {
-            w = (h * x / y) | 0;
-          }
-          var topMargin = ((screenHeight - h) / 2) | 0;
-          // Back to CSS pixels.
-          topMargin /= window.devicePixelRatio;
-          w /= window.devicePixelRatio;
-          h /= window.devicePixelRatio;
-          // Round to nearest 6 digits of precision.
-          w = Math.round(w*1000000)/1000000;
-          h = Math.round(h*1000000)/1000000;
-          topMargin = Math.round(topMargin*1000000)/1000000;
-          var canvas = document.getElementById('canvas');
-          canvas.style.width = w + 'px';
-          canvas.style.height = h + 'px';
-          Module['canvas'].style.marginTop = topMargin + 'px';
-        }
     }
-
   },
 
 /*******************************************************************************
@@ -461,8 +436,8 @@ var LibraryGLFW = {
     GLFW.params[0x0002000A] = stencilbits; // GLFW_STENCIL_BITS
 
     if (mode == 0x00010001) {// GLFW_WINDOW
-      Browser.setCanvasSize(GLFW.initWindowWidth = width,
-                            GLFW.initWindowHeight = height);
+      GLFW.initWindowWidth = width;
+      GLFW.initWindowHeight = height;
       GLFW.params[0x00030003] = true; // GLFW_STICKY_MOUSE_BUTTONS
     } else if (mode == 0x00010002) {// GLFW_FULLSCREEN
       GLFW.requestFullScreen();
@@ -475,11 +450,8 @@ var LibraryGLFW = {
       antialias: (GLFW.params[0x00020013] > 1), // GLFW_FSAA_SAMPLES
       depth: (GLFW.params[0x00020009] > 0), // GLFW_DEPTH_BITS
       stencil: (GLFW.params[0x0002000A] > 0) // GLFW_STENCIL_BITS
-    }
+    };
     Module.ctx = Browser.createContext(Module['canvas'], true, true, contextAttributes);
-
-    GLFW.addEventListener("resize", GLFW.webResizeScreenToAspectRatio);
-    GLFW.webResizeScreenToAspectRatio();
 
     return 1; // GL_TRUE
   },
@@ -506,7 +478,6 @@ var LibraryGLFW = {
   },
 
   glfwSetWindowSize: function(width, height) {
-    GLFW.cancelFullScreen();
       Browser.setCanvasSize(width, height);
       if (GLFW.resizeFunc) {
         Runtime.dynCall('vii', GLFW.resizeFunc, [width, height]);
@@ -519,7 +490,25 @@ var LibraryGLFW = {
 
   glfwRestoreWindow: function() {},
 
-  glfwSwapBuffers: function() {},
+  glfwSwapBuffers__deps: ['glfwSetWindowSize'],
+  glfwSwapBuffers: function() {
+
+    var width = Module['canvas'].width;
+    var height = Module['canvas'].height;
+
+    if (GLFW.isFullscreen) {
+      width = window.innerWidth;
+      height = window.innerHeight;
+    }
+
+    if (GLFW.prevWidth != width ||
+        GLFW.prevHeight != height) {
+
+      GLFW.prevWidth = width;
+      GLFW.prevHeight = height;
+      _glfwSetWindowSize(width, height);
+    }
+  },
 
   glfwSwapInterval: function(interval) {},
 
@@ -537,6 +526,10 @@ var LibraryGLFW = {
 
   glfwSetWindowRefreshCallback: function(cbfun) {
     GLFW.refreshFunc = cbfun;
+  },
+
+  glfwSetWindowFocusCallback: function(cbfun) {
+    GLFW.focusFunc = cbfun;
   },
 
   /* Video mode functions */
@@ -579,6 +572,12 @@ var LibraryGLFW = {
 
   glfwSetCharCallback: function(cbfun) {
     GLFW.charFunc = cbfun;
+    return 1;
+  },
+
+  glfwSetMarkedTextCallback: function(cbfun) {
+    GLFW.markedTextFunc = cbfun;
+    return 1;
   },
 
   glfwSetMouseButtonCallback: function(cbfun) {
@@ -594,11 +593,11 @@ var LibraryGLFW = {
   },
 
   /* Joystick input */
-  glfwGetJoystickParam: function(joy, param) { throw "glfwGetJoystickParam is not implemented."; },
+  glfwGetJoystickParam: function(joy, param) { return 0; },
 
-  glfwGetJoystickPos: function(joy, pos, numaxes) { throw "glfwGetJoystickPos is not implemented."; },
+  glfwGetJoystickPos: function(joy, pos, numaxes) { return 0; },
 
-  glfwGetJoystickButtons: function(joy, buttons, numbuttons) { throw "glfwGetJoystickButtons is not implemented."; },
+  glfwGetJoystickButtons: function(joy, buttons, numbuttons) { return 0; },
 
   /* Time */
   glfwGetTime: function() {
@@ -702,16 +701,7 @@ var LibraryGLFW = {
     }
   },
 
-  glfwGetJoystickParam: function(joy, param) {
-      return 0;
-  },
-
-  glfwGetJoystickPos: function(joy, pos, numaxes) {
-      return 0;
-  },
-
-  glfwGetJoystickButtons: function(joy, buttons, numbuttons) {
-      return 0;
+  glfwResetKeyboard: function() {
   },
 
   glfwGetJoystickDeviceId: function(joy, device_id) {
@@ -736,5 +726,4 @@ var LibraryGLFW = {
 
 autoAddDeps(LibraryGLFW, '$GLFW');
 mergeInto(LibraryManager.library, LibraryGLFW);
-
 

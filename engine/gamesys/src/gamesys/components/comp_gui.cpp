@@ -196,7 +196,7 @@ namespace dmGameSystem
             if (gui_result != dmGui::RESULT_OK)
             {
                 dmLogError("The layer '%s' could not be set for the '%s', result: %d.", node_desc->m_Layer, node_desc->m_Id != 0x0 ? node_desc->m_Id : "unnamed", gui_result);
-                result = false;
+                dmGui::SetNodeLayer(scene, n, "");
             }
         }
         else
@@ -215,6 +215,7 @@ namespace dmGameSystem
         dmGui::SetNodeXAnchor(scene, n, (dmGui::XAnchor) node_desc->m_Xanchor);
         dmGui::SetNodeYAnchor(scene, n, (dmGui::YAnchor) node_desc->m_Yanchor);
         dmGui::SetNodeAdjustMode(scene, n, (dmGui::AdjustMode) node_desc->m_AdjustMode);
+        dmGui::SetNodeSizeMode(scene, n, (dmGui::SizeMode) node_desc->m_SizeMode);
         dmGui::SetNodeInheritAlpha(scene, n, node_desc->m_InheritAlpha);
 
         dmGui::SetNodeClippingMode(scene, n, (dmGui::ClippingMode) node_desc->m_ClippingMode);
@@ -228,6 +229,8 @@ namespace dmGameSystem
                 dmGui::SetNodeText(scene, n, node_desc->m_Text);
                 dmGui::SetNodeFont(scene, n, node_desc->m_Font);
                 dmGui::SetNodeLineBreak(scene, n, node_desc->m_LineBreak);
+                dmGui::SetNodeTextLeading(scene, n, node_desc->m_TextLeading);
+                dmGui::SetNodeTextTracking(scene, n, node_desc->m_TextTracking);
             break;
 
             case dmGuiDDF::NodeDesc::TYPE_PIE:
@@ -321,7 +324,8 @@ namespace dmGameSystem
         for (uint32_t i = 0; i < scene_resource->m_GuiTextureSets.Size(); ++i)
         {
             const char* name = scene_desc->m_Textures[i].m_Name;
-            dmGui::Result r = dmGui::AddTexture(scene, name, (void*) scene_resource->m_GuiTextureSets[i].m_Texture, (void*) scene_resource->m_GuiTextureSets[i].m_TextureSet);
+            dmGraphics::HTexture texture = scene_resource->m_GuiTextureSets[i].m_Texture;
+            dmGui::Result r = dmGui::AddTexture(scene, name, (void*) texture, (void*) scene_resource->m_GuiTextureSets[i].m_TextureSet, dmGraphics::GetTextureWidth(texture), dmGraphics::GetTextureHeight(texture));
             if (r != dmGui::RESULT_OK) {
                 dmLogError("Unable to add texture '%s' to scene (%d)", name,  r);
                 return false;
@@ -366,7 +370,8 @@ namespace dmGameSystem
             {
                 if (node_desc->m_Id)
                     dmGui::SetNodeId(scene, n, node_desc->m_Id);
-                result = SetNode(scene, n, node_desc);
+                if(!SetNode(scene, n, node_desc))
+                    return false;
                 if(layouts_count != 0)
                     dmGui::SetNodeLayoutDesc(scene, n, node_desc, 0, layouts_count);
             }
@@ -451,6 +456,7 @@ namespace dmGameSystem
         GuiWorld* gui_world = (GuiWorld*)params.m_World;
 
         GuiSceneResource* scene_resource = (GuiSceneResource*) params.m_Resource;
+        dmGuiDDF::SceneDesc* scene_desc = scene_resource->m_SceneDesc;
 
         GuiComponent* gui_component = new GuiComponent();
         gui_component->m_Instance = params.m_Instance;
@@ -459,8 +465,9 @@ namespace dmGameSystem
         gui_component->m_AddedToUpdate = 0;
 
         dmGui::NewSceneParams scene_params;
-        // 512 is a hard cap since the render key has 9 bits for node index
-        scene_params.m_MaxNodes = 512;
+        // 1024 is a hard cap since the render key has 10 bits for node index
+        assert(scene_desc->m_MaxNodes <= 1024);
+        scene_params.m_MaxNodes = scene_desc->m_MaxNodes;
         scene_params.m_MaxAnimations = 1024;
         scene_params.m_UserData = gui_component;
         scene_params.m_MaxFonts = 64;
@@ -606,7 +613,7 @@ namespace dmGameSystem
     void RenderTextNodes(dmGui::HScene scene,
                          const dmGui::RenderEntry* entries,
                          const Matrix4* node_transforms,
-                         const Vector4* node_colors,
+                         const float* node_opacities,
                          const dmGui::StencilScope** stencil_scopes,
                          uint32_t node_count,
                          void* context)
@@ -617,7 +624,7 @@ namespace dmGameSystem
         {
             dmGui::HNode node = entries[i].m_Node;
 
-            const Vector4& color = node_colors[i];
+            const Vector4& color = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_COLOR);
             const Vector4& outline = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_OUTLINE);
             const Vector4& shadow = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_SHADOW);
 
@@ -625,14 +632,18 @@ namespace dmGameSystem
             assert(node_type == dmGui::NODE_TYPE_TEXT);
 
             dmRender::DrawTextParams params;
-            params.m_FaceColor = color;
-            params.m_OutlineColor = outline;
-            params.m_ShadowColor = shadow;
+            float opacity = node_opacities[i];
+            params.m_FaceColor = Vector4(color.getXYZ(), opacity);
+            params.m_OutlineColor = Vector4(outline.getXYZ(), outline.getW() * opacity);
+            params.m_ShadowColor = Vector4(shadow.getXYZ(), shadow.getW() * opacity);
             params.m_Text = dmGui::GetNodeText(scene, node);
             params.m_WorldTransform = node_transforms[i];
             params.m_Depth = 0;
             params.m_RenderOrder = dmGui::GetRenderOrder(scene);
             params.m_LineBreak = dmGui::GetNodeLineBreak(scene, node);
+            params.m_Leading = dmGui::GetNodeTextLeading(scene, node);
+            params.m_Tracking = dmGui::GetNodeTextTracking(scene, node);
+
             Vector4 size = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_SIZE);
             params.m_Width = size.getX();
             params.m_Height = size.getY();
@@ -686,7 +697,7 @@ namespace dmGameSystem
     void RenderBoxNodes(dmGui::HScene scene,
                         const dmGui::RenderEntry* entries,
                         const Matrix4* node_transforms,
-                        const Vector4* node_colors,
+                        const float* node_opacities,
                         const dmGui::StencilScope** stencil_scopes,
                         uint32_t node_count,
                         void* context)
@@ -742,14 +753,11 @@ namespace dmGameSystem
 
         for (uint32_t i = 0; i < node_count; ++i)
         {
-            const Vector4& color = node_colors[i];
             const dmGui::HNode node = entries[i].m_Node;
+        	const Vector4& color = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_COLOR);
 
             // Pre-multiplied alpha
-            Vector4 pm_color(color);
-            pm_color.setX(color.getX() * color.getW());
-            pm_color.setY(color.getY() * color.getW());
-            pm_color.setZ(color.getZ() * color.getW());
+            Vector4 pm_color(color.getXYZ() * node_opacities[i], node_opacities[i]);
             uint32_t bcolor = dmGraphics::PackRGBA(pm_color);
 
             Vector4 slice9 = dmGui::GetNodeSlice9(scene, node);
@@ -904,7 +912,7 @@ namespace dmGameSystem
     void RenderPieNodes(dmGui::HScene scene,
                         const dmGui::RenderEntry* entries,
                         const Matrix4* node_transforms,
-                        const Vector4* node_colors,
+                        const float* node_opacities,
                         const dmGui::StencilScope** stencil_scopes,
                         uint32_t node_count,
                         void* context)
@@ -958,18 +966,16 @@ namespace dmGameSystem
 
         for (uint32_t i = 0; i < node_count; ++i)
         {
-            const Vector4& color = node_colors[i];
             const dmGui::HNode node = entries[i].m_Node;
             const Point3 size = dmGui::GetNodeSize(scene, node);
 
             if (dmMath::Abs(size.getX()) < 0.001f)
                 continue;
 
+        	const Vector4& color = dmGui::GetNodeProperty(scene, node, dmGui::PROPERTY_COLOR);
+
             // Pre-multiplied alpha
-            Vector4 pm_color(color);
-            pm_color.setX(color.getX() * color.getW());
-            pm_color.setY(color.getY() * color.getW());
-            pm_color.setZ(color.getZ() * color.getW());
+            Vector4 pm_color(color.getXYZ() * node_opacities[i], node_opacities[i]);
             uint32_t bcolor = dmGraphics::PackRGBA(pm_color);
 
             const uint32_t perimeterVertices = dmMath::Max<uint32_t>(4, dmGui::GetNodePerimeterVertices(scene, node));
@@ -1106,7 +1112,7 @@ namespace dmGameSystem
     void RenderNodes(dmGui::HScene scene,
                     const dmGui::RenderEntry* entries,
                     const Matrix4* node_transforms,
-                    const Vector4* node_colors,
+                    const float* node_opacities,
                     const dmGui::StencilScope** stencil_scopes,
                     uint32_t node_count,
                     void* context)
@@ -1145,13 +1151,13 @@ namespace dmGameSystem
                 switch (prev_node_type)
                 {
                     case dmGui::NODE_TYPE_TEXT:
-                        RenderTextNodes(scene, entries + start, node_transforms + start, node_colors + start, stencil_scopes + start, n, context);
+                        RenderTextNodes(scene, entries + start, node_transforms + start, node_opacities + start, stencil_scopes + start, n, context);
                         break;
                     case dmGui::NODE_TYPE_BOX:
-                        RenderBoxNodes(scene, entries + start, node_transforms + start, node_colors + start, stencil_scopes + start, n, context);
+                        RenderBoxNodes(scene, entries + start, node_transforms + start, node_opacities + start, stencil_scopes + start, n, context);
                         break;
                     case dmGui::NODE_TYPE_PIE:
-                        RenderPieNodes(scene, entries + start, node_transforms + start, node_colors + start, stencil_scopes + start, n, context);
+                        RenderPieNodes(scene, entries + start, node_transforms + start, node_opacities + start, stencil_scopes + start, n, context);
                         break;
                     default:
                         break;
@@ -1173,13 +1179,13 @@ namespace dmGameSystem
             switch (prev_node_type)
             {
                 case dmGui::NODE_TYPE_TEXT:
-                    RenderTextNodes(scene, entries + start, node_transforms + start, node_colors + start, stencil_scopes + start, n, context);
+                    RenderTextNodes(scene, entries + start, node_transforms + start, node_opacities + start, stencil_scopes + start, n, context);
                     break;
                 case dmGui::NODE_TYPE_BOX:
-                    RenderBoxNodes(scene, entries + start, node_transforms + start, node_colors + start, stencil_scopes + start, n, context);
+                    RenderBoxNodes(scene, entries + start, node_transforms + start, node_opacities + start, stencil_scopes + start, n, context);
                     break;
                 case dmGui::NODE_TYPE_PIE:
-                    RenderPieNodes(scene, entries + start, node_transforms + start, node_colors + start, stencil_scopes + start, n, context);
+                    RenderPieNodes(scene, entries + start, node_transforms + start, node_opacities + start, stencil_scopes + start, n, context);
                     break;
                 default:
                     break;
@@ -1272,8 +1278,8 @@ namespace dmGameSystem
             out_data->m_TexCoords = (const float*) texture_set_res->m_TextureSet->m_TexCoords.m_Data;
             out_data->m_Start = animation->m_Start;
             out_data->m_End = animation->m_End;
-            out_data->m_Width = animation->m_Width;
-            out_data->m_Height = animation->m_Height;
+            out_data->m_TextureWidth = dmGraphics::GetTextureWidth(texture_set_res->m_Texture);
+            out_data->m_TextureHeight = dmGraphics::GetTextureHeight(texture_set_res->m_Texture);
             out_data->m_FPS = animation->m_Fps;
             out_data->m_FlipHorizontal = animation->m_FlipHorizontal;
             out_data->m_FlipVertical = animation->m_FlipVertical;
@@ -1455,6 +1461,7 @@ namespace dmGameSystem
 
             size_t text_count = dmStrlCpy(gui_input_action.m_Text, params.m_InputAction->m_Text, sizeof(gui_input_action.m_Text));
             gui_input_action.m_TextCount = text_count;
+            gui_input_action.m_HasText = params.m_InputAction->m_HasText;
 
             bool consumed;
             dmGui::Result gui_result = dmGui::DispatchInput(scene, &gui_input_action, 1, &consumed);
@@ -1530,11 +1537,12 @@ namespace dmGameSystem
         }
     }
 
-    void GuiGetTextMetricsCallback(const void* font, const char* text, float width, bool line_break, dmGui::TextMetrics* out_metrics)
+    void GuiGetTextMetricsCallback(const void* font, const char* text, float width, bool line_break, float leading, float tracking, dmGui::TextMetrics* out_metrics)
     {
         dmRender::TextMetrics metrics;
-        dmRender::GetTextMetrics((dmRender::HFontMap)font, text, width, line_break, &metrics);
+        dmRender::GetTextMetrics((dmRender::HFontMap)font, text, width, line_break, leading, tracking, &metrics);
         out_metrics->m_Width = metrics.m_Width;
+        out_metrics->m_Height = metrics.m_Height;
         out_metrics->m_MaxAscent = metrics.m_MaxAscent;
         out_metrics->m_MaxDescent = metrics.m_MaxDescent;
     }

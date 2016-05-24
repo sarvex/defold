@@ -29,6 +29,7 @@ import com.dynamo.gui.proto.Gui.NodeDesc.AdjustMode;
 import com.dynamo.gui.proto.Gui.NodeDesc.BlendMode;
 import com.dynamo.gui.proto.Gui.NodeDesc.ClippingMode;
 import com.dynamo.gui.proto.Gui.NodeDesc.Pivot;
+import com.dynamo.gui.proto.Gui.NodeDesc.SizeMode;
 import com.dynamo.gui.proto.Gui.NodeDesc.XAnchor;
 import com.dynamo.gui.proto.Gui.NodeDesc.YAnchor;
 import com.dynamo.proto.DdfMath.Vector4;
@@ -38,26 +39,26 @@ public class GuiNode extends Node implements Identifiable {
 
     // Fields of the render key
     private enum RenderKeyRange {
-        SUB_INDEX(9),
+        SUB_INDEX(10),
         SUB_LAYER(3),
         INV_CLIPPER_ID(8),
-        INDEX(9),
+        INDEX(10),
         LAYER(3);
 
-        private final int bitRange;
+        private final long bitRange;
 
         RenderKeyRange(int bitRange) {
             this.bitRange = bitRange;
         }
 
-        private int mask() {
+        private long mask() {
             return (1 << this.bitRange) - 1;
         }
 
-        public int shift(int val) {
+        public long shift(int val) {
             int end = this.ordinal();
             int offset = 0;
-            int result = val & mask();
+            long result = val & mask();
             for (int i = 0; i < end; ++i) {
                 RenderKeyRange range = values()[i];
                 offset += range.bitRange;
@@ -69,6 +70,9 @@ public class GuiNode extends Node implements Identifiable {
 
     @Property
     private Vector3d size = new Vector3d(0.0, 0.0, 0.0);
+
+    @Property
+    protected SizeMode sizeMode = SizeMode.SIZE_MODE_AUTO;
 
     @Property
     @NotEmpty(severity = IStatus.ERROR)
@@ -103,7 +107,7 @@ public class GuiNode extends Node implements Identifiable {
     @Property(editorType = EditorType.DROP_DOWN)
     private String layer = "";
 
-    private transient int renderKey = 0;
+    private transient long renderKey = 0;
     private transient TemplateNode parentTemplateNode = null;
     private GuiNodeStateBuilder nodeStates = new GuiNodeStateBuilder();
 
@@ -205,6 +209,23 @@ public class GuiNode extends Node implements Identifiable {
 
     public boolean isSizeOverridden() {
         return GuiNodeStateBuilder.isFieldOverridden(this, "Size", LoaderUtil.toVector4(this.size));
+    }
+
+    public SizeMode getSizeMode() {
+        return this.sizeMode;
+    }
+
+    public void resetSizeMode() {
+        this.sizeMode = SizeMode.valueOf((EnumValueDescriptor)GuiNodeStateBuilder.resetField(this, "SizeMode"));
+    }
+
+    public boolean isSizeModeOverridden() {
+        return GuiNodeStateBuilder.isFieldOverridden(this, "SizeMode", this.sizeMode);
+    }
+
+    public void setSizeMode(SizeMode sizeMode) {
+        this.sizeMode = sizeMode;
+        GuiNodeStateBuilder.setField(this, "SizeMode", sizeMode);
     }
 
     public RGB getColor() {
@@ -419,7 +440,7 @@ public class GuiNode extends Node implements Identifiable {
         return parentTemplateNode != null;
     }
 
-    public int getRenderKey() {
+    public long getRenderKey() {
         return this.renderKey;
     }
 
@@ -433,7 +454,7 @@ public class GuiNode extends Node implements Identifiable {
         }
     }
 
-    protected static int calcRenderKey(int layer, int index, int invClipperId, int subLayer, int subIndex) {
+    protected static long calcRenderKey(int layer, int index, int invClipperId, int subLayer, int subIndex) {
         return RenderKeyRange.LAYER.shift(layer)
                 | RenderKeyRange.INDEX.shift(index)
                 | RenderKeyRange.INV_CLIPPER_ID.shift(invClipperId)
@@ -445,7 +466,7 @@ public class GuiNode extends Node implements Identifiable {
         this.renderKey = calcRenderKey(layer, index, invClipperId, subLayer, subIndex);
     }
 
-    public void setRenderKey(int renderKey) {
+    public void setRenderKey(long renderKey) {
         this.renderKey = renderKey;
     }
 

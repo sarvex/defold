@@ -20,6 +20,21 @@ import org.eclipse.jetty.server.handler.ResourceHandler;
 import org.eclipse.jetty.server.bio.SocketConnector;
 import org.eclipse.jetty.server.ssl.SslSocketConnector;
 
+
+class TestSslSocketConnector extends SslSocketConnector
+{
+	@Override
+	public void accept(int acceptorID) throws IOException, InterruptedException
+	{
+        try {
+            Thread.sleep(10000); // milliseconds
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        super.accept(acceptorID);
+	}
+}
+
 public class TestHttpServer extends AbstractHandler
 {
     Pattern m_AddPattern = Pattern.compile("/add/(\\d+)/(\\d+)");
@@ -276,17 +291,25 @@ public class TestHttpServer extends AbstractHandler
         {
             Server server = new Server();
             SocketConnector connector = new SocketConnector();
-            connector.setMaxIdleTime(300);
+            connector.setMaxIdleTime(500);
             connector.setPort(7000);
             server.addConnector(connector);
 
             SslSocketConnector sslConnector = new SslSocketConnector();
-            sslConnector.setHandshakeTimeout(300);
-            sslConnector.setMaxIdleTime(300);
+            sslConnector.setHandshakeTimeout(500);
+            sslConnector.setMaxIdleTime(500);
             sslConnector.setPort(7001);
             sslConnector.setKeystore("src/test/data/keystore");
             sslConnector.setKeyPassword("defold");
             server.addConnector(sslConnector);
+
+            TestSslSocketConnector testsslConnector = new TestSslSocketConnector();
+            testsslConnector.setHandshakeTimeout(500);
+            testsslConnector.setMaxIdleTime(500);
+            testsslConnector.setPort(7002);
+            testsslConnector.setKeystore("src/test/data/keystore");
+            testsslConnector.setKeyPassword("defold");
+            server.addConnector(testsslConnector);
 
             HandlerList handlerList = new HandlerList();
             handlerList.addHandler(new TestHttpServer());
@@ -338,8 +361,8 @@ public class TestHttpServer extends AbstractHandler
             server.setHandler(handlerList);
 
             server.start();
-            Thread.sleep(1000 * 400);
-            System.out.println("ERROR: HTTP server wasn't terminated by the tests after 400 seconds. Quiting...");
+            Thread.sleep(1000 * 500);
+            System.out.println("ERROR: HTTP server wasn't terminated by the tests after 500 seconds. Quitting...");
             System.exit(1);
         }
         catch (Throwable e)

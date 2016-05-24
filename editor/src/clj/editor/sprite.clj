@@ -1,14 +1,17 @@
 (ns editor.sprite
   (:require [editor.protobuf :as protobuf]
             [dynamo.graph :as g]
+            [editor.graph-util :as gu]
             [editor.geom :as geom]
             [editor.gl :as gl]
             [editor.gl.shader :as shader]
             [editor.gl.vertex :as vtx]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.scene :as scene]
             [editor.workspace :as workspace]
-            [internal.render.pass :as pass])
+            [editor.validation :as validation]
+            [editor.resource :as resource]
+            [editor.gl.pass :as pass])
   (:import [com.dynamo.graphics.proto Graphics$Cubemap Graphics$TextureImage Graphics$TextureImage$Image Graphics$TextureImage$Type]
            [com.dynamo.sprite.proto Sprite$SpriteDesc Sprite$SpriteDesc$BlendMode]
            [com.jogamp.opengl.util.awt TextRenderer]
@@ -18,6 +21,8 @@
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
            [javax.media.opengl.glu GLU]
            [javax.vecmath Matrix4d Point3d]))
+
+(set! *warn-on-reflection* true)
 
 (def sprite-icon "icons/16/Icons_14-Sprite.png")
 
@@ -142,7 +147,7 @@
     (cond
       (= pass pass/outline)
       (let [outline-vertex-binding (vtx/use-with ::sprite-outline (gen-outline-vertex-buffer renderables count) outline-shader)]
-        (gl/with-gl-bindings gl [outline-shader outline-vertex-binding]
+        (gl/with-gl-bindings gl render-args [outline-shader outline-vertex-binding]
           (gl/gl-draw-arrays gl GL/GL_LINES 0 (* count 8))))
 
       (= pass pass/transparent)
@@ -150,7 +155,7 @@
             user-data (:user-data (first renderables))
             gpu-texture (:gpu-texture user-data)
             blend-mode (:blend-mode user-data)]
-        (gl/with-gl-bindings gl [gpu-texture shader vertex-binding]
+        (gl/with-gl-bindings gl render-args [gpu-texture shader vertex-binding]
           (case blend-mode
             :blend-mode-alpha (.glBlendFunc gl GL/GL_ONE GL/GL_ONE_MINUS_SRC_ALPHA)
             (:blend-mode-add :blend-mode-add-alpha) (.glBlendFunc gl GL/GL_ONE GL/GL_ONE)
@@ -161,17 +166,17 @@
 
       (= pass pass/selection)
       (let [vertex-binding (vtx/use-with ::sprite-selection (gen-vertex-buffer renderables count) shader)]
-        (gl/with-gl-bindings gl [shader vertex-binding]
+        (gl/with-gl-bindings gl render-args [shader vertex-binding]
           (gl/gl-draw-arrays gl GL/GL_TRIANGLES 0 (* count 6)))))))
 
 ; Node defs
 
-(g/defnk produce-save-data [resource image default-animation material blend-mode]
+(g/defnk produce-save-data [_node-id resource image default-animation material blend-mode]
   {:resource resource
    :content (protobuf/map->str Sprite$SpriteDesc
-              {:tile-set (workspace/proj-path image)
+              {:tile-set (resource/resource->proj-path image)
                :default-animation default-animation
-               :material (workspace/proj-path material)
+               :material (resource/proj-path material)
                :blend-mode blend-mode})})
 
 (defn anim-uvs [anim]
@@ -197,7 +202,7 @@
 
 (defn- build-sprite [self basis resource dep-resources user-data]
   (let [pb (:proto-msg user-data)
-        pb (reduce #(assoc %1 (first %2) (second %2)) pb (map (fn [[label res]] [label (workspace/proj-path (get dep-resources res))]) (:dep-resources user-data)))]
+        pb (reduce #(assoc %1 (first %2) (second %2)) pb (map (fn [[label res]] [label (resource/proj-path (get dep-resources res))]) (:dep-resources user-data)))]
     {:resource resource :content (protobuf/map->bytes Sprite$SpriteDesc pb)}))
 
 (g/defnk produce-build-targets [_node-id resource image default-animation material blend-mode dep-build-targets]
@@ -207,58 +212,49 @@
     [{:node-id _node-id
       :resource (workspace/make-build-resource resource)
       :build-fn build-sprite
-      :user-data {:proto-msg {:tile-set (workspace/proj-path image)
+      :user-data {:proto-msg {:tile-set (resource/proj-path image)
                               :default-animation default-animation
-                              :material (workspace/proj-path material)
+                              :material (resource/proj-path material)
                               :blend-mode blend-mode}
                   :dep-resources dep-resources}
       :deps dep-build-targets}]))
 
-(defn- connect-image [project self image]
-  (if-let [image-node (project/get-resource-node project image)]
-    (let [outputs (-> image-node g/node-type* g/output-labels)]
-      (if (every? #(contains? outputs %) [:anim-data :gpu-texture :build-targets])
-        [(g/connect image-node :anim-data     self :anim-data)
-         (g/connect image-node :gpu-texture   self :gpu-texture)
-         (g/connect image-node :build-targets self :dep-build-targets)]
-        []))
-    []))
-
-(defn- disconnect-all [node-id label]
-  (for [[src-node-id src-label] (g/sources-of node-id label)]
-    (g/disconnect src-node-id src-label node-id label)))
-
-(defn reconnect [transaction graph self label kind labels]
-  (when (some #{:image} labels)
-    (let [image (g/node-value self :image)
-          project (project/get-project self)]
-      (concat
-        (disconnect-all self :anim-data)
-        (disconnect-all self :gpu-texture)
-        (disconnect-all self :dep-build-targets)
-        (connect-image project self image)))))
-
 (g/defnode SpriteNode
   (inherits project/ResourceNode)
 
-  (property image (g/protocol workspace/Resource))
+  (property image (g/protocol resource/Resource)
+            (value (gu/passthrough image-resource))
+            (set (project/gen-resource-setter [[:resource :image-resource]
+                                               [:anim-data :anim-data]
+                                               [:gpu-texture :gpu-texture]
+                                               [:build-targets :dep-build-targets]]))
+            (validate (validation/validate-resource image)))
+
   (property default-animation g/Str
+            (validate (validation/validate-animation default-animation anim-data))
             (dynamic edit-type (g/fnk [anim-data] {:type :choicebox
                                                    :options (or (and anim-data (zipmap (keys anim-data) (keys anim-data))) {})})))
-  (property material (g/protocol workspace/Resource))
-  (property blend-mode g/Any (default :BLEND_MODE_ALPHA)
+  (property material (g/protocol resource/Resource)
+            (value (gu/passthrough material-resource))
+            (set (project/gen-resource-setter [[:resource :material-resource]
+                                               [:build-targets :dep-build-targets]]))
+            (validate (validation/validate-resource material)))
+
+
+  (property blend-mode g/Any (default :blend_mode_alpha)
+            (dynamic tip (validation/blend-mode-tip blend-mode Sprite$SpriteDesc$BlendMode))
             (dynamic edit-type (g/always
                                 (let [options (protobuf/enum-values Sprite$SpriteDesc$BlendMode)]
                                   {:type :choicebox
                                    :options (zipmap (map first options)
                                                     (map (comp :display-name second) options))}))))
 
-  ;; TODO - replace with use of property setter
-  #_(trigger reconnect :property-touched #'reconnect)
-
+  (input image-resource (g/protocol resource/Resource))
   (input anim-data g/Any)
   (input gpu-texture g/Any)
   (input dep-build-targets g/Any :array)
+
+  (input material-resource (g/protocol resource/Resource))
 
   (output animation g/Any (g/fnk [anim-data default-animation] (get anim-data default-animation))) ; TODO - use placeholder animation
   (output aabb AABB (g/fnk [animation] (if animation
@@ -268,25 +264,19 @@
                                              (geom/aabb-incorporate (Point3d. (- hw) (- hh) 0))
                                              (geom/aabb-incorporate (Point3d. hw hh 0))))
                                          (geom/null-aabb))))
-  (output outline g/Any :cached (g/fnk [_node-id] {:node-id _node-id :label "Sprite" :icon sprite-icon}))
   (output save-data g/Any :cached produce-save-data)
   (output scene g/Any :cached produce-scene)
   (output build-targets g/Any :cached produce-build-targets))
 
-(defn load-sprite [project self input]
-  (let [sprite   (protobuf/read-text Sprite$SpriteDesc input)
-        resource (g/node-value self :resource)
+(defn load-sprite [project self resource]
+  (let [sprite   (protobuf/read-text Sprite$SpriteDesc resource)
         image    (workspace/resolve-resource resource (:tile-set sprite))
         material (workspace/resolve-resource resource (:material sprite))]
     (concat
       (g/set-property self :image image)
       (g/set-property self :default-animation (:default-animation sprite))
       (g/set-property self :material material)
-      (g/set-property self :blend-mode (:blend-mode sprite))
-      (connect-image project self image)
-      (if-let [material-node (project/get-resource-node project material)]
-        (g/connect material-node :build-targets self :dep-build-targets)
-        []))))
+      (g/set-property self :blend-mode (:blend-mode sprite)))))
 
 (defn register-resource-types [workspace]
   (workspace/register-resource-type workspace
@@ -294,6 +284,6 @@
                                     :node-type SpriteNode
                                     :load-fn load-sprite
                                     :icon sprite-icon
-                                    :view-types [:scene]
+                                    :view-types [:scene :text]
                                     :tags #{:component}
                                     :label "Sprite"))

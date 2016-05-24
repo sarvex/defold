@@ -2,6 +2,7 @@
 #include <dlib/log.h>
 #include <extension/extension.h>
 #include <script/script.h>
+#include "iap.h"
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -35,23 +36,29 @@ struct IAP
         m_Callback = LUA_NOREF;
         m_Self = LUA_NOREF;
         m_InitCount = 0;
-    }
+        m_AutoFinishTransactions = true;
+        m_PendingTransactions = 0;
+  }
     int                  m_InitCount;
     int                  m_Callback;
     int                  m_Self;
+    bool                 m_AutoFinishTransactions;
+    NSMutableDictionary* m_PendingTransactions;
     IAPListener          m_Listener;
     SKPaymentTransactionObserver* m_Observer;
 };
 
 IAP g_IAP;
 
-static void PushError(lua_State*L, NSError* error)
+static void PushError(lua_State*L, NSError* error, NSInteger reason)
 {
-    // Could be extended with error codes etc
     if (error != 0) {
         lua_newtable(L);
         lua_pushstring(L, "error");
         lua_pushstring(L, [error.localizedDescription UTF8String]);
+        lua_rawset(L, -3);
+        lua_pushstring(L, "reason");
+        lua_pushnumber(L, reason);
         lua_rawset(L, -3);
     } else {
         lua_pushnil(L);
@@ -163,14 +170,14 @@ static void PushError(lua_State*L, NSError* error)
 
     if (!dmScript::IsInstanceValid(L))
     {
-        dmLogError("Could not run facebook callback because the instance has been deleted.");
+        dmLogError("Could not run iap callback because the instance has been deleted.");
         lua_pop(L, 2);
         assert(top == lua_gettop(L));
         return;
     }
 
     lua_pushnil(L);
-    PushError(L, error);
+    PushError(L, error, REASON_UNSPECIFIED);
 
     int ret = lua_pcall(L, 3, LUA_MULTRET, 0);
     if (ret != 0) {
@@ -214,7 +221,13 @@ static void PushTransaction(lua_State* L, SKPaymentTransaction* transaction)
 
     if (transaction.transactionState == SKPaymentTransactionStatePurchased) {
         lua_pushstring(L, "receipt");
-        lua_pushlstring(L, (const char*) transaction.transactionReceipt.bytes, transaction.transactionReceipt.length);
+        if (floor(NSFoundationVersionNumber) <= NSFoundationVersionNumber_iOS_6_1) {
+            lua_pushlstring(L, (const char*) transaction.transactionReceipt.bytes, transaction.transactionReceipt.length);
+        } else {
+            NSURL *receiptURL = [[NSBundle mainBundle] appStoreReceiptURL];
+            NSData *receiptData = [NSData dataWithContentsOfURL:receiptURL];
+            lua_pushlstring(L, (const char*) receiptData.bytes, receiptData.length);
+        }
         lua_rawset(L, -3);
     }
 
@@ -244,7 +257,7 @@ void RunTransactionCallback(lua_State* L, int cb, int self, SKPaymentTransaction
 
     if (!dmScript::IsInstanceValid(L))
     {
-        dmLogError("Could not run facebook callback because the instance has been deleted.");
+        dmLogError("Could not run iap callback because the instance has been deleted.");
         lua_pop(L, 2);
         assert(top == lua_gettop(L));
         return;
@@ -253,7 +266,11 @@ void RunTransactionCallback(lua_State* L, int cb, int self, SKPaymentTransaction
     PushTransaction(L, transaction);
 
     if (transaction.transactionState == SKPaymentTransactionStateFailed) {
-        PushError(L, transaction.error);
+        if (transaction.error.code == SKErrorPaymentCancelled) {
+            PushError(L, transaction.error, REASON_USER_CANCELED);
+        } else {
+            PushError(L, transaction.error, REASON_UNSPECIFIED);
+        }
     } else {
         lua_pushnil(L);
     }
@@ -272,6 +289,12 @@ void RunTransactionCallback(lua_State* L, int cb, int self, SKPaymentTransaction
     {
         for (SKPaymentTransaction * transaction in transactions) {
 
+            if ((!g_IAP.m_AutoFinishTransactions) && (transaction.transactionState == SKPaymentTransactionStatePurchased)) {
+                NSData *data = [transaction.transactionIdentifier dataUsingEncoding:NSUTF8StringEncoding];
+                uint64_t trans_id_hash = dmHashBuffer64((const char*) [data bytes], [data length]);
+                [g_IAP.m_PendingTransactions setObject:transaction forKey:[NSNumber numberWithInteger:trans_id_hash] ];
+            }
+
             bool has_listener = false;
             if (self.m_IAP->m_Listener.m_Callback != LUA_NOREF) {
                 const IAPListener& l = self.m_IAP->m_Listener;
@@ -284,7 +307,7 @@ void RunTransactionCallback(lua_State* L, int cb, int self, SKPaymentTransaction
                 case SKPaymentTransactionStatePurchasing:
                     break;
                 case SKPaymentTransactionStatePurchased:
-                    if (has_listener > 0) {
+                    if (has_listener > 0 && g_IAP.m_AutoFinishTransactions) {
                         [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
                     }
                     break;
@@ -309,6 +332,9 @@ void RunTransactionCallback(lua_State* L, int cb, int self, SKPaymentTransaction
  * @param ids table (array) to get information about
  * @param callback result callback
  * @examples
+ *
+ * <b>Note:</b> Nested calls, that is calling iap.list from within callback is not supported.
+ *  Doing so will result in call being ignored with the engine reporting "Unexpected callback set".
  *
  * <pre>
  * local function iap_callback(self, products, error)
@@ -343,6 +369,7 @@ int IAP_List(lua_State* L)
 
     NSCountedSet* product_identifiers = [[[NSCountedSet alloc] init] autorelease];
 
+    luaL_checktype(L, 1, LUA_TTABLE);
     lua_pushnil(L);
     while (lua_next(L, 1) != 0) {
         const char* p = luaL_checkstring(L, -1);
@@ -372,6 +399,15 @@ int IAP_List(lua_State* L)
  *
  * @name iap.buy
  * @param id product to buy (identifier)
+ * @param options table of optional parameters as properties.
+ *
+ * The options table has the following members:
+ * <ul>
+ * <li> request_id: custom unique request id -- optional argument only available for Facebook IAP transactions
+ * </ul>
+ *
+ * <b>Note:</b> Calling iap.finish is required on a successful transaction if auto finish transactions is disabled in project settings.
+ *
  * @examples
  *
  * <pre>
@@ -380,10 +416,18 @@ int IAP_List(lua_State* L)
  *         print(transaction.ident)
  *         print(transaction.state)
  *         print(transaction.date)
- *         print(transaction.trans_ident) -- only available when state == TRANS_STATE_PURCHASED or state == TRANS_STATE_RESTORED
- *         print(transaction.receipt)     -- only available when state == TRANS_STATE_PURCHASED
+ *         print(transaction.trans_ident) -- only available when state == TRANS_STATE_PURCHASED, TRANS_STATE_UNVERIFIED or TRANS_STATE_RESTORED
+ *         print(transaction.receipt)     -- only available when state == TRANS_STATE_PURCHASED or TRANS_STATE_UNVERIFIED
+ *         print(transaction.request_id)  -- only available for Facebook IAP transactions (and if used in the iap.buy call parameters)
+ *         print(transaction.user_id)     -- only available for Amazon IAP transactions
+ *
+ *         -- required if auto finish transactions is disabled in project settings
+ *         if (transaction.state == iap.TRANS_STATE_PURCHASED) then
+ *             -- do server-side verification of purchase here..
+ *             iap.finish(self, transation)
+ *         end
  *     else
- *         print(error.error)
+ *         print(error.error, error.reason)
  *     end
  * end
  * function example(self)
@@ -408,9 +452,67 @@ int IAP_Buy(lua_State* L)
     return 0;
 }
 
+/*# finish buying product
+ *
+ * @name iap.finish
+ * @param transaction transaction table parameter as supplied in listener callback
+ *
+ * <b>Note:</b> Calling iap.finish is required on a successful transaction if auto finish transactions is disabled in project settings (otherwise ignored).
+ * The transaction.state field must equal iap.TRANS_STATE_PURCHASED.
+ *
+ */
+int IAP_Finish(lua_State* L)
+{
+    if(g_IAP.m_AutoFinishTransactions)
+    {
+        dmLogWarning("Calling iap.finish when autofinish transactions is enabled. Ignored.");
+        return 0;
+    }
+
+    int top = lua_gettop(L);
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    lua_getfield(L, -1, "state");
+    if (lua_isnumber(L, -1))
+    {
+        if(lua_tointeger(L, -1) != SKPaymentTransactionStatePurchased)
+        {
+            dmLogError("Transaction error. Invalid transaction state for transaction finish (must be iap.TRANS_STATE_PURCHASED).");
+            lua_pop(L, 1);
+            assert(top == lua_gettop(L));
+            return 0;
+        }
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, -1, "trans_ident");
+    if (!lua_isstring(L, -1)) {
+        dmLogError("Transaction error. Invalid transaction data for transaction finish, does not contain 'trans_ident' key.");
+        lua_pop(L, 1);
+    }
+    else
+    {
+          const char *str = lua_tostring(L, -1);
+          uint64_t trans_ident_hash = dmHashBuffer64(str, strlen(str));
+          lua_pop(L, 1);
+          SKPaymentTransaction * transaction = [g_IAP.m_PendingTransactions objectForKey:[NSNumber numberWithInteger:trans_ident_hash]];
+          if(transaction == 0x0) {
+              dmLogError("Transaction error. Invalid trans_ident value for transaction finish.");
+          } else {
+              [[SKPaymentQueue defaultQueue] finishTransaction:transaction];
+              [g_IAP.m_PendingTransactions removeObjectForKey:[NSNumber numberWithInteger:trans_ident_hash]];
+          }
+    }
+
+    assert(top == lua_gettop(L));
+    return 0;
+}
+
 /*# restore products (non-consumable)
  *
  * @name iap.restore
+ * @return false if current store doesn't support handling restored transactions, otherwise true (bool)
  */
 int IAP_Restore(lua_State* L)
 {
@@ -420,7 +522,8 @@ int IAP_Restore(lua_State* L)
     int top = lua_gettop(L);
     [[SKPaymentQueue defaultQueue] restoreCompletedTransactions];
     assert(top == lua_gettop(L));
-    return 0;
+    lua_pushboolean(L, 1);
+    return 1;
 }
 
 /*# set transaction listener
@@ -431,10 +534,11 @@ int IAP_Restore(lua_State* L)
  * <ul>
  * <li> ident: product identifier
  * <li> state: transaction state
- * <li> trans_ident: transaction identifier (only set when state == TRANS_STATE_RESTORED or state == TRANS_STATE_PURCHASED)
- * <li> receipt: receipt (only set when state == TRANS_STATE_PURCHASED)
  * <li> date: transaction date
  * <li> original_trans: original transaction (only set when state == TRANS_STATE_RESTORED)
+ * <li> trans_ident: transaction identifier (only set when state == TRANS_STATE_RESTORED, TRANS_STATE_UNVERIFIED or TRANS_STATE_PURCHASED)
+ * <li> request_id: transaction request id. (only if receipt is set and for Facebook IAP transactions when used in the iap.buy call parameters)
+ * <li> receipt: receipt (only set when state == TRANS_STATE_PURCHASED or TRANS_STATE_UNVERIFIED)
  * </ul>
  * @name iap.set_listener
  * @param listener listener function
@@ -471,16 +575,36 @@ int IAP_SetListener(lua_State* L)
     return 0;
 }
 
+/*# get current provider id
+ *
+ * @name iap.get_provider_id
+ * @return provider id (constant).
+ * <ul>
+ *     <li>iap.PROVIDER_ID_GOOGLE</li>
+ *     <li>iap.PROVIDER_ID_AMAZON</li>
+ *     <li>iap.PROVIDER_ID_APPLE</li>
+ *     <li>iap.PROVIDER_ID_FACEBOOK</li>
+ * </ul>
+ *
+ */
+int IAP_GetProviderId(lua_State* L)
+{
+    lua_pushinteger(L, PROVIDER_ID_APPLE);
+    return 1;
+}
+
 static const luaL_reg IAP_methods[] =
 {
     {"list", IAP_List},
     {"buy", IAP_Buy},
+    {"finish", IAP_Finish},
     {"restore", IAP_Restore},
     {"set_listener", IAP_SetListener},
+    {"get_provider_id", IAP_GetProviderId},
     {0, 0}
 };
 
-/*# transaction purchasing state
+/*# transaction purchasing state, intermediate mode followed by TRANS_STATE_PURCHASED. Store provider support dependent.
  *
  * @name iap.TRANS_STATE_PURCHASING
  * @variable
@@ -492,15 +616,33 @@ static const luaL_reg IAP_methods[] =
  * @variable
  */
 
+/*# transaction unverified state, requires verification of purchase
+ *
+ * @name iap.TRANS_STATE_UNVERIFIED
+ * @variable
+ */
+
 /*# transaction failed state
  *
  * @name iap.TRANS_STATE_FAILED
  * @variable
  */
 
-/*# transaction restored state
+/*# transaction restored state. Only available on store providers supporting restoring purchases.
  *
  * @name iap.TRANS_STATE_RESTORED
+ * @variable
+ */
+
+/*# unspecified error reason
+ *
+ * @name iap.REASON_UNSPECIFIED
+ * @variable
+ */
+
+/*# user canceled reason
+ *
+ * @name iap.REASON_USER_CANCELED
  * @variable
  */
 
@@ -509,23 +651,41 @@ dmExtension::Result InitializeIAP(dmExtension::Params* params)
     // TODO: Life-cycle managaemnt is *budget*. No notion of "static initalization"
     // Extend extension functionality with per system initalization?
     if (g_IAP.m_InitCount == 0) {
+        g_IAP.m_AutoFinishTransactions = dmConfigFile::GetInt(params->m_ConfigFile, "iap.auto_finish_transactions", 1) == 1;
+        g_IAP.m_PendingTransactions = [[NSMutableDictionary alloc]initWithCapacity:2];
     }
     g_IAP.m_InitCount++;
+
 
     lua_State*L = params->m_L;
     int top = lua_gettop(L);
     luaL_register(L, LIB_NAME, IAP_methods);
 
-#define SETCONSTANT(name, val) \
-        lua_pushnumber(L, (lua_Number) val); \
+    // ensure ios payment constants values corresponds to iap constants.
+    assert(TRANS_STATE_PURCHASING == SKPaymentTransactionStatePurchasing);
+    assert(TRANS_STATE_PURCHASED == SKPaymentTransactionStatePurchased);
+    assert(TRANS_STATE_FAILED == SKPaymentTransactionStateFailed);
+    assert(TRANS_STATE_RESTORED == SKPaymentTransactionStateRestored);
+
+#define SETCONSTANT(name) \
+        lua_pushnumber(L, (lua_Number) name); \
         lua_setfield(L, -2, #name);\
 
-    SETCONSTANT(TRANS_STATE_PURCHASING, SKPaymentTransactionStatePurchasing);
-    SETCONSTANT(TRANS_STATE_PURCHASED, SKPaymentTransactionStatePurchased);
-    SETCONSTANT(TRANS_STATE_FAILED, SKPaymentTransactionStateFailed);
-    SETCONSTANT(TRANS_STATE_RESTORED, SKPaymentTransactionStateRestored);
+    SETCONSTANT(TRANS_STATE_PURCHASING)
+    SETCONSTANT(TRANS_STATE_PURCHASED)
+    SETCONSTANT(TRANS_STATE_FAILED)
+    SETCONSTANT(TRANS_STATE_RESTORED)
+
+    SETCONSTANT(REASON_UNSPECIFIED)
+    SETCONSTANT(REASON_USER_CANCELED)
+
+    SETCONSTANT(PROVIDER_ID_GOOGLE)
+    SETCONSTANT(PROVIDER_ID_AMAZON)
+    SETCONSTANT(PROVIDER_ID_APPLE)
+    SETCONSTANT(PROVIDER_ID_FACEBOOK)
 
 #undef SETCONSTANT
+
 
     lua_pop(L, 1);
     assert(top == lua_gettop(L));
@@ -548,6 +708,11 @@ dmExtension::Result FinalizeIAP(dmExtension::Params* params)
     }
 
     if (g_IAP.m_InitCount == 0) {
+        if (g_IAP.m_PendingTransactions) {
+             [g_IAP.m_PendingTransactions release];
+             g_IAP.m_PendingTransactions = 0;
+        }
+
         if (g_IAP.m_Observer) {
             [[SKPaymentQueue defaultQueue] removeTransactionObserver: g_IAP.m_Observer];
             [g_IAP.m_Observer release];
@@ -558,4 +723,4 @@ dmExtension::Result FinalizeIAP(dmExtension::Params* params)
 }
 
 
-DM_DECLARE_EXTENSION(IAPExt, "IAP", 0, 0, InitializeIAP, 0, FinalizeIAP)
+DM_DECLARE_EXTENSION(IAPExt, "IAP", 0, 0, InitializeIAP, 0, 0, FinalizeIAP)

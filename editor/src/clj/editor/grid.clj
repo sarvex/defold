@@ -1,14 +1,17 @@
 (ns editor.grid
   (:require [dynamo.graph :as g]
-            [editor.camera :as c]
             [editor.colors :as colors]
             [editor.geom :as geom]
             [editor.gl :as gl]
             [editor.types :as types]
-            [internal.render.pass :as pass])
+            [editor.camera :as c]
+            [editor.validation :as validation]
+            [editor.gl.pass :as pass])
   (:import [editor.types AABB Camera]
            [javax.media.opengl GL GL2]
            [javax.vecmath Vector3d Vector4d Matrix3d Matrix4d Point3d]))
+
+(set! *warn-on-reflection* true)
 
 (def min-align (/ (Math/sqrt 2.0) 2.0))
 (def grid-color [0.44705 0.44314 0.5098 1.0])
@@ -162,7 +165,8 @@
   (input camera Camera)
   (property grid-color types/Color)
   (property auto-grid  g/Bool)
-  (property fixed-grid-size types/NonNegativeInt (default 0))
-
+  (property fixed-grid-size g/Int
+            (default 0)
+            (validate (validation/validate-positive fixed-grid-size "Grid size must be positive")))
   (output grids      g/Any :cached update-grids)
-  (output renderable pass/RenderData  grid-renderable))
+  (output renderable pass/RenderData :cached grid-renderable))

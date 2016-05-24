@@ -230,6 +230,19 @@ void _glfwInputChar( int character, int action )
 
 
 //========================================================================
+// Register unfinished (marked) keyboard input
+//========================================================================
+
+void _glfwSetMarkedText( char* text )
+{
+    if( _glfwWin.markedTextCallback )
+    {
+        _glfwWin.markedTextCallback( text );
+    }
+}
+
+
+//========================================================================
 // Register mouse button clicks
 //========================================================================
 
@@ -465,6 +478,7 @@ GLFWAPI int GLFWAPIENTRY glfwOpenWindow( int width, int height,
     wndconfig.glForward      = _glfwLibrary.hints.glForward ? GL_TRUE : GL_FALSE;
     wndconfig.glDebug        = _glfwLibrary.hints.glDebug ? GL_TRUE : GL_FALSE;
     wndconfig.glProfile      = _glfwLibrary.hints.glProfile;
+    wndconfig.highDPI        = _glfwLibrary.hints.highDPI;
 
     if( wndconfig.glMajor == 1 && wndconfig.glMinor > 5 )
     {
@@ -521,6 +535,7 @@ GLFWAPI int GLFWAPIENTRY glfwOpenWindow( int width, int height,
     _glfwWin.windowRefreshCallback = NULL;
     _glfwWin.keyCallback           = NULL;
     _glfwWin.charCallback          = NULL;
+    _glfwWin.markedTextCallback    = NULL;
     _glfwWin.mousePosCallback      = NULL;
     _glfwWin.mouseButtonCallback   = NULL;
     _glfwWin.mouseWheelCallback    = NULL;
@@ -581,19 +596,25 @@ GLFWAPI int GLFWAPIENTRY glfwOpenWindow( int width, int height,
         ( _glfwWin.glMajor >= 2 ) || ( _glfwWin.glMinor >= 4 ) ||
         glfwExtensionSupported( "GL_SGIS_generate_mipmap" );
 
-    if( _glfwWin.glMajor > 2 )
-    {
-        _glfwWin.GetStringi = (PFNGLGETSTRINGIPROC) glfwGetProcAddress( "glGetStringi" );
-        if( !_glfwWin.GetStringi )
-        {
-            // This is a very common problem among people who compile GLFW
-            // on X11/GLX using custom build systems, as it needs explicit
-            // configuration in order to work
-            //
-            // See readme.html section 2.2 for details
-
-            glfwCloseWindow();
-            return GL_FALSE;
+    //
+    // The following check for glGetString(i) is a modification to improve compatibility
+    // with Linux. We have encountered cases where GL_VERSION is 3.0 or higher but where
+    // the function glGetStringi could not be found. In these cases we fallback to the
+    // deprecated function glGetString. This should not change the control-flow for any
+    // other platform.
+    //
+    // 2016-04-29
+    // Jakob Pogulis <jakob.pogulis@king.com>
+    // Ragnar Svensson <ragnar.svensson@king.com>
+    //
+    _glfwWin.GetStringi = NULL;
+    if (_glfwWin.glMajor > 2) {
+        _glfwWin.GetStringi = (PFNGLGETSTRINGIPROC) glfwGetProcAddress("glGetStringi");
+        if (!_glfwWin.GetStringi) {
+            if (glfwGetProcAddress("glGetString") == NULL) {
+                glfwCloseWindow();
+                return GL_FALSE;
+            }
         }
     }
 
@@ -670,6 +691,9 @@ GLFWAPI void GLFWAPIENTRY glfwOpenWindowHint( int target, int hint )
             break;
         case GLFW_OPENGL_PROFILE:
             _glfwLibrary.hints.glProfile = hint;
+            break;
+        case GLFW_WINDOW_HIGH_DPI:
+            _glfwLibrary.hints.highDPI = hint;
             break;
         default:
             break;
@@ -926,6 +950,8 @@ GLFWAPI int GLFWAPIENTRY glfwGetWindowParam( int param )
             return _glfwWin.glDebug;
         case GLFW_OPENGL_PROFILE:
             return _glfwWin.glProfile;
+        case GLFW_WINDOW_HIGH_DPI:
+            return _glfwWin.highDPI;
         default:
             return 0;
     }
@@ -983,6 +1009,20 @@ GLFWAPI void GLFWAPIENTRY glfwSetWindowRefreshCallback( GLFWwindowrefreshfun cbf
 
     // Set callback function
     _glfwWin.windowRefreshCallback = cbfun;
+}
+
+//========================================================================
+// Set callback function for window focus events
+//========================================================================
+GLFWAPI void GLFWAPIENTRY glfwSetWindowFocusCallback( GLFWwindowfocusfun cbfun )
+{
+    if( !_glfwInitialized || !_glfwWin.opened )
+    {
+        return;
+    }
+
+    // Set callback function
+    _glfwWin.windowFocusCallback = cbfun;
 }
 
 

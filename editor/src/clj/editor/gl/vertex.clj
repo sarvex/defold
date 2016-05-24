@@ -35,22 +35,24 @@ the `do-gl` macro from `editor.gl`."
            [java.util.concurrent.atomic AtomicLong AtomicBoolean]
            [javax.media.opengl GL GL2]))
 
+(set! *warn-on-reflection* true)
+
 (defn put-byte   [^ByteBuffer bb position v] (.put       bb position v))
 (defn put-short  [^ByteBuffer bb position v] (.putShort  bb position v))
 (defn put-int    [^ByteBuffer bb position v] (.putInt    bb position v))
 (defn put-float  [^ByteBuffer bb position v] (.putFloat  bb position v))
 (defn put-double [^ByteBuffer bb position v] (.putDouble bb position v))
-(defn put-ubyte  [^ByteBuffer bb position v] (.put       bb position (.byteValue  (bit-and v 0xff))))
-(defn put-ushort [^ByteBuffer bb position v] (.putShort  bb position (.shortValue (bit-and v 0xffff))))
-(defn put-uint   [^ByteBuffer bb position v] (.putInt    bb position (.intValue   (bit-and v 0xffffffff))))
+(defn put-ubyte  [^ByteBuffer bb position v] (.put       bb position (.byteValue  (Long. (bit-and v 0xff)))))
+(defn put-ushort [^ByteBuffer bb position v] (.putShort  bb position (.shortValue (Long. (bit-and v 0xffff)))))
+(defn put-uint   [^ByteBuffer bb position v] (.putInt    bb position (.intValue   (Long. (bit-and v 0xffffffff)))))
 
 
-(defn get-byte   [^ByteBuffer bb position]   (.get       bb position))
+(defn get-byte   [^ByteBuffer bb position]   (.get       bb ^int position))
 (defn get-short  [^ByteBuffer bb position]   (.getShort  bb position))
 (defn get-int    [^ByteBuffer bb position]   (.getInt    bb position))
 (defn get-float  [^ByteBuffer bb position]   (.getFloat  bb position))
 (defn get-double [^ByteBuffer bb position]   (.getDouble bb position))
-(defn get-ubyte  [^ByteBuffer bb position]   (bit-and 0xff       (short (.get bb position))))
+(defn get-ubyte  [^ByteBuffer bb position]   (bit-and 0xff       (short (.get bb ^int position))))
 (defn get-ushort [^ByteBuffer bb position]   (bit-and 0xffff     (long  (.getShort bb position))))
 (defn get-uint   [^ByteBuffer bb position]   (bit-and 0xffffffff (int   (.getInt bb position))))
 
@@ -480,7 +482,7 @@ the `do-gl` macro from `editor.gl`."
 
 (defrecord VertexBufferShaderLink [request-id ^PersistentVertexBuffer vertex-buffer shader]
   GlBind
-  (bind [this gl]
+  (bind [this gl _]
     (let [vbo (scene-cache/request-object! ::vbo request-id gl vertex-buffer)]
       (gl/gl-bind-buffer ^GL2 gl GL/GL_ARRAY_BUFFER vbo)
       (let [attributes  (:attributes (.layout vertex-buffer))
@@ -515,7 +517,7 @@ the `do-gl` macro from `editor.gl`."
   (let [vbo (first (gl/gl-gen-buffers gl 1))]
     (update-vbo gl vbo data)))
 
-(defn- destroy-vbos [^GL2 gl vbos]
+(defn- destroy-vbos [^GL2 gl vbos _]
   (apply gl/gl-delete-buffers gl vbos))
 
 (scene-cache/register-object-cache! ::vbo make-vbo update-vbo destroy-vbos)

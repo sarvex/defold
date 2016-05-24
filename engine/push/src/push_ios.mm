@@ -48,6 +48,7 @@ struct Push
             [m_SavedNotification release];
         }
         m_SavedNotification = 0;
+        m_SavedNotificationOrigin = DM_PUSH_EXTENSION_ORIGIN_LOCAL;
         m_ScheduledID = -1;
     }
 
@@ -57,6 +58,7 @@ struct Push
     id<UIApplicationDelegate> m_AppDelegate;
     PushListener         m_Listener;
     NSDictionary*        m_SavedNotification;
+    int                  m_SavedNotificationOrigin;
 
     int m_ScheduledID;
 };
@@ -202,6 +204,17 @@ static void RunListener(NSDictionary *userdata, bool local)
             lua_pop(L, 1);
         }
         assert(top == lua_gettop(L));
+    } else {
+        dmLogWarning("No push listener set, saving message.");
+
+        if (g_Push.m_SavedNotification) {
+            [g_Push.m_SavedNotification release];
+        }
+
+        // Save notification as push.set_listener may not be set at this point, e.g. when launching the app
+        // but clicking on the notification
+        g_Push.m_SavedNotification = [[NSDictionary alloc] initWithDictionary:userdata copyItems:YES];
+        g_Push.m_SavedNotificationOrigin = (local ? DM_PUSH_EXTENSION_ORIGIN_LOCAL : DM_PUSH_EXTENSION_ORIGIN_REMOTE);
     }
 }
 
@@ -212,18 +225,6 @@ static void RunListener(NSDictionary *userdata, bool local)
 @implementation PushAppDelegate
 
 - (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo {
-    if (g_Push.m_Listener.m_Callback == LUA_NOREF) {
-        if (g_Push.m_SavedNotification) {
-            dmLogWarning("No push listener set. Message discarded.");
-        } else {
-            // Save notification as push.set_listener may not be set at this point, e.g. when launching the app
-            // buy clicking on the notification
-            // TODO: Test this functionality. Not possible to test with dev-app as m_SavedNotification is cleared on reboot
-            g_Push.m_SavedNotification = [[NSDictionary alloc] initWithDictionary:userInfo copyItems:YES];
-        }
-        return;
-    }
-
     RunListener(userInfo, false);
 }
 
@@ -235,7 +236,12 @@ static void RunListener(NSDictionary *userdata, bool local)
 {
     UILocalNotification *localNotification = [launchOptions objectForKey:UIApplicationLaunchOptionsLocalNotificationKey];
     if (localNotification) {
-        RunListener(localNotification.userInfo, true);
+        [self application:application didReceiveLocalNotification:localNotification];
+    }
+
+    NSDictionary *remoteNotification = [launchOptions objectForKey:UIApplicationLaunchOptionsRemoteNotificationKey];
+    if (remoteNotification) {
+        [self application:application didReceiveRemoteNotification:remoteNotification];
     }
 
     return YES;
@@ -249,13 +255,15 @@ static void RunListener(NSDictionary *userdata, bool local)
 
 - (void)application:(UIApplication *)application didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     dmLogWarning("Failed to register remote notifications: %s\n", [error.localizedDescription UTF8String]);
-    RunCallback(g_Push.m_L, g_Push.m_Callback, g_Push.m_Self, 0, error);
+    if (g_Push.m_Callback != LUA_NOREF) {
+        RunCallback(g_Push.m_L, g_Push.m_Callback, g_Push.m_Self, 0, error);
+    }
 }
 
 @end
 
 /*# Register for push notifications
- * Send a request for push notifications. Note that the notifications table parameter 
+ * Send a request for push notifications. Note that the notifications table parameter
  * is iOS only and will be ignored on Android.
  *
  * @name push.register
@@ -278,7 +286,7 @@ static void RunListener(NSDictionary *userdata, bool local)
  *           -- NOTE: %02x to pad byte with leading zero
  *           local token_string = ""
  *           for i = 1,#token do
- *               token_string = token_string .. string.format("%02x", string.byte(token, i)) 
+ *               token_string = token_string .. string.format("%02x", string.byte(token, i))
  *           end
  *           print(token_string)
  *           push.set_listener(push_listener)
@@ -322,9 +330,9 @@ int Push_Register(lua_State* L)
     }
 
     if (!lua_istable(L, 1)) {
-	assert(top == lua_gettop(L));
-	luaL_error(L, "First argument must be a table of notification types.");
-	return 0;
+    assert(top == lua_gettop(L));
+    luaL_error(L, "First argument must be a table of notification types.");
+    return 0;
     }
 
     UIRemoteNotificationType types = UIRemoteNotificationTypeNone;
@@ -421,7 +429,7 @@ int Push_SetListener(lua_State* L)
     push->m_Listener.m_Self = luaL_ref(L, LUA_REGISTRYINDEX);
 
     if (g_Push.m_SavedNotification) {
-        [g_Push.m_AppDelegate application: [UIApplication sharedApplication] didReceiveRemoteNotification: g_Push.m_SavedNotification];
+        RunListener(g_Push.m_SavedNotification, g_Push.m_SavedNotificationOrigin == DM_PUSH_EXTENSION_ORIGIN_LOCAL);
         [g_Push.m_SavedNotification release];
         g_Push.m_SavedNotification = 0;
     }
@@ -446,19 +454,20 @@ int Push_SetBadgeCount(lua_State* L)
 /*# Schedule a local push notification to be triggered at a specific time in the future
  *
  * Notification settings is a platform specific table of data that can contain the following fields:
- * 
+ *
  * <table>
  *   <th>Field</th>
  *   <th>Description</th>
- *   <tr><td><code>action</code></td><td>(iOS only). The alert action string to be used as the title of the 
- *          right button of the alert or the value of the unlock slider, where the value replaces 
+ *   <tr><td><code>action</code></td><td>(iOS only). The alert action string to be used as the title of the
+ *          right button of the alert or the value of the unlock slider, where the value replaces
  *          "unlock" in "slide to unlock" text. (string)</td></tr>
- *   <tr><td><code>badge_number</code></td><td>(iOS only). The numeric value of the icon badge. (number)</td></tr>
- *   <tr><td><code>priority</code></td><td>(Android only). The priority is a hint to the device UI about how the notification 
+ *   <tr><td><code>badge_count</code></td><td>(iOS only). The numeric value of the icon badge. (number)</td></tr>
+ *   <tr><td><code>badge_number</code></td><td>Deprecated. Use badge_count instead</td></tr>
+ *   <tr><td><code>priority</code></td><td>(Android only). The priority is a hint to the device UI about how the notification
             should be displayed. There are five priority levels, from -2 to 2 where -1 is the lowest priority
             and 2 the highest. Unless specified, a default priority level of 2 is used. (number)</td></tr>
  * </table>
- * 
+ *
  * @name push.schedule
  * @param time number of seconds into the future until the notification should be triggered (number)
  * @param title localized title to be displayed to the user if the application is not running (string)
@@ -540,13 +549,26 @@ int Push_Schedule(lua_State* L)
         }
         lua_pop(L, 1);
 
-        // badge_number
-        lua_pushstring(L, "badge_number");
+        // badge_count
+        lua_pushstring(L, "badge_count");
         lua_gettable(L, 5);
+        bool badge_count_set = false;
         if (lua_isnumber(L, -1)) {
             notification.applicationIconBadgeNumber = lua_tointeger(L, -1);
+            badge_count_set = true;
         }
         lua_pop(L, 1);
+
+        // Deprecated, replaced by badge_count
+        if(!badge_count_set)
+        {
+            lua_pushstring(L, "badge_number");
+            lua_gettable(L, 5);
+            if (lua_isnumber(L, -1)) {
+                notification.applicationIconBadgeNumber = lua_tointeger(L, -1);
+            }
+            lua_pop(L, 1);
+        }
 
         // sound
         /*
@@ -576,9 +598,9 @@ int Push_Schedule(lua_State* L)
 
 /*# Cancel a scheduled local push notification
  *
- * Use this function to cancel a previously scheduled local push notification. The 
+ * Use this function to cancel a previously scheduled local push notification. The
  * notification is identified by a numeric id as returned by +push.schedule()+.
- * 
+ *
  * @name push.cancel
  * @param id the numeric id of the local push notification (number)
  */
@@ -627,6 +649,11 @@ static void NotificationToLua(lua_State* L, UILocalNotification* notification)
     lua_pushstring(L, [[notification alertAction] UTF8String]);
     lua_settable(L, -3);
 
+    lua_pushstring(L, "badge_count");
+    lua_pushnumber(L, [notification applicationIconBadgeNumber]);
+    lua_settable(L, -3);
+
+    // Deprecated
     lua_pushstring(L, "badge_number");
     lua_pushnumber(L, [notification applicationIconBadgeNumber]);
     lua_settable(L, -3);
@@ -636,7 +663,7 @@ static void NotificationToLua(lua_State* L, UILocalNotification* notification)
  *
  * Returns a table with all data associated with a specified local push notification.
  * The notification is identified by a numeric id as returned by +push.schedule()+.
- * 
+ *
  * @name push.get_scheduled
  * @param id the numeric id of the local push notification (number)
  * @return data table with all data associated with the notification (table)
@@ -662,7 +689,7 @@ int Push_GetScheduled(lua_State* L)
  * The table contains key, value pairs where the key is the push notification id and the
  * value is a table with the notification data, corresponding to the data given by
  * push.get_scheduled(id).
- * 
+ *
  * @name push.get_all_scheduled
  * @return data table with all data associated with all scheduled notifications (table)
  */
@@ -782,4 +809,4 @@ dmExtension::Result FinalizePush(dmExtension::Params* params)
     return dmExtension::RESULT_OK;
 }
 
-DM_DECLARE_EXTENSION(PushExt, "Push", AppInitializePush, AppFinalizePush, InitializePush, 0, FinalizePush)
+DM_DECLARE_EXTENSION(PushExt, "Push", AppInitializePush, AppFinalizePush, InitializePush, 0, 0, FinalizePush)

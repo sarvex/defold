@@ -12,6 +12,7 @@
         <string>{{project.title}}</string>
         <key>CFBundleIconFiles</key>
         <array>
+                <string>Icon-167.png</string>
                 <string>Icon-60@3x.png</string>
                 <string>Icon-60@2x.png</string>
                 <string>Icon-76@2x.png</string>
@@ -27,6 +28,7 @@
                 <dict>
                         <key>CFBundleIconFiles</key>
                         <array>
+                                <string>Icon-167.png</string>
                                 <string>Icon-60@3x.png</string>
                                 <string>Icon-60@2x.png</string>
                                 <string>Icon-76@2x.png</string>
@@ -48,8 +50,6 @@
         <string>dmengine</string>
         <key>CFBundlePackageType</key>
         <string>APPL</string>
-        <key>CFBundleResourceSpecification</key>
-        <string>ResourceRules.plist</string>
         <key>CFBundleShortVersionString</key>
         <string>{{project.version}}</string>
         <key>CFBundleSignature</key>
@@ -110,10 +110,43 @@
                 <dict>
                         <key>CFBundleURLSchemes</key>
                         <array>
-                                {{#url-schemes}}<string>fb{{.}}</string>{{/url-schemes}}
+                                {{#url-schemes}}<string>{{.}}</string>{{/url-schemes}}
                         </array>
                 </dict>
         </array>
+
+        <key>LSApplicationQueriesSchemes</key>
+        <array>
+                {{#application-queries-schemes}}<string>{{.}}</string>{{/application-queries-schemes}}
+        </array>
+
+        <key>NSAppTransportSecurity</key>
+        <dict>
+            <key>NSExceptionDomains</key>
+            <dict>
+                <key>facebook.com</key>
+                <dict>
+                    <key>NSIncludesSubdomains</key>
+                    <true/>
+                    <key>NSThirdPartyExceptionRequiresForwardSecrecy</key>
+                    <false/>
+                </dict>
+                <key>fbcdn.net</key>
+                <dict>
+                    <key>NSIncludesSubdomains</key>
+                    <true/>
+                    <key>NSThirdPartyExceptionRequiresForwardSecrecy</key>
+                    <false/>
+                </dict>
+                <key>akamaihd.net</key>
+                <dict>
+                    <key>NSIncludesSubdomains</key>
+                    <true/>
+                    <key>NSThirdPartyExceptionRequiresForwardSecrecy</key>
+                    <false/>
+                </dict>
+            </dict>
+        </dict>
 
         <key>UILaunchImages</key>
         <array>
@@ -181,7 +214,7 @@
                     <key>UILaunchImageMinimumOSVersion</key>
                     <string>8.0</string>
                     <key>UILaunchImageName</key>
-                    <string>Default-736h</string>
+                    <string>Default-Portrait-736h</string>
                     <key>UILaunchImageOrientation</key>
                     <string>Portrait</string>
                     <key>UILaunchImageSize</key>
@@ -216,6 +249,26 @@
                     <string>Landscape</string>
                     <key>UILaunchImageSize</key>
                     <string>{768, 1024}</string>
+                </dict>
+                <dict>
+                    <key>UILaunchImageMinimumOSVersion</key>
+                    <string>8.0</string>
+                    <key>UILaunchImageName</key>
+                    <string>Default-Portrait-1366h</string>
+                    <key>UILaunchImageOrientation</key>
+                    <string>Portrait</string>
+                    <key>UILaunchImageSize</key>
+                    <string>{1024,1366}</string>
+                </dict>
+                <dict>
+                    <key>UILaunchImageMinimumOSVersion</key>
+                    <string>8.0</string>
+                    <key>UILaunchImageName</key>
+                    <string>Default-Landscape-1366h</string>
+                    <key>UILaunchImageOrientation</key>
+                    <string>Landscape</string>
+                    <key>UILaunchImageSize</key>
+                    <string>{1024,1366}</string>
                 </dict>
         </array>
 </dict>

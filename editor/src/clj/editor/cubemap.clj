@@ -1,23 +1,25 @@
 (ns editor.cubemap
-  (:require [dynamo.file.protobuf :as protobuf]
+  (:require [editor.protobuf :as protobuf]
             [dynamo.graph :as g]
             [editor.geom :as geom]
             [editor.gl :as gl]
             [editor.gl.shader :as shader]
             [editor.gl.texture :as texture]
             [editor.gl.vertex :as vtx]
-            [editor.project :as project]
+            [editor.defold-project :as project]
             [editor.scene :as scene]
             [editor.types :as types]
             [editor.workspace :as workspace]
-            [internal.render.pass :as pass])
+            [editor.gl.pass :as pass])
   (:import [com.dynamo.graphics.proto Graphics$Cubemap Graphics$TextureImage Graphics$TextureImage$Image Graphics$TextureImage$Type]
            [com.jogamp.opengl.util.awt TextRenderer]
            [editor.types Animation Camera Image TexturePacking Rect EngineFormatTexture AABB TextureSetAnimationFrame TextureSetAnimation TextureSet]
            [java.awt.image BufferedImage]
            [javax.media.opengl GL GL2 GLContext GLDrawableFactory]
            [javax.media.opengl.glu GLU]
-           [javax.vecmath Matrix4d]))
+           [javax.vecmath Point3d Matrix4d]))
+
+(set! *warn-on-reflection* true)
 
 (def cubemap-icon "icons/32/Icons_23-Cubemap.png")
 
@@ -59,8 +61,8 @@
 (def cubemap-shader (shader/make-shader ::cubemap-shader pos-norm-vert pos-norm-frag))
 
 (defn render-cubemap
-  [^GL2 gl camera gpu-texture vertex-binding]
-  (gl/with-gl-bindings gl [gpu-texture cubemap-shader vertex-binding]
+  [^GL2 gl render-args camera gpu-texture vertex-binding]
+  (gl/with-gl-bindings gl render-args [gpu-texture cubemap-shader vertex-binding]
     (shader/set-uniform cubemap-shader gl "world" geom/Identity4d)
     (shader/set-uniform cubemap-shader gl "cameraPosition" (types/position camera))
     (shader/set-uniform cubemap-shader gl "envMap" 0)
@@ -74,25 +76,23 @@
   (apply texture/image-cubemap-texture _node-id [right-img left-img top-img bottom-img front-img back-img]))
 
 (g/defnk produce-save-data [resource right left top bottom front back]
-  {:resource resource
-   :content (-> (doto (Graphics$Cubemap/newBuilder)
-                  (.setRight right)
-                  (.setLeft left)
-                  (.setTop top)
-                  (.setBottom bottom)
-                  (.setFront front)
-                  (.setBack back))
-              (.build)
-              (protobuf/pb->str))})
+  (let [proto-msg {:right right
+                   :left left
+                   :top top
+                   :bottom bottom
+                   :front front
+                   :back back}]
+    {:resource resource
+     :content (protobuf/map->str Graphics$Cubemap proto-msg)}))
 
 (g/defnk produce-scene
-  [_node-id aabb gpu-texture vertex-binding]
+  [_node-id aabb gpu-texture]
   (let [vertex-binding (vtx/use-with _node-id unit-sphere cubemap-shader)]
     {:node-id    _node-id
      :aabb       aabb
      :renderable {:render-fn (fn [gl render-args renderables count]
                                (let [camera (:camera render-args)]
-                                 (render-cubemap gl camera gpu-texture vertex-binding)))
+                                 (render-cubemap gl render-args camera gpu-texture vertex-binding)))
                   :passes [pass/transparent]}}))
 
 (g/defnode CubemapNode
@@ -118,10 +118,10 @@
   (output aabb        AABB  :cached (g/always geom/unit-bounding-box))
   (output scene       g/Any :cached produce-scene))
 
-(defn load-cubemap [project self input]
-  (let [cubemap-message (protobuf/pb->map (protobuf/read-text Graphics$Cubemap input))]
+(defn load-cubemap [project self resource]
+  (let [cubemap-message (protobuf/read-text Graphics$Cubemap resource)]
     (for [[side input] cubemap-message
-          :let [img-resource (workspace/resolve-resource (g/node-value self :resource) input)]]
+          :let [img-resource (workspace/resolve-resource resource input)]]
       (concat
         (project/connect-resource-node project
                                        img-resource self
@@ -135,4 +135,4 @@
                                     :node-type CubemapNode
                                     :load-fn load-cubemap
                                     :icon cubemap-icon
-                                    :view-types [:scene]))
+                                    :view-types [:scene :text]))

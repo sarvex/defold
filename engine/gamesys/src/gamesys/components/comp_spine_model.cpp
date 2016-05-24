@@ -38,7 +38,7 @@ namespace dmGameSystem
 
     static const uint32_t INVALID_BONE_INDEX = 0xffff;
 
-    static void ResourceReloadedCallback(void* user_data, dmResource::SResourceDescriptor* descriptor, const char* name);
+    static void ResourceReloadedCallback(const dmResource::ResourceReloadedParams& params);
     static void DestroyComponent(SpineModelWorld* world, uint32_t index);
 
     dmGameObject::CreateResult CompSpineModelNewWorld(const dmGameObject::ComponentNewWorldParams& params)
@@ -1048,9 +1048,10 @@ namespace dmGameSystem
                     dmTransform::Transform parent_t_local = parent_t;
                     dmTransform::Transform target_t = GetPoseTransform(bind_pose, pose, pose[ik->m_Target], ik->m_Target);
                     const uint32_t parent_parent_index = skeleton->m_Bones[ik->m_Parent].m_Parent;
+                    dmTransform::Transform parent_parent_t;
                     if(parent_parent_index != INVALID_BONE_INDEX)
                     {
-                        dmTransform::Transform parent_parent_t = dmTransform::Inv(GetPoseTransform(bind_pose, pose, pose[skeleton->m_Bones[ik->m_Parent].m_Parent], skeleton->m_Bones[ik->m_Parent].m_Parent));
+                        parent_parent_t = dmTransform::Inv(GetPoseTransform(bind_pose, pose, pose[skeleton->m_Bones[ik->m_Parent].m_Parent], skeleton->m_Bones[ik->m_Parent].m_Parent));
                         parent_t = dmTransform::Mul(parent_parent_t, parent_t);
                         target_t = dmTransform::Mul(parent_parent_t, target_t);
                     }
@@ -1088,6 +1089,8 @@ namespace dmGameSystem
                         user_target_position -=  t.GetTranslation();
                         Quat rotation = dmTransform::conj(dmGameObject::GetWorldRotation(component->m_Instance) * component->m_Transform.GetRotation());
                         user_target_position = dmTransform::mulPerElem(dmTransform::rotate(rotation, user_target_position), dmGameObject::GetWorldScale(component->m_Instance));
+                        if(parent_parent_index != INVALID_BONE_INDEX)
+                            user_target_position =  dmTransform::Apply(parent_parent_t, user_target_position);
 
                         // blend default target pose and target pose
                         target_position = target_mix == 1.0f ? user_target_position : dmTransform::lerp(target_mix, target_position, user_target_position);
@@ -1332,6 +1335,38 @@ namespace dmGameSystem
             {
                 CancelAnimation(component);
             }
+            else if (params.m_Message->m_Id == dmGameSystemDDF::SetConstantSpineModel::m_DDFDescriptor->m_NameHash)
+            {
+                dmGameSystemDDF::SetConstantSpineModel* ddf = (dmGameSystemDDF::SetConstantSpineModel*)params.m_Message->m_Data;
+                dmGameObject::PropertyResult result = dmGameSystem::SetMaterialConstant(component->m_Resource->m_Material, ddf->m_NameHash,
+                        dmGameObject::PropertyVar(ddf->m_Value), CompSpineModelSetConstantCallback, component);
+                if (result == dmGameObject::PROPERTY_RESULT_NOT_FOUND)
+                {
+                    dmMessage::URL& receiver = params.m_Message->m_Receiver;
+                    dmLogError("'%s:%s#%s' has no constant named '%s'",
+                            dmMessage::GetSocketName(receiver.m_Socket),
+                            (const char*)dmHashReverse64(receiver.m_Path, 0x0),
+                            (const char*)dmHashReverse64(receiver.m_Fragment, 0x0),
+                            (const char*)dmHashReverse64(ddf->m_NameHash, 0x0));
+                }
+            }
+            else if (params.m_Message->m_Id == dmGameSystemDDF::ResetConstantSpineModel::m_DDFDescriptor->m_NameHash)
+            {
+                dmGameSystemDDF::ResetConstantSpineModel* ddf = (dmGameSystemDDF::ResetConstantSpineModel*)params.m_Message->m_Data;
+                dmArray<dmRender::Constant>& constants = component->m_RenderConstants;
+                uint32_t size = constants.Size();
+                for (uint32_t i = 0; i < size; ++i)
+                {
+                    if( constants[i].m_NameHash == ddf->m_NameHash)
+                    {
+                        constants[i] = constants[size - 1];
+                        component->m_PrevRenderConstants[i] = component->m_PrevRenderConstants[size - 1];
+                        constants.Pop();
+                        ReHash(component);
+                        break;
+                    }
+                }
+            }
         }
 
         return dmGameObject::UPDATE_RESULT_OK;
@@ -1418,17 +1453,16 @@ namespace dmGameSystem
         return SetMaterialConstant(component->m_Resource->m_Material, params.m_PropertyId, params.m_Value, CompSpineModelSetConstantCallback, component);
     }
 
-    static void ResourceReloadedCallback(void* user_data, dmResource::SResourceDescriptor* descriptor, const char* name)
+    static void ResourceReloadedCallback(const dmResource::ResourceReloadedParams& params)
     {
-        SpineModelWorld* world = (SpineModelWorld*)user_data;
+        SpineModelWorld* world = (SpineModelWorld*) params.m_UserData;
         dmArray<SpineModelComponent*>& components = world->m_Components.m_Objects;
         uint32_t n = components.Size();
         for (uint32_t i = 0; i < n; ++i)
         {
             SpineModelComponent* component = components[i];
-            if (component->m_Resource != 0x0 && component->m_Resource->m_Scene == descriptor->m_Resource)
+            if (component->m_Resource != 0x0 && component->m_Resource->m_Scene == params.m_Resource->m_Resource)
                 OnResourceReloaded(world, component);
         }
     }
-
 }
