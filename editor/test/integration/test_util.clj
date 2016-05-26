@@ -170,3 +170,6 @@
 
 (defn prop-read-only? [node-id label]
   (get-in (g/node-value node-id :_properties) [:properties label :read-only?]))
+
+(defn prop-overridden? [node-id label]
+  (contains? (get-in (g/node-value node-id :_properties) [:properties label]) :original-value))

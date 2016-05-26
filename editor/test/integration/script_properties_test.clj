@@ -47,7 +47,10 @@
           go-id (tu/resource-node project "/game_object/props.go")
           script-c (component go-id "script")]
       (is (= 2.0 (tu/prop script-c :number)))
+      (is (tu/prop-overridden? (tu/prop-node-id script-c :number) :number))
       (tu/prop! (tu/prop-node-id script-c :number) :number 3.0)
       (is (= 3.0 (tu/prop script-c :number)))
+      (is (tu/prop-overridden? (tu/prop-node-id script-c :number) :number))
       (tu/prop-clear! (tu/prop-node-id script-c :number) :number)
-      (is (= 1.0 (tu/prop script-c :number))))))
+      (is (= 1.0 (tu/prop script-c :number)))
+      (is (not (tu/prop-overridden? (tu/prop-node-id script-c :number) :number))))))
