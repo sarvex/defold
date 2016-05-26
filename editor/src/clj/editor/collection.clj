@@ -84,11 +84,13 @@
     (g/connect child-id from coll-id to)))
 
 (defn- attach-coll-go [coll-id child-id ddf-label]
-  (let [conns [[:ddf-message ddf-label]
-               [:build-targets :dep-build-targets]
-               [:id :ids]]]
-    (for [[from to] conns]
-      (g/connect child-id from coll-id to))))
+  (concat
+    (g/connect child-id :_node-id coll-id :nodes)
+    (let [conns [[:ddf-message ddf-label]
+                 [:build-targets :dep-build-targets]
+                 [:id :ids]]]
+      (for [[from to] conns]
+        (g/connect child-id from coll-id to)))))
 
 (defn- attach-coll-ref-go [coll-id child-id]
   (attach-coll-go coll-id child-id :ref-inst-ddf))
@@ -97,41 +99,41 @@
   (attach-coll-go coll-id child-id :embed-inst-ddf))
 
 (defn- attach-coll-coll [coll-id child-id]
-  (let [conns [[:ddf-message :ref-coll-ddf]
-               [:id :ids]
-               [:build-targets :sub-build-targets]]]
-    (for [[from to] conns]
-      (g/connect child-id from coll-id to))))
+  (concat
+    (g/connect child-id :_node-id coll-id :nodes)
+    (let [conns [[:ddf-message :ref-coll-ddf]
+                 [:id :ids]
+                 [:build-targets :sub-build-targets]]]
+      (for [[from to] conns]
+        (g/connect child-id from coll-id to)))))
 
-(def GameObjectInstanceNode nil)
+(def EmbeddedGOInstanceNode nil)
+(def ReferencedGOInstanceNode nil)
 
 (defn- go-id->node-ids [go-id]
   (let [collection (core/scope go-id)]
     (g/node-value collection :ids)))
 
-(g/defnk produce-go-outline [_node-id id source-resource embedded source-outline child-outlines]
+(g/defnk produce-go-outline [_node-id id node-outline-label source-outline child-outlines]
   (let [coll-id (core/scope _node-id)]
-    (merge-with concat
-                (merge source-outline
-                       {:node-id _node-id
-                        :label (if embedded id (format "%s (%s)" id (resource/resource->proj-path source-resource)))
-                        :icon game-object/game-object-icon
-                        :children (vec (sort-by label-sort-by-fn (:children source-outline)))})
-                {:children child-outlines
-                 :child-reqs [{:node-type GameObjectInstanceNode
-                               :values {:embedded (comp not true?)}
-                               :tx-attach-fn (fn [self-id child-id]
-                                               (concat
-                                                (g/update-property child-id :id outline/resolve-id (go-id->node-ids self-id))
-                                                 (child-go-go self-id child-id)
-                                                 (attach-coll-ref-go coll-id child-id)))}
-                              {:node-type GameObjectInstanceNode
-                               :values {:embedded true?}
-                               :tx-attach-fn (fn [self-id child-id]
-                                               (concat
-                                                (g/update-property child-id :id outline/resolve-id (go-id->node-ids self-id))
-                                                 (child-go-go self-id child-id)
-                                                 (attach-coll-embedded-go coll-id child-id)))}]})))
+    (-> source-outline
+      (merge {:node-id _node-id
+              :label node-outline-label
+              :icon game-object/game-object-icon
+              :children (into (vec (sort-by label-sort-by-fn (:children source-outline))) child-outlines)})
+      (update :child-reqs (fn [c] (conj (if c c [])
+                                        {:node-type ReferencedGOInstanceNode
+                                         :tx-attach-fn (fn [self-id child-id]
+                                                         (concat
+                                                           (g/update-property child-id :id outline/resolve-id (go-id->node-ids self-id))
+                                                           (attach-coll-ref-go coll-id child-id)
+                                                           (child-go-go self-id child-id)))}
+                                        {:node-type EmbeddedGOInstanceNode
+                                         :tx-attach-fn (fn [self-id child-id]
+                                                         (concat
+                                                           (g/update-property child-id :id outline/resolve-id (go-id->node-ids self-id))
+                                                           (attach-coll-embedded-go coll-id child-id)
+                                                           (child-go-go self-id child-id)))}))))))
 
 (defn- source-outline-subst [err]
   ;; TODO: embed error so can warn in outline
@@ -143,6 +145,47 @@
 (g/defnode GameObjectInstanceNode
   (inherits scene/ScalableSceneNode)
   (inherits InstanceNode)
+
+  (property embedded g/Bool (dynamic visible (g/always false)))
+
+  (input source g/Any)
+  (input properties g/Any)
+  (input build-targets g/Any)
+  (input scene g/Any)
+  (input child-scenes g/Any :array)
+  (input child-ids g/Str :array)
+
+  (input source-outline outline/OutlineData :substitute source-outline-subst)
+  (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
+
+  (output node-outline outline/OutlineData :cached produce-go-outline)
+  (output ddf-message g/Any :abstract)
+  (output node-outline-label g/Str (g/fnk [id] id))
+  (output build-targets g/Any (g/fnk [build-targets ddf-message transform] (let [target (first build-targets)]
+                                                                             [(assoc target :instance-data {:resource (:resource target)
+                                                                                                            :instance-msg ddf-message
+                                                                                                            :transform transform})])))
+
+  (output scene g/Any :cached (g/fnk [_node-id transform scene child-scenes]
+                                     (let [aabb (reduce #(geom/aabb-union %1 (:aabb %2)) (or (:aabb scene) (geom/null-aabb)) child-scenes)
+                                           aabb (geom/aabb-transform (geom/aabb-incorporate aabb 0 0 0) transform)]
+                                       (merge-with concat
+                                                   (assoc (assoc-deep scene :node-id _node-id)
+                                                          :transform transform
+                                                          :aabb aabb
+                                                          :renderable {:passes [pass/selection]})
+                                                   {:children child-scenes})))))
+
+(g/defnode EmbeddedGOInstanceNode
+  (inherits GameObjectInstanceNode)
+
+  (input save-data g/Any)
+
+  (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale save-data]
+                                           (gen-embed-ddf id child-ids position rotation-q4 scale save-data))))
+
+(g/defnode ReferencedGOInstanceNode
+  (inherits GameObjectInstanceNode)
 
   (property path (g/protocol resource/Resource)
     (dynamic visible (g/fnk [embedded] (not embedded)))
@@ -156,39 +199,11 @@
                 (when (and (not embedded) (nil? path))
                   (g/error-warning "Missing prototype")))))
 
-  (property embedded g/Bool (dynamic visible (g/always false)))
-
-  (input source g/Any)
   (input source-resource (g/protocol resource/Resource))
-  (input properties g/Any)
-  (input save-data g/Any)
-  (input build-targets g/Any)
-  (input scene g/Any)
-  (input child-scenes g/Any :array)
-  (input child-ids g/Str :array)
 
-  (input source-outline outline/OutlineData :substitute source-outline-subst)
-  (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
-
-  (output node-outline outline/OutlineData :cached produce-go-outline)
-  (output ddf-message g/Any :cached (g/fnk [id child-ids source-resource embedded position ^Quat4d rotation-q4 scale save-data]
-                                           (if embedded
-                                             (gen-embed-ddf id child-ids position rotation-q4 scale save-data)
-                                             (gen-ref-ddf id child-ids position rotation-q4 scale source-resource))))
-  (output build-targets g/Any (g/fnk [build-targets ddf-message transform] (let [target (first build-targets)]
-                                                                             [(assoc target :instance-data {:resource (:resource target)
-                                                                                                            :instance-msg ddf-message
-                                                                                                            :transform transform})])))
-
-  (output scene g/Any :cached (g/fnk [_node-id transform scene child-scenes embedded]
-                                     (let [aabb (reduce #(geom/aabb-union %1 (:aabb %2)) (or (:aabb scene) (geom/null-aabb)) child-scenes)
-                                           aabb (geom/aabb-transform (geom/aabb-incorporate aabb 0 0 0) transform)]
-                                       (merge-with concat
-                                                   (assoc (assoc-deep scene :node-id _node-id)
-                                                          :transform transform
-                                                          :aabb aabb
-                                                          :renderable {:passes [pass/selection]})
-                                                   {:children child-scenes})))))
+  (output node-outline-label g/Str (g/fnk [id source-resource] (format "%s (%s)" id (resource/resource->proj-path source-resource))))
+  (output ddf-message g/Any :cached (g/fnk [id child-ids source-resource position ^Quat4d rotation-q4 scale]
+                                           (gen-ref-ddf id child-ids position rotation-q4 scale source-resource))))
 
 (g/defnk produce-proto-msg [name ref-inst-ddf embed-inst-ddf ref-coll-ddf]
   {:name name
@@ -242,26 +257,24 @@
    :label "Collection"
    :icon collection-icon
    :children (vec (sort-by outline-sort-by-fn child-outlines))
-   :child-reqs [{:node-type GameObjectInstanceNode
-                 :values {:embedded (comp not true?)}
+   :child-reqs [{:node-type ReferencedGOInstanceNode
                  :tx-attach-fn (fn [self-id child-id]
                                  (concat
                                    (g/update-property child-id :id outline/resolve-id (g/node-value self-id :ids))
-                                   (child-coll-any self-id child-id)
-                                   (attach-coll-ref-go self-id child-id)))}
-                {:node-type GameObjectInstanceNode
-                 :values {:embedded true?}
+                                   (attach-coll-ref-go self-id child-id)
+                                   (child-coll-any self-id child-id)))}
+                {:node-type EmbeddedGOInstanceNode
                  :tx-attach-fn (fn [self-id child-id]
                                  (concat
                                    (g/update-property child-id :id outline/resolve-id (g/node-value self-id :ids))
-                                   (child-coll-any self-id child-id)
-                                   (attach-coll-embedded-go self-id child-id)))}
+                                   (attach-coll-embedded-go self-id child-id)
+                                   (child-coll-any self-id child-id)))}
                 {:node-type CollectionInstanceNode
                  :tx-attach-fn (fn [self-id child-id]
                                  (concat
                                    (g/update-property child-id :id outline/resolve-id (g/node-value self-id :ids))
-                                   (child-coll-any self-id child-id)
-                                   (attach-coll-coll self-id child-id)))}]})
+                                   (attach-coll-coll self-id child-id)
+                                   (child-coll-any self-id child-id)))}]})
 
 (g/defnode CollectionNode
   (inherits project/ResourceNode)
@@ -359,13 +372,11 @@
 
 (defn- make-ref-go [self project source-resource id position rotation scale child?]
   (g/make-nodes (g/node-id->graph-id self)
-                [go-node [GameObjectInstanceNode :id id :path source-resource
-                          :position position :rotation rotation :scale scale]]
+                [go-node [ReferencedGOInstanceNode :id id :path source-resource :position position :rotation rotation :scale scale]]
                 (attach-coll-ref-go self go-node)
                 (if child?
                   (child-coll-any self go-node)
-                  [])
-                (g/connect go-node :_node-id self :nodes)))
+                  [])))
 
 (defn- single-selection? [selection]
   (= 1 (count selection)))
@@ -375,8 +386,7 @@
 
 (defn- selected-embedded-instance? [selection]
   (let [node (first selection)]
-    (and (g/node-instance? GameObjectInstanceNode node)
-         (g/node-value node :embedded))))
+    (g/node-instance? EmbeddedGOInstanceNode node)))
 
 (defn- add-game-object-file [selection]
   (let [coll-node (first selection)
@@ -415,9 +425,7 @@
 (defn- make-embedded-go [self project type data id position rotation scale child? select?]
   (let [graph (g/node-id->graph-id self)
         resource (project/make-embedded-resource project type data)]
-    (g/make-nodes graph [go-node [GameObjectInstanceNode :id id :embedded true
-                                  :position position :rotation rotation :scale scale]]
-      (g/connect go-node :_node-id self :nodes)
+    (g/make-nodes graph [go-node [EmbeddedGOInstanceNode :id id :position position :rotation rotation :scale scale]]
       (if select?
         (project/select project [go-node])
         [])
@@ -471,8 +479,7 @@
                   [coll-node [CollectionInstanceNode :id id :path source-resource
                               :position position :rotation rotation :scale scale]]
                   (attach-coll-coll self coll-node)
-                  (child-coll-any self coll-node)
-                  (g/connect coll-node :_node-id self :nodes))))
+                  (child-coll-any self coll-node))))
 
 (handler/defhandler :add-secondary-from-file :global
   (active? [selection] (and (single-selection? selection) (selected-collection? selection)))

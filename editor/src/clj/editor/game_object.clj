@@ -264,11 +264,9 @@
    :label "Game Object"
    :icon game-object-icon
    :children child-outlines
-   :child-reqs [{:node-type ComponentNode
-                 :values {:embedded (comp not true?)}
+   :child-reqs [{:node-type ReferencedComponent
                  :tx-attach-fn attach-component}
-                {:node-type ComponentNode
-                 :values {:embedded true?}
+                {:node-type EmbeddedComponent
                  :tx-attach-fn attach-embedded-component}]})
 
 (g/defnode GameObjectNode
@@ -348,19 +346,6 @@
             []
             (attach-embedded-component self comp-node)))))))
 
-(defn add-embedded-component-handler
-  ([self]
-    (let [workspace (:workspace (g/node-value self :resource))
-          component-type (first (workspace/get-resource-types workspace :component))]
-      (add-embedded-component-handler self component-type)))
-  ([self component-type]
-    (let [project (project/get-project self)
-          template (workspace/template component-type)
-          id (gen-component-id self (:ext component-type))]
-      (g/transact
-        (concat
-          (g/operation-label "Add Component")
-          (add-embedded-component self project (:ext component-type) template id [0 0 0] [0 0 0] true))))))
 (defn add-embedded-component-handler [user-data]
   (let [self (:_node-id user-data)
         project (project/get-project self)

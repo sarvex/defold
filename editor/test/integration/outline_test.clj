@@ -201,6 +201,14 @@
           (is (= 2 (child-count root)))
           (is (= second-id (get (outline root [1]) :label))))))))
 
+(deftest copy-paste-dnd-collection
+  (with-clean-system
+    (let [[workspace project] (setup world)
+          root (test-util/resource-node project "/logic/atlas_sprite.collection")]
+      (copy-paste! project root [0])
+      (drag! root [0])
+      (drop! project root [1]))))
+
 (defn- read-only? [root path]
   (and (not (delete? root path))
        (not (cut? root path))
