@@ -613,7 +613,7 @@
                                            (g/connect or-script src self tgt))]
                            (concat tx-data set-prop-data conn-data))
                          []))))))
-  (input instance g/NodeID)
+  (input instance g/NodeID :cascade-delete)
   (input script-properties g/Properties)
   (output _properties g/Properties (g/fnk [_declared-properties script-properties]
                                           (-> _declared-properties
@@ -762,3 +762,41 @@
       (is (conn? [tmpl1-sub :node-overrides tmpl1-tree :node-overrides]))
       (is (conn? [tmpl-tree :node-overrides tmpl-scene :node-overrides]))
       (is (conn? [tmpl1-tree :node-overrides tmpl1-scene :node-overrides])))))
+
+(g/defnode GameObject
+  (input components g/NodeID :array :cascade-delete))
+
+(g/defnode GameObjectInstance
+  (input source g/NodeID :cascade-delete))
+
+(g/defnode Collection
+  (input instances g/NodeID :array :cascade-delete))
+
+(deftest cascade-delete-avoided
+  (with-clean-system
+    (let [[script] (tx-nodes (g/make-nodes world [script Script]))
+          [go comp or-script] (tx-nodes (g/make-nodes world [go GameObject
+                                                             comp Component]
+                                                      (let [o (g/override script {:traverse? (constantly true)})
+                                                            or-script ((:id-mapping o) script)]
+                                                        (concat
+                                                          (g/connect comp :_node-id go :components)
+                                                          (:tx-data o)
+                                                          (g/connect or-script :_node-id comp :instance)))))
+          [coll inst or-go] (tx-nodes (g/make-nodes world [coll Collection
+                                                           inst GameObjectInstance]
+                                                    (let [o (g/override go {:traverse? (constantly false)})
+                                                          or-go ((:id-mapping o) go)]
+                                                      (concat
+                                                        (g/connect inst :_node-id coll :instances)
+                                                        (:tx-data o)
+                                                        (g/connect or-go :_node-id inst :source)))))]
+      (is (every? some? (map g/node-by-id [coll inst or-go go comp or-script script])))
+      (g/transact (g/delete-node coll))
+      (is (every? nil? (map g/node-by-id [coll inst or-go])))
+      (is (every? some? (map g/node-by-id [go comp or-script script])))
+      (g/transact (g/delete-node go))
+      (is (every? nil? (map g/node-by-id [coll inst or-go go comp or-script])))
+      (is (every? some? (map g/node-by-id [script])))
+      (g/transact (g/delete-node script))
+      (is (every? nil? (map g/node-by-id [coll inst or-go go comp or-script script]))))))

@@ -14,6 +14,16 @@
 
 (set! *warn-on-reflection* true)
 
+(defn user-name->key [name]
+  (->> name
+    (str "__")
+    keyword))
+
+(defn key->user-name [k]
+  (-> k
+    name
+    (subs 2)))
+
 (defprotocol Sampler
   (sample [this]))
 

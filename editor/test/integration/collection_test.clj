@@ -80,3 +80,22 @@
                       (map :label (tree-seq :children :children outline))))
                ; Verify AABBs
                (is (every? #(= zero-aabb %) (map :aabb (tree-seq :children :children (g/node-value node-id :scene)))))))))
+
+(defn- prop [node-id path prop]
+       (-> (test-util/outline node-id path)
+         :node-id
+         (test-util/prop prop)))
+
+(defn- url-prop [node-id path]
+  (prop node-id path :url))
+
+(deftest urls
+  (testing "Checks URLs at different levels"
+           (with-clean-system
+             (let [workspace (test-util/setup-workspace! world)
+                   project   (test-util/setup-project! workspace)
+                   node-id   (test-util/resource-node project "/collection/sub_sub_props.collection")]
+               (is (= "/sub_props" (url-prop node-id [0])))
+               (is (= "/sub_props/props" (url-prop node-id [0 0])))
+               (is (= "/sub_props/props/props" (url-prop node-id [0 0 0])))
+               (is (= "/sub_props/props/props#script" (url-prop node-id [0 0 0 0])))))))

@@ -172,7 +172,7 @@
     (with-build-results "/merge/merge_embed.collection"
       (is (= 1 (count-exts (keys content-by-target) "goc")))
       (is (= 1 (count-exts (keys content-by-target) "spritec")))
-      (let [go-node   (first-source (first-source resource-node :child-scenes) :source)
+      (let [go-node   (first-source (first-source resource-node :child-scenes) :source-id)
             comp-node (first-source go-node :child-scenes)]
         (g/transact (g/delete-node comp-node))
         (let [build-results     (project/build project resource-node {})
