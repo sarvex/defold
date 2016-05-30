@@ -317,30 +317,33 @@
                   [comp-node [ReferencedComponent :id id :position position :rotation rotation :path path]]
                   (attach-ref-component self comp-node))))
 
-(defn add-component-handler [self]
-  (let [project (project/get-project self)
-        workspace (:workspace (g/node-value self :resource))
-        component-exts (map :ext (workspace/get-resource-types workspace :component))]
+(defn add-component-file [go-id resource]
+  (let [project (project/get-project go-id)
+        id (gen-component-id go-id (:ext (resource/resource-type resource)))
+        op-seq (gensym)
+        [comp-node] (g/tx-nodes-added
+                      (g/transact
+                        (concat
+                          (g/operation-label "Add Component")
+                          (g/operation-sequence op-seq)
+                          (add-component go-id project resource id [0 0 0] [0 0 0] {}))))]
+    ; Selection
+    (g/transact
+      (concat
+        (g/operation-sequence op-seq)
+        (g/operation-label "Add Component")
+        (project/select project [comp-node])))))
+
+(defn add-component-handler [workspace go-id]
+  (let [component-exts (map :ext (workspace/get-resource-types workspace :component))]
     (when-let [resource (first (dialogs/make-resource-dialog workspace {:ext component-exts :title "Select Component File"}))]
-      (let [id (gen-component-id self (:ext (resource/resource-type resource)))
-            op-seq (gensym)
-            [comp-node] (g/tx-nodes-added
-                          (g/transact
-                            (concat
-                              (g/operation-label "Add Component")
-                              (g/operation-sequence op-seq)
-                              (add-component self project resource id [0 0 0] [0 0 0] {}))))]
-        ; Selection
-        (g/transact
-          (concat
-            (g/operation-sequence op-seq)
-            (g/operation-label "Add Component")
-            (project/select project [comp-node])))))))
+      (add-component-file go-id resource))))
 
 (handler/defhandler :add-from-file :global
   (active? [selection] (and (= 1 (count selection)) (g/node-instance? GameObjectNode (first selection))))
   (label [] "Add Component File")
-  (run [selection] (add-component-handler (first selection))))
+  (run [workspace selection]
+       (add-component-handler workspace (first selection))))
 
 (defn- add-embedded-component [self project type data id position rotation select?]
   (let [graph (g/node-id->graph-id self)

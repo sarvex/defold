@@ -3,9 +3,11 @@
             [dynamo.graph :as g]
             [support.test-support :refer [with-clean-system]]
             [editor.collection :as collection]
+            [editor.game-object :as game-object]
             [editor.handler :as handler]
             [editor.defold-project :as project]
             [editor.types :as types]
+            [editor.properties :as properties]
             [integration.test-util :as test-util])
   (:import [editor.types Region]
            [java.awt.image BufferedImage]
@@ -99,3 +101,35 @@
                (is (= "/sub_props/props" (url-prop node-id [0 0])))
                (is (= "/sub_props/props/props" (url-prop node-id [0 0 0])))
                (is (= "/sub_props/props/props#script" (url-prop node-id [0 0 0 0])))))))
+
+(defn- script-prop [node-id name]
+  (let [key (properties/user-name->key name)]
+    (test-util/prop node-id key)))
+
+(defn- script-prop! [node-id name v]
+  (let [key (properties/user-name->key name)]
+    (test-util/prop! (test-util/prop-node-id node-id key) key v)))
+
+(defn- script-prop-clear! [node-id name]
+  (let [key (properties/user-name->key name)]
+    (test-util/prop-clear! (test-util/prop-node-id node-id key) key)))
+
+(deftest add-script-properties
+  (with-clean-system
+    (let [workspace (test-util/setup-workspace! world)
+          project   (test-util/setup-project! workspace)
+          coll-id   (test-util/resource-node project "/collection/test.collection")
+          go-id     (test-util/resource-node project "/game_object/test.go")
+          script-id (test-util/resource-node project "/script/props.script")]
+      (collection/add-game-object-file coll-id (test-util/resource workspace "/game_object/test.go"))
+      (is (nil? (test-util/outline coll-id [0 0])))
+      (let [inst (first (test-util/selection project))]
+        (game-object/add-component-file go-id (test-util/resource workspace "/script/props.script"))
+        (let [comp (:node-id (test-util/outline coll-id [0 0]))]
+          (is (= 1.0 (script-prop comp "number")))
+          (script-prop! comp "number" 2.0)
+          (is (= 2.0 (script-prop comp "number")))
+          (script-prop-clear! comp "number")
+          (is (= 1.0 (script-prop comp "number")))
+          (g/set-property! script-id :code "go.property(\"new_value\", 2.0)\n")
+          (is (= 2.0 (script-prop comp "new_value"))))))))

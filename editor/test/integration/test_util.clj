@@ -173,3 +173,9 @@
 
 (defn prop-overridden? [node-id label]
   (contains? (get-in (g/node-value node-id :_properties) [:properties label]) :original-value))
+
+(defn resource [workspace path]
+  (workspace/file-resource workspace path))
+
+(defn selection [project]
+  (workspace/selection (project/selection-provider project)))
