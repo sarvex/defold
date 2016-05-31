@@ -86,3 +86,15 @@
           (is (:outline-overridden? outline))
           (is (= 3.0 (prop script-c "number")))
           (is (overridden? script-c "number")))))))
+
+(deftest script-properties-sub-collection
+  (with-clean-system
+    (let [workspace (tu/setup-workspace! world)
+          project (tu/setup-project! workspace)
+          coll-id (tu/resource-node project "/collection/sub_props.collection")]
+      (let [i 0]
+        (let [outline (tu/outline coll-id [0 0 0])
+              script-c (:node-id outline)]
+          (is (:outline-overridden? outline))
+          (is (= 4.0 (prop script-c "number")))
+          (is (overridden? script-c "number")))))))

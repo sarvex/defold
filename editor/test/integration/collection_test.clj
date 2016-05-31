@@ -84,9 +84,9 @@
                (is (every? #(= zero-aabb %) (map :aabb (tree-seq :children :children (g/node-value node-id :scene)))))))))
 
 (defn- prop [node-id path prop]
-       (-> (test-util/outline node-id path)
-         :node-id
-         (test-util/prop prop)))
+  (-> (test-util/outline node-id path)
+    :node-id
+    (test-util/prop prop)))
 
 (defn- url-prop [node-id path]
   (prop node-id path :url))

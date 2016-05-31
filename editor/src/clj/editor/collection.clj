@@ -84,7 +84,8 @@
   (property url g/Str
             (value (g/fnk [base-url id] (format "%s/%s" (or base-url "") id)))
             (dynamic read-only? (g/always true)))
-  (input base-url g/Str))
+  (input base-url g/Str)
+  (input source-id g/Any :cascade-delete))
 
 (defn- child-go-go [go-id child-id]
   (for [[from to] [[:id :child-ids]
@@ -93,20 +94,20 @@
     (g/connect child-id from go-id to)))
 
 (defn- child-coll-any [coll-id child-id]
-  (concat
-    (for [[from to] [[:node-outline :child-outlines]
-                     [:scene :child-scenes]]]
-      (g/connect child-id from coll-id to))
-    (for [[from to] [[:url :base-url]]]
-      (g/connect coll-id from child-id to))))
+  (for [[from to] [[:node-outline :child-outlines]
+                   [:scene :child-scenes]]]
+    (g/connect child-id from coll-id to)))
 
 (defn- attach-coll-go [coll-id child-id ddf-label]
   (concat
-    (g/connect child-id :_node-id coll-id :nodes)
-    (for [[from to] [[:ddf-message ddf-label]
+    (for [[from to] [[:_node-id :nodes]
+                     [:ddf-message ddf-label]
                      [:build-targets :dep-build-targets]
-                     [:id :ids]]]
-      (g/connect child-id from coll-id to))))
+                     [:id :ids]
+                     [:go-inst-ids :go-inst-ids]]]
+      (g/connect child-id from coll-id to))
+    (for [[from to] [[:base-url :base-url]]]
+      (g/connect coll-id from child-id to))))
 
 (defn- attach-coll-ref-go [coll-id child-id]
   (attach-coll-go coll-id child-id :ref-inst-ddf))
@@ -116,12 +117,14 @@
 
 (defn- attach-coll-coll [coll-id child-id]
   (concat
-    (g/connect child-id :_node-id coll-id :nodes)
-    (let [conns [[:ddf-message :ref-coll-ddf]
-                 [:id :ids]
-                 [:build-targets :sub-build-targets]]]
-      (for [[from to] conns]
-        (g/connect child-id from coll-id to)))))
+    (for [[from to] [[:_node-id :nodes]
+                     [:ddf-message :ref-coll-ddf]
+                     [:id :ids]
+                     [:build-targets :sub-build-targets]
+                     [:go-inst-ids :go-inst-ids]]]
+      (g/connect child-id from coll-id to))
+    (for [[from to] [[:base-url :base-url]]]
+      (g/connect coll-id from child-id to))))
 
 (def EmbeddedGOInstanceNode nil)
 (def ReferencedGOInstanceNode nil)
@@ -162,7 +165,6 @@
   (inherits scene/ScalableSceneNode)
   (inherits InstanceNode)
 
-  (input source-id g/Any :cascade-delete)
   (input properties g/Any)
   (input build-targets g/Any)
   (input scene g/Any)
@@ -189,7 +191,9 @@
                                                           :transform transform
                                                           :aabb aabb
                                                           :renderable {:passes [pass/selection]})
-                                                   {:children child-scenes})))))
+                                                   {:children child-scenes}))))
+  (output go-inst-ids g/Any :cached (g/fnk [_node-id id]
+                                           {id _node-id})))
 
 (g/defnode EmbeddedGOInstanceNode
   (inherits GameObjectInstanceNode)
@@ -383,8 +387,9 @@
   (input sub-build-targets g/Any :array)
   (input dep-build-targets g/Any :array)
   (input base-url g/Str)
+  (input go-inst-ids g/Any :array)
 
-  (output url g/Str (g/fnk [base-url] base-url))
+  (output base-url g/Str (g/fnk [base-url] base-url))
   (output proto-msg g/Any :cached produce-proto-msg)
   (output save-data g/Any :cached produce-save-data)
   (output build-targets g/Any :cached produce-build-targets)
@@ -392,7 +397,8 @@
   (output scene g/Any :cached (g/fnk [_node-id child-scenes]
                                      {:node-id _node-id
                                       :children child-scenes
-                                      :aabb (reduce geom/aabb-union (geom/null-aabb) (filter #(not (nil? %)) (map :aabb child-scenes)))})))
+                                      :aabb (reduce geom/aabb-union (geom/null-aabb) (filter #(not (nil? %)) (map :aabb child-scenes)))}))
+  (output go-inst-ids g/Any :cached (g/fnk [go-inst-ids] (reduce merge {} go-inst-ids))))
 
 (defn- flatten-instance-data [data base-id ^Matrix4d base-transform all-child-ids]
   (let [{:keys [resource instance-msg ^Matrix4d transform]} data
@@ -410,38 +416,89 @@
         child-ids (reduce (fn [child-ids data] (into child-ids (:children (:instance-msg data)))) #{} instance-data)]
     (assoc-in build-targets [0 :user-data :instance-data] (map #(flatten-instance-data % base-id transform child-ids) instance-data))))
 
-(g/defnk produce-coll-inst-outline [_node-id id source-resource source-outline source]
+(g/defnk produce-coll-inst-outline [_node-id id source-resource source-outline source-id]
   (-> source-outline
     (assoc :node-id _node-id
       :label (format "%s (%s)" id (resource/resource->proj-path source-resource))
       :icon collection-icon)
     (update :child-reqs (fn [reqs]
                           (mapv (fn [req] (update req :tx-attach-fn #(fn [self-id child-id]
-                                                                       (% source child-id))))
+                                                                       (% source-id child-id))))
                             ; TODO - temp blocked because of risk for graph cycles
                             ; If it's dropped on another instance referencing the same collection, it blows up
-                                (filter (fn [req] (not= CollectionInstanceNode (:node-type req))) reqs))))))
+                            (filter (fn [req] (not= CollectionInstanceNode (:node-type req))) reqs))))))
+
+(defn- or-coll-traverse? [basis [src-id src-label tgt-id tgt-label]]
+  (cond
+    (g/node-instance? basis game-object/ComponentNode src-id)
+    (some-> (g/node-value src-id :source-resource :basis basis)
+      resource/resource-type
+      :tags
+      (contains? :overridable-properties))
+
+    (g/node-instance? basis project/ResourceNode src-id)
+    true
+
+    (g/node-instance? basis InstanceNode src-id)
+    true))
 
 (g/defnode CollectionInstanceNode
   (inherits scene/ScalableSceneNode)
   (inherits InstanceNode)
 
-  (property path (g/protocol resource/Resource)
-    (value (gu/passthrough source-resource))
-    (set (project/gen-resource-setter [[:_node-id      :source]
-                                       [:resource      :source-resource]
-                                       [:node-outline  :source-outline]
-                                       [:scene         :scene]
-                                       [:build-targets :build-targets]]
-                                      (fn [basis self n] (g/connect self :url n :base-url))))
+  (property path g/Any
+    (value (g/fnk [source-resource ddf-properties]
+                  {:resource source-resource
+                   :overrides ddf-properties}))
+    (set (fn [basis self old-value new-value]
+           (concat
+             (if-let [old-source (g/node-value self :source-id :basis basis)]
+               (g/delete-node old-source)
+               [])
+             (let [new-resource (:resource new-value)]
+               (let [project (project/get-project self)]
+                 (project/connect-resource-node project new-resource self []
+                                                (fn [coll-node]
+                                                  (let [override (g/override basis coll-node {:traverse? or-coll-traverse?})
+                                                        id-mapping (:id-mapping override)
+                                                        go-inst-ids (g/node-value coll-node :go-inst-ids :basis basis)
+                                                        component-overrides (for [{:keys [id properties]} (:overrides new-value)
+                                                                                  :let [comp-ids (-> id
+                                                                                                   go-inst-ids
+                                                                                                   (g/node-value :source-id :basis basis)
+                                                                                                   (g/node-value :component-ids :basis basis))]
+                                                                                  :when comp-ids
+                                                                                  {:keys [id properties]} properties
+                                                                                  :let [comp-id (-> id
+                                                                                                  comp-ids
+                                                                                                  (g/node-value :source-id :basis basis))]
+                                                                                  p properties]
+                                                                              [(id-mapping comp-id) (properties/user-name->key (:id p)) (properties/str->go-prop (:value p) (:type p))])
+                                                        or-node (get id-mapping coll-node)]
+                                                    (concat
+                                                      (:tx-data override)
+                                                      (let [outputs (g/output-labels (:node-type (resource/resource-type new-resource)))]
+                                                        (for [[from to] [[:_node-id      :source-id]
+                                                                         [:resource      :source-resource]
+                                                                         [:node-outline  :source-outline]
+                                                                         [:scene         :scene]]
+                                                              :when (contains? outputs from)]
+                                                          (g/connect or-node from self to)))
+                                                      (for [[from to] [[:build-targets :build-targets]]]
+                                                        (g/connect coll-node from self to))
+                                                      (for [[from to] [[:url :base-url]]]
+                                                        (g/connect self from or-node to))
+                                                      (for [[comp-id label value] component-overrides]
+                                                        (g/set-property comp-id label value)))))))))))
     (validate (validation/validate-resource path "Missing prototype" [scene])))
 
   (display-order [:id :url :path scene/ScalableSceneNode])
 
-  (input source g/Any)
   (input source-resource (g/protocol resource/Resource))
+  (input ddf-properties g/Any)
   (input scene g/Any)
   (input build-targets g/Any)
+  (input go-inst-ids g/Any)
 
   (input source-outline outline/OutlineData :substitute source-outline-subst)
   (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
@@ -458,7 +515,8 @@
                                            :transform transform
                                            :aabb (geom/aabb-transform (or (:aabb scene) (geom/null-aabb)) transform)
                                            :renderable {:passes [pass/selection]})))
-  (output build-targets g/Any produce-coll-inst-build-targets))
+  (output build-targets g/Any :cached produce-coll-inst-build-targets)
+  (output go-inst-ids g/Any (g/fnk [go-inst-ids] go-inst-ids)))
 
 (defn- gen-instance-id [coll-node base]
   (let [ids (g/node-value coll-node :ids)]
@@ -576,10 +634,10 @@
                                (selected-collection? selection) (add-game-object selection)
                                (selected-embedded-instance? selection) (game-object/add-embedded-component-handler user-data))))
 
-(defn- add-collection-instance [self source-resource id position rotation scale]
+(defn- add-collection-instance [self source-resource id position rotation scale overrides]
   (let [project (project/get-project self)]
     (g/make-nodes (g/node-id->graph-id self)
-                  [coll-node [CollectionInstanceNode :id id :path source-resource
+                  [coll-node [CollectionInstanceNode :id id :path {:resource source-resource :overrides overrides}
                               :position position :rotation rotation :scale scale]]
                   (attach-coll-coll self coll-node)
                   (child-coll-any self coll-node))))
@@ -601,7 +659,7 @@
                                                 (concat
                                                  (g/operation-label "Add Collection")
                                                  (g/operation-sequence op-seq)
-                                                 (add-collection-instance coll-node resource id [0 0 0] [0 0 0] [1 1 1]))))]
+                                                 (add-collection-instance coll-node resource id [0 0 0] [0 0 0] [1 1 1] []))))]
                                         ; Selection
                          (g/transact
                           (concat
@@ -615,14 +673,16 @@
 (defn load-collection [project self resource]
   (let [collection (protobuf/read-text GameObject$CollectionDesc resource)
         project-graph (g/node-id->graph-id project)
-        go-resources (map :prototype (:instances collection))
-        go-load-data  (project/load-resource-nodes project
-                                                   (->> go-resources
-                                                     (map #(project/get-resource-node project %))
-                                                     (remove nil?))
-                                                   progress/null-render-progress!)]
+        prototype-resources (concat
+                              (map :prototype (:instances collection))
+                              (map :collection (:collection-instances collection)))
+        prototype-load-data  (project/load-resource-nodes project
+                                                          (->> prototype-resources
+                                                            (map #(project/get-resource-node project %))
+                                                            (remove nil?))
+                                                          progress/null-render-progress!)]
     (concat
-      go-load-data
+      prototype-load-data
       (g/set-property self :name (:name collection))
       (let [tx-go-creation (flatten
                              (concat
@@ -657,7 +717,7 @@
                   scale (:scale coll-instance)
                   source-resource (workspace/resolve-resource resource (:collection coll-instance))]]
         (add-collection-instance self source-resource (:id coll-instance) (:position coll-instance)
-          (v4->euler (:rotation coll-instance)) [scale scale scale])))))
+          (v4->euler (:rotation coll-instance)) [scale scale scale] (:instance-properties coll-instance))))))
 
 (defn register-resource-types [workspace]
   (workspace/register-resource-type workspace

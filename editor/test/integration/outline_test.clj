@@ -156,6 +156,11 @@
   (with-clean-system
     (let [[workspace project] (setup world)
           root (test-util/resource-node project "/collection/sub_props.collection")]
+      ; Original tree
+      ; + Collection (root)
+      ;   + props (collection)
+      ;     + props (go)
+      ;     + props_embedded (go)
       ; 1 collection instance
       (is (= 1 (child-count root)))
       ; 2 go instances
@@ -168,14 +173,14 @@
       (paste! project root)
       ; 2 collection instances + 1 go instances
       (is (= 3 (child-count root)))
-      ; 1 go instances under coll instance
-      (is (= 1 (child-count root [0])))
+      ; 2 go instances under coll instance
+      (is (= 2 (child-count root [0])))
       (cut! root [2])
       (paste! project root [0])
       ; 2 collection instance
       (is (= 2 (child-count root)))
-      ; 2 go instance
-      (is (= 2 (child-count root [0]))))))
+      ; 1 go instance
+      (is (= 1 (child-count root [0]))))))
 
 (deftest dnd-collection
   (with-clean-system
