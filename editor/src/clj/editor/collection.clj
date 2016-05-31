@@ -22,7 +22,7 @@
             [editor.progress :as progress]
             [editor.properties :as properties]
             [clojure.string :as str])
-  (:import [com.dynamo.gameobject.proto GameObject$CollectionDesc]
+  (:import [com.dynamo.gameobject.proto GameObject$PrototypeDesc GameObject$CollectionDesc]
            [com.dynamo.graphics.proto Graphics$Cubemap Graphics$TextureImage Graphics$TextureImage$Image Graphics$TextureImage$Type]
            [com.dynamo.proto DdfMath$Point3 DdfMath$Quat]
            [com.jogamp.opengl.util.awt TextRenderer]
@@ -46,14 +46,19 @@
                  (conj r {:id k :properties (mapv (fn [[_ v]] (second v)) v)})))
              [] o))
 
-(defn- gen-embed-ddf [id child-ids position ^Quat4d rotation-q4 scale save-data ddf-component-properties]
-  {:id id
-   :children child-ids
-   :data (:content save-data)
-   :position position
-   :rotation (math/vecmath->clj rotation-q4)
-   :scale3 scale
-   :component-properties ddf-component-properties})
+(defn- strip-properties [v]
+  (mapv #(dissoc % :properties) v))
+
+(defn- gen-embed-ddf [id child-ids position ^Quat4d rotation-q4 scale proto-msg ddf-component-properties]
+  (let [proto-msg (-> proto-msg
+                    (update :components strip-properties))]
+    {:id id
+     :children child-ids
+     :data (protobuf/map->str GameObject$PrototypeDesc proto-msg)
+     :position position
+     :rotation (math/vecmath->clj rotation-q4)
+     :scale3 scale
+     :component-properties ddf-component-properties}))
 
 (defn- gen-ref-ddf [id child-ids position ^Quat4d rotation-q4 scale path ddf-component-properties]
   {:id id
@@ -72,9 +77,6 @@
 
 (defn- label-sort-by-fn [v]
   (when-let [label (:label v)] (str/lower-case label)))
-
-(defn- outline-sort-by-fn [v]
-  [(:name (g/node-type* (:node-id v))) (label-sort-by-fn v)])
 
 (g/defnode InstanceNode
   (inherits outline/OutlineNode)
@@ -167,7 +169,7 @@
   (input child-scenes g/Any :array)
   (input child-ids g/Str :array)
 
-  (input ddf-component-properties g/Any :substitute {})
+  (input ddf-component-properties g/Any :substitute [])
   (input source-outline outline/OutlineData :substitute source-outline-subst)
   (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
 
@@ -192,12 +194,27 @@
 (g/defnode EmbeddedGOInstanceNode
   (inherits GameObjectInstanceNode)
 
+  (property overrides g/Any
+              (dynamic visible (g/always false))
+              (value (g/fnk [ddf-component-properties] ddf-component-properties))
+              (set (fn [basis self old-value new-value]
+                     (let [go (g/node-value self :source-id :basis basis)
+                           component-ids (g/node-value go :component-ids :basis basis)]
+                       (for [{:keys [id properties]} new-value
+                             p properties
+                             :let [src-id (-> id
+                                            component-ids
+                                            (g/node-value :source-id :basis basis))
+                                   key (properties/user-name->key (:id p))
+                                   val (properties/str->go-prop (:value p) (:type p))]
+                             :when src-id]
+                         (g/set-property src-id key val))))))
   (display-order [:id :url scene/ScalableSceneNode])
 
-  (input save-data g/Any)
+  (input proto-msg g/Any)
 
-  (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale save-data ddf-component-properties]
-                                           (gen-embed-ddf id child-ids position rotation-q4 scale save-data ddf-component-properties))))
+  (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale proto-msg ddf-component-properties]
+                                           (gen-embed-ddf id child-ids position rotation-q4 scale proto-msg ddf-component-properties))))
 
 (defn- or-go-traverse? [basis [src-id src-label tgt-id tgt-label]]
   (if (g/node-instance? basis game-object/ComponentNode src-id)
@@ -325,6 +342,9 @@
       :deps (vec (reduce into dep-build-targets (map :deps sub-build-targets)))}]))
 
 (def CollectionInstanceNode nil)
+
+(defn- outline-sort-by-fn [v]
+  [(not (g/node-instance? CollectionInstanceNode (:node-id v))) (label-sort-by-fn v)])
 
 (g/defnk produce-coll-outline [_node-id child-outlines]
   {:node-id _node-id
@@ -501,7 +521,7 @@
                                               (add-game-object-file coll-node resource)))
          (selected-embedded-instance? selection) (game-object/add-component-handler workspace (g/node-value (first selection) :source-id)))))
 
-(defn- make-embedded-go [self project type data id position rotation scale child? select?]
+(defn- make-embedded-go [self project type data id position rotation scale child? select? overrides]
   (let [graph (g/node-id->graph-id self)
         resource (project/make-embedded-resource project type data)]
     (g/make-nodes graph [go-node [EmbeddedGOInstanceNode :id id :position position :rotation rotation :scale scale]]
@@ -511,7 +531,7 @@
       (let [tx-data (project/make-resource-node graph project resource true
                                                 {go-node [[:_node-id :source-id]
                                                           [:node-outline :source-outline]
-                                                          [:save-data :save-data]
+                                                          [:proto-msg :proto-msg]
                                                           [:build-targets :build-targets]
                                                           [:scene :scene]
                                                           [:ddf-component-properties :ddf-component-properties]]
@@ -522,6 +542,7 @@
           (if (empty? tx-data)
             []
             (concat
+              (g/set-property go-node :overrides overrides)
               (attach-coll-embedded-go self go-node)
               (if child?
                 (child-coll-any self go-node)
@@ -538,7 +559,7 @@
     (g/transact
       (concat
         (g/operation-label "Add Game Object")
-        (make-embedded-go coll-node project ext template id [0 0 0] [0 0 0] [1 1 1] true true)))))
+        (make-embedded-go coll-node project ext template id [0 0 0] [0 0 0] [1 1 1] true true {})))))
 
 (handler/defhandler :add :global
   (active? [selection] (and (single-selection? selection)
@@ -617,7 +638,7 @@
                                  (make-embedded-go self project "go" (:data embedded) (:id embedded)
                                    (:position embedded)
                                    (v4->euler (:rotation embedded))
-                                   [scale scale scale] false false))))
+                                   [scale scale scale] false false (:component-properties embedded)))))
             new-instance-data (filter #(and (= :create-node (:type %)) (g/node-instance*? GameObjectInstanceNode (:node %))) tx-go-creation)
             id->nid (into {} (map #(do [(get-in % [:node :id]) (g/node-id (:node %))]) new-instance-data))
             child->parent (into {} (map #(do [% nil]) (keys id->nid)))

@@ -158,24 +158,24 @@
           root (test-util/resource-node project "/collection/sub_props.collection")]
       ; 1 collection instance
       (is (= 1 (child-count root)))
-      ; 1 go instance
-      (is (= 1 (child-count root [0])))
+      ; 2 go instances
+      (is (= 2 (child-count root [0])))
       (copy! root [0])
       (paste! project root)
       (is (= 2 (child-count root)))
-      (is (= 1 (child-count root [1])))
+      (is (= 2 (child-count root [1])))
       (cut! root [0 0])
       (paste! project root)
       ; 2 collection instances + 1 go instances
       (is (= 3 (child-count root)))
-      ; 0 go instances under coll instance
-      (is (= 0 (child-count root [0])))
+      ; 1 go instances under coll instance
+      (is (= 1 (child-count root [0])))
       (cut! root [2])
       (paste! project root [0])
       ; 2 collection instance
       (is (= 2 (child-count root)))
-      ; 1 go instance
-      (is (= 1 (child-count root [0]))))))
+      ; 2 go instance
+      (is (= 2 (child-count root [0]))))))
 
 (deftest dnd-collection
   (with-clean-system
