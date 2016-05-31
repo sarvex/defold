@@ -39,23 +39,30 @@
 (def collection-icon "icons/32/Icons_09-Collection.png")
 (def path-sep "/")
 
-(defn- gen-embed-ddf [id child-ids position ^Quat4d rotation-q4 scale save-data]
+(defn- comp-overrides->ddf [o]
+  (reduce-kv (fn [r k v]
+               (if (empty? v)
+                 r
+                 (conj r {:id k :properties (mapv (fn [[_ v]] (second v)) v)})))
+             [] o))
+
+(defn- gen-embed-ddf [id child-ids position ^Quat4d rotation-q4 scale save-data ddf-component-properties]
   {:id id
    :children child-ids
-   ; TODO properties
    :data (:content save-data)
    :position position
    :rotation (math/vecmath->clj rotation-q4)
-   :scale3 scale})
+   :scale3 scale
+   :component-properties ddf-component-properties})
 
-(defn- gen-ref-ddf [id child-ids position ^Quat4d rotation-q4 scale path]
+(defn- gen-ref-ddf [id child-ids position ^Quat4d rotation-q4 scale path ddf-component-properties]
   {:id id
    :children child-ids
-   ; TODO properties
    :prototype (resource/resource->proj-path path)
    :position position
    :rotation (math/vecmath->clj rotation-q4)
-   :scale3 scale})
+   :scale3 scale
+   :component-properties ddf-component-properties})
 
 (defn- assoc-deep [scene keyword new-value]
   (let [new-scene (assoc scene keyword new-value)]
@@ -160,8 +167,7 @@
   (input child-scenes g/Any :array)
   (input child-ids g/Str :array)
 
-  (input source-overrides g/Any)
-  (input source-properties g/Properties :substitute {:properties {}})
+  (input ddf-component-properties g/Any :substitute {})
   (input source-outline outline/OutlineData :substitute source-outline-subst)
   (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
 
@@ -190,15 +196,16 @@
 
   (input save-data g/Any)
 
-  (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale save-data]
-                                           (gen-embed-ddf id child-ids position rotation-q4 scale save-data))))
+  (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale save-data ddf-component-properties]
+                                           (gen-embed-ddf id child-ids position rotation-q4 scale save-data ddf-component-properties))))
 
 (defn- or-go-traverse? [basis [src-id src-label tgt-id tgt-label]]
   (if (g/node-instance? basis game-object/ComponentNode src-id)
     (some-> (g/node-value src-id :source-resource :basis basis)
       resource/resource-type
       :tags
-      (contains? :overridable-properties))))
+      (contains? :overridable-properties))
+    (g/node-instance? basis project/ResourceNode src-id)))
 
 (g/defnode ReferencedGOInstanceNode
   (inherits GameObjectInstanceNode)
@@ -209,9 +216,9 @@
                                        :ext (some-> source-resource resource/resource-type :ext)
                                        :to-type (fn [v] (:resource v))
                                        :from-type (fn [r] {:resource r :overrides {}})}))
-            (value (g/fnk [source-resource property-overrides]
+            (value (g/fnk [source-resource ddf-component-properties]
                           {:resource source-resource
-                           :overrides property-overrides}))
+                           :overrides ddf-component-properties}))
             (set (fn [basis self old-value new-value]
                    (concat
                      (if-let [old-source (g/node-value self :source-id :basis basis)]
@@ -221,23 +228,34 @@
                        (let [project (project/get-project self)]
                          (project/connect-resource-node project new-resource self []
                                                         (fn [go-node]
-                                                          (let [override (g/override basis go-node {:traverse? or-go-traverse?})
+                                                          (let [component-overrides (into {} (map (fn [m]
+                                                                                                    [(:id m) (into {} (map (fn [p] [(properties/user-name->key (:id p)) (properties/str->go-prop (:value p) (:type p))])
+                                                                                                                           (:properties m)))])
+                                                                                                  (:overrides new-value)))
+                                                                override (g/override basis go-node {:traverse? or-go-traverse?})
                                                                 id-mapping (:id-mapping override)
                                                                 or-node (get id-mapping go-node)
-                                                                id-mapping (comp id-mapping (g/node-value go-node :component-ids :basis basis))]
+                                                                component-ids (g/node-value go-node :component-ids :basis basis)
+                                                                id-mapping (fn [id]
+                                                                             (-> id
+                                                                               component-ids
+                                                                               (g/node-value :source-id :basis basis)
+                                                                               id-mapping))]
                                                             (concat
                                                               (:tx-data override)
                                                               (let [outputs (g/output-labels (:node-type (resource/resource-type new-resource)))]
-                                                                (for [[from to] [[:_node-id      :source-id]
-                                                                                 [:resource      :source-resource]
-                                                                                 [:node-outline  :source-outline]
-                                                                                 [:build-targets :build-targets]
-                                                                                 [:scene         :scene]]
+                                                                (for [[from to] [[:_node-id                 :source-id]
+                                                                                 [:resource                 :source-resource]
+                                                                                 [:node-outline             :source-outline]
+                                                                                 [:scene                    :scene]
+                                                                                 [:ddf-component-properties :ddf-component-properties]]
                                                                       :when (contains? outputs from)]
                                                                   (g/connect or-node from self to)))
+                                                              (for [[from to] [[:build-targets :build-targets]]]
+                                                                (g/connect go-node from self to))
                                                               (for [[from to] [[:url :base-url]]]
                                                                 (g/connect self from or-node to))
-                                                              (for [[id p] (:overrides new-value)
+                                                              (for [[id p] component-overrides
                                                                     [label value] p
                                                                     :let [comp-id (id-mapping id)]]
                                                                 (g/set-property comp-id label value)))))))))))
@@ -248,15 +266,9 @@
   (display-order [:id :url :path scene/ScalableSceneNode])
 
   (input source-resource (g/protocol resource/Resource))
-  (output property-overrides g/Any :cached
-          (g/fnk [source-properties]
-                 (into {}
-                       (map (fn [[key p]] [key (:value p)])
-                            (filter (fn [[_ p]] (contains? p :original-value))
-                                    (:properties source-properties))))))
   (output node-outline-label g/Str (g/fnk [id source-resource] (format "%s (%s)" id (resource/resource->proj-path source-resource))))
-  (output ddf-message g/Any :cached (g/fnk [id child-ids source-resource position ^Quat4d rotation-q4 scale]
-                                           (gen-ref-ddf id child-ids position rotation-q4 scale source-resource))))
+  (output ddf-message g/Any :cached (g/fnk [id child-ids source-resource position ^Quat4d rotation-q4 scale ddf-component-properties]
+                                           (gen-ref-ddf id child-ids position rotation-q4 scale source-resource ddf-component-properties))))
 
 (g/defnk produce-proto-msg [name ref-inst-ddf embed-inst-ddf ref-coll-ddf]
   {:name name
@@ -264,9 +276,18 @@
    :embedded-instances embed-inst-ddf
    :collection-instances ref-coll-ddf})
 
+(defn- clean-comp-props [props]
+  (mapv #(dissoc % :property-decls) props))
+
+(defn- clean-inst-ddfs [instances]
+  (mapv #(update % :component-properties clean-comp-props) instances))
+
 (g/defnk produce-save-data [resource proto-msg]
-  {:resource resource
-   :content (protobuf/map->str GameObject$CollectionDesc proto-msg)})
+  (let [msg (-> proto-msg
+              (update :instances clean-inst-ddfs)
+              (update :embedded-instances clean-inst-ddfs))]
+    {:resource resource
+     :content (protobuf/map->str GameObject$CollectionDesc msg)}))
 
 (defn- externalize [inst-data resources]
   (map (fn [data]
@@ -458,7 +479,7 @@
                       (concat
                         (g/operation-label "Add Game Object")
                         (g/operation-sequence op-seq)
-                        (make-ref-go coll-node project resource id [0 0 0] [0 0 0] [1 1 1] true []))))]
+                        (make-ref-go coll-node project resource id [0 0 0] [0 0 0] [1 1 1] true {}))))]
     ; Selection
     (g/transact
       (concat
@@ -492,7 +513,8 @@
                                                           [:node-outline :source-outline]
                                                           [:save-data :save-data]
                                                           [:build-targets :build-targets]
-                                                          [:scene :scene]]
+                                                          [:scene :scene]
+                                                          [:ddf-component-properties :ddf-component-properties]]
                                                  self [[:_node-id :nodes]]}
                                                 (fn [n] (g/connect go-node :url n :base-url)))]
         (concat
@@ -586,10 +608,9 @@
                                (for [game-object (:instances collection)
                                      :let [; TODO - fix non-uniform hax
                                            scale (:scale game-object)
-                                           source-resource (workspace/resolve-resource resource (:prototype game-object))
-                                           properties (into {} (map (fn [m] [(:id m) (into {} (map (fn [p] [(properties/user-name->key (:id p)) (properties/str->go-prop (:value p) (:type p))]) (:properties m)))]) (:component-properties game-object)))]]
+                                           source-resource (workspace/resolve-resource resource (:prototype game-object))]]
                                  (make-ref-go self project source-resource (:id game-object) (:position game-object)
-                                   (v4->euler (:rotation game-object)) [scale scale scale] false properties))
+                                   (v4->euler (:rotation game-object)) [scale scale scale] false (:component-properties game-object)))
                                (for [embedded (:embedded-instances collection)
                                      :let [; TODO - fix non-uniform hax
                                            scale (:scale embedded)]]

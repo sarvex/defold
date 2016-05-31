@@ -137,7 +137,7 @@
                        :hash-values :string-values])]
     (if-let [prop (first properties)]
       (let [type (:type prop)
-            value (:value prop)
+            value (str->go-prop (:value prop) type)
             value (case type
                     (:property-type-number :property-type-url) [value]
                     :property-type-hash [(protobuf/hash64 value)]

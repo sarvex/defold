@@ -94,7 +94,10 @@
 
 (defn- build-script [self basis resource dep-resources user-data]
   (let [user-properties (:user-properties user-data)
-        properties (mapv (fn [[k v]] {:id (name k) :value (:value v) :type (:go-prop-type v)})
+        properties (mapv (fn [[k v]] (let [type (:go-prop-type v)]
+                                       {:id (properties/key->user-name k)
+                                        :value (properties/go-prop->str (:value v) type)
+                                        :type type}))
                          (:properties user-properties))
         modules (:modules user-data)]
     {:resource resource :content (protobuf/map->bytes Lua$LuaModule

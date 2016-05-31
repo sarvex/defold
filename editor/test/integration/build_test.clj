@@ -288,9 +288,10 @@
         #_(is (contains? content-by-target (.getTextureSet desc)))))))
 
 (deftest build-script-properties
-  (with-build-results "/script/props.go"
+  (with-build-results "/script/props.collection"
     (doseq [[res-path pb decl-path] [["/script/props.script" Lua$LuaModule [:properties]]
-                                     ["/script/props.go" GameObject$PrototypeDesc [:components 0 :property-decls]]]]
+                                     ["/script/props.go" GameObject$PrototypeDesc [:components 0 :property-decls]]
+                                     ["/script/props.collection" GameObject$CollectionDesc [:instances 0 :component-properties 0 :property-decls]]]]
       (let [content (get content-by-source res-path)
             desc (protobuf/bytes->map pb content)
             decl (get-in desc decl-path)]

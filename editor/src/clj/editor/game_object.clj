@@ -38,20 +38,13 @@
 (defn- gen-ref-ddf
   ([id position ^Quat4d rotation-q4 path]
     (gen-ref-ddf id position rotation-q4 path {}))
-  ([id position ^Quat4d rotation-q4 path source-properties]
-    (let [prop-order (into {} (map-indexed (fn [i k] [k i]) (:display-order source-properties)))]
-      {:id id
-       :position position
-       :rotation (math/vecmath->clj rotation-q4)
-       :component (resource/resource->proj-path path)
-       :properties (->> source-properties
-                     :properties
-                     (filter (fn [[key p]] (contains? p :original-value)))
-                     (sort-by (comp prop-order first))
-                     (mapv (fn [[key p]]
-                             {:id (properties/key->user-name key)
-                              :type (:go-prop-type p)
-                              :value (properties/go-prop->str (:value p) (:go-prop-type p))})))})))
+  ([id position ^Quat4d rotation-q4 path ddf-properties ddf-property-decls]
+    {:id id
+     :position position
+     :rotation (math/vecmath->clj rotation-q4)
+     :component (resource/resource->proj-path path)
+     :properties ddf-properties
+     :property-decls ddf-property-decls}))
 
 (defn- gen-embed-ddf [id position ^Quat4d rotation-q4 save-data]
   {:id id
@@ -106,11 +99,6 @@
   (input source-outline outline/OutlineData :substitute source-outline-subst)
 
   (output component-id [(g/one g/Str "id") (g/one g/NodeID "node-id")] (g/fnk [_node-id id] [id _node-id]))
-  (output source-properties g/Properties (g/fnk [_node-id source-properties]
-                                                (if (g/override-original _node-id)
-                                                  (reduce-kv (fn [p k v] (assoc-in p [:properties k :node-id] _node-id))
-	                                                            source-properties (:properties source-properties))
-                                                  source-properties)))
   (output node-outline outline/OutlineData :cached
     (g/fnk [_node-id node-outline-label id source-outline source-properties]
       (let [source-outline (or source-outline {:icon unknown-icon})
@@ -118,15 +106,8 @@
         (assoc source-outline :node-id _node-id :label node-outline-label
                :outline-overridden? overridden?))))
   (output node-outline-label g/Str (g/fnk [id] id))
-  (output ddf-message g/Any :abstract)
-  (output rt-ddf-message g/Any :cached
-          (g/fnk [ddf-message source-properties]
-                 (assoc ddf-message
-                        :property-decls (->> source-properties
-                                          :properties
-                                          (filter (fn [[k v]] (contains? v :original-value)))
-                                          (map (fn [[k v]] {:id (properties/key->user-name k) :type (:go-prop-type v) :value (:value v)}))
-                                          properties/properties->decls))))
+  (output ddf-message g/Any :cached (g/fnk [rt-ddf-message] (dissoc rt-ddf-message :property-decls)))
+  (output rt-ddf-message g/Any :abstract)
   (output scene g/Any :cached (g/fnk [_node-id transform scene]
                                      (-> scene
                                        (assoc :node-id _node-id
@@ -145,8 +126,8 @@
   (inherits ComponentNode)
 
   (input save-data g/Any :cascade-delete)
-  (output ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 save-data]
-                                           (gen-embed-ddf id position rotation-q4 save-data)))
+  (output rt-ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 save-data]
+                                              (gen-embed-ddf id position rotation-q4 save-data)))
   (output _properties g/Properties :cached (g/fnk [_declared-properties source-properties]
                                                   (merge-with into _declared-properties source-properties))))
 
@@ -159,9 +140,10 @@
                                        :ext (some-> source-resource resource/resource-type :ext)
                                        :to-type (fn [v] (:resource v))
                                        :from-type (fn [r] {:resource r :overrides {}})}))
-            (value (g/fnk [source-resource property-overrides]
+            (value (g/fnk [source-resource ddf-properties]
                           {:resource source-resource
-                           :overrides property-overrides}))
+                           :overrides (into {} (map (fn [p] [(properties/user-name->key (:id p)) (properties/str->go-prop (:value p) (:type p))])
+                                                    ddf-properties))}))
             (set (fn [basis self old-value new-value]
                    (concat
                      (if-let [old-source (g/node-value self :source-id :basis basis)]
@@ -201,20 +183,24 @@
                           (g/error-warning "Missing component")))))
 
   (input source-id g/NodeID :cascade-delete)
-  (output property-overrides g/Any :cached
+  (output ddf-properties g/Any :cached
           (g/fnk [source-properties]
-                 (into {}
-                       (map (fn [[key p]] [key (:value p)])
-                            (filter (fn [[_ p]] (contains? p :original-value))
-                                    (:properties source-properties))))))
-  (output component-overrides g/Any :cached
-          (g/fnk [id property-overrides] {id property-overrides}))
+                 (let [prop-order (into {} (map-indexed (fn [i k] [k i]) (:display-order source-properties)))]
+                   (->> source-properties
+                     :properties
+                     (filter (fn [[key p]] (contains? p :original-value)))
+                     (sort-by (comp prop-order first))
+                     (mapv (fn [[key p]]
+                             {:id (properties/key->user-name key)
+                              :type (:go-prop-type p)
+                              :value (properties/go-prop->str (:value p) (:go-prop-type p))}))))))
+  (output ddf-property-decls g/Any :cached (g/fnk [ddf-properties] (properties/properties->decls ddf-properties)))
   (output node-outline-label g/Str :cached (g/fnk [id source-resource]
                                                   (format "%s - %s" id (resource/resource->proj-path source-resource))))
-  (output ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 source-resource source-properties]
-                                           (gen-ref-ddf id position rotation-q4 source-resource source-properties)))
+  (output rt-ddf-message g/Any :cached (g/fnk [id position ^Quat4d rotation-q4 source-resource ddf-properties ddf-property-decls]
+                                              (gen-ref-ddf id position rotation-q4 source-resource ddf-properties ddf-property-decls)))
   ;; TODO - cache it, not possible now because of dynamic prop invalidation bug
-  (output _properties g/Properties #_:cached (g/fnk [_node-id _declared-properties source-properties]
+  (output _properties g/Properties #_:cached (g/fnk [_declared-properties source-properties]
                                                     (merge-with into _declared-properties source-properties))))
 
 (g/defnk produce-proto-msg [ref-ddf embed-ddf]
@@ -265,8 +251,7 @@
 
 (defn- attach-ref-component [self-id comp-id]
   (concat
-    (attach-component self-id comp-id :ref-ddf)
-    (g/connect comp-id :component-overrides self-id :component-overrides)))
+    (attach-component self-id comp-id :ref-ddf)))
 
 (defn- attach-embedded-component [self-id comp-id]
   (attach-component self-id comp-id :embed-ddf))
@@ -289,7 +274,6 @@
   (input child-scenes g/Any :array)
   (input component-ids [(g/one g/Str "id") (g/one g/NodeID "node-id")] :array)
   (input dep-build-targets g/Any :array)
-  (input component-overrides g/Any :array)
   (input base-url g/Str)
 
   (output base-url g/Str (g/fnk [base-url] base-url))
@@ -299,7 +283,12 @@
   (output build-targets g/Any :cached produce-build-targets)
   (output scene g/Any :cached produce-scene)
   (output component-ids {g/Str g/NodeID} :cached (g/fnk [component-ids] (reduce conj {} component-ids)))
-  (output component-overrides g/Any :cached (g/fnk [component-overrides] (reduce merge {} component-overrides))))
+  (output ddf-component-properties g/Any :cached
+          (g/fnk [ref-ddf]
+                 (map (fn [m] (-> m
+                                (select-keys [:id :properties])
+                                (assoc :property-decls (properties/properties->decls (:properties m)))))
+                      ref-ddf))))
 
 (defn- gen-component-id [go-node base]
   (let [ids (map first (g/node-value go-node :component-ids))]

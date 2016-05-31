@@ -9,10 +9,11 @@
             [editor.resource :as resource]
             [integration.test-util :as test-util])
   (:import [java.io StringReader]
-           [com.dynamo.gameobject.proto GameObject$PrototypeDesc]
+           [com.dynamo.gameobject.proto GameObject$PrototypeDesc GameObject$CollectionDesc]
            [com.dynamo.gui.proto Gui$SceneDesc]))
 
 (def ^:private ext->proto {"go" GameObject$PrototypeDesc
+                           "collection" GameObject$CollectionDesc
                            "gui" Gui$SceneDesc})
 
 (deftest save-all
@@ -22,6 +23,7 @@
                           "**/env.cubemap"
                           "**/switcher.atlas"
                           "**/atlas_sprite.collection"
+                          "**/props.collection"
                           "**/atlas_sprite.go"
                           "**/atlas.sprite"
                           "**/props.go"
