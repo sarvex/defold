@@ -415,21 +415,23 @@
                                                                    (conj props m)))
                                                                [] ddf-properties))))
 
-(defn- flatten-instance-data [data base-id ^Matrix4d base-transform all-child-ids]
+(defn- flatten-instance-data [data base-id ^Matrix4d base-transform all-child-ids ddf-properties]
   (let [{:keys [resource instance-msg ^Matrix4d transform]} data
         is-child? (contains? all-child-ids (:id instance-msg))
         instance-msg {:id (str base-id (:id instance-msg))
-                      :children (map #(str base-id %) (:children instance-msg))}
+                      :children (map #(str base-id %) (:children instance-msg))
+                      :component-properties (ddf-properties (:id instance-msg))}
         transform (if is-child?
                     transform
                     (doto (Matrix4d. transform) (.mul base-transform transform)))]
     {:resource resource :instance-msg instance-msg :transform transform}))
 
-(g/defnk produce-coll-inst-build-targets [id transform build-targets]
-  (let [base-id (str id path-sep)
+(g/defnk produce-coll-inst-build-targets [id transform build-targets ddf-properties]
+  (let [ddf-properties (into {} (map (fn [m] [(:id m) (:properties m)]) ddf-properties))
+        base-id (str id path-sep)
         instance-data (get-in build-targets [0 :user-data :instance-data])
         child-ids (reduce (fn [child-ids data] (into child-ids (:children (:instance-msg data)))) #{} instance-data)]
-    (assoc-in build-targets [0 :user-data :instance-data] (map #(flatten-instance-data % base-id transform child-ids) instance-data))))
+    (assoc-in build-targets [0 :user-data :instance-data] (map #(flatten-instance-data % base-id transform child-ids ddf-properties) instance-data))))
 
 (g/defnk produce-coll-inst-outline [_node-id id source-resource source-outline source-id]
   (-> source-outline
