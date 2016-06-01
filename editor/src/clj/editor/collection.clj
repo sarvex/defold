@@ -104,7 +104,8 @@
                      [:ddf-message ddf-label]
                      [:build-targets :dep-build-targets]
                      [:id :ids]
-                     [:go-inst-ids :go-inst-ids]]]
+                     [:go-inst-ids :go-inst-ids]
+                     [:ddf-properties :ddf-properties]]]
       (g/connect child-id from coll-id to))
     (for [[from to] [[:base-url :base-url]]]
       (g/connect coll-id from child-id to))))
@@ -193,7 +194,8 @@
                                                           :renderable {:passes [pass/selection]})
                                                    {:children child-scenes}))))
   (output go-inst-ids g/Any :cached (g/fnk [_node-id id]
-                                           {id _node-id})))
+                                           {id _node-id}))
+  (output ddf-properties g/Any :cached (g/fnk [id ddf-component-properties] {:id id :properties ddf-component-properties})))
 
 (g/defnode EmbeddedGOInstanceNode
   (inherits GameObjectInstanceNode)
@@ -303,10 +305,17 @@
 (defn- clean-inst-ddfs [instances]
   (mapv #(update % :component-properties clean-comp-props) instances))
 
+(defn- clean-prop-ddfs [instances]
+  (mapv #(update % :properties clean-comp-props) instances))
+
+(defn- clean-coll-inst-ddfs [instances]
+  (mapv #(update % :instance-properties clean-prop-ddfs) instances))
+
 (g/defnk produce-save-data [resource proto-msg]
   (let [msg (-> proto-msg
               (update :instances clean-inst-ddfs)
-              (update :embedded-instances clean-inst-ddfs))]
+              (update :embedded-instances clean-inst-ddfs)
+              (update :collection-instances clean-coll-inst-ddfs))]
     {:resource resource
      :content (protobuf/map->str GameObject$CollectionDesc msg)}))
 
@@ -388,6 +397,7 @@
   (input dep-build-targets g/Any :array)
   (input base-url g/Str)
   (input go-inst-ids g/Any :array)
+  (input ddf-properties g/Any :array)
 
   (output base-url g/Str (g/fnk [base-url] base-url))
   (output proto-msg g/Any :cached produce-proto-msg)
@@ -398,7 +408,12 @@
                                      {:node-id _node-id
                                       :children child-scenes
                                       :aabb (reduce geom/aabb-union (geom/null-aabb) (filter #(not (nil? %)) (map :aabb child-scenes)))}))
-  (output go-inst-ids g/Any :cached (g/fnk [go-inst-ids] (reduce merge {} go-inst-ids))))
+  (output go-inst-ids g/Any :cached (g/fnk [go-inst-ids] (reduce merge {} go-inst-ids)))
+  (output ddf-properties g/Any (g/fnk [ddf-properties] (reduce (fn [props m]
+                                                                 (if (empty? (:properties m))
+                                                                   props
+                                                                   (conj props m)))
+                                                               [] ddf-properties))))
 
 (defn- flatten-instance-data [data base-id ^Matrix4d base-transform all-child-ids]
   (let [{:keys [resource instance-msg ^Matrix4d transform]} data
@@ -478,10 +493,11 @@
                                                     (concat
                                                       (:tx-data override)
                                                       (let [outputs (g/output-labels (:node-type (resource/resource-type new-resource)))]
-                                                        (for [[from to] [[:_node-id      :source-id]
-                                                                         [:resource      :source-resource]
-                                                                         [:node-outline  :source-outline]
-                                                                         [:scene         :scene]]
+                                                        (for [[from to] [[:_node-id       :source-id]
+                                                                         [:resource       :source-resource]
+                                                                         [:node-outline   :source-outline]
+                                                                         [:scene          :scene]
+                                                                         [:ddf-properties :ddf-properties]]
                                                               :when (contains? outputs from)]
                                                           (g/connect or-node from self to)))
                                                       (for [[from to] [[:build-targets :build-targets]]]
@@ -495,7 +511,7 @@
   (display-order [:id :url :path scene/ScalableSceneNode])
 
   (input source-resource (g/protocol resource/Resource))
-  (input ddf-properties g/Any)
+  (input ddf-properties g/Any :substitute [])
   (input scene g/Any)
   (input build-targets g/Any)
   (input go-inst-ids g/Any)
@@ -504,12 +520,13 @@
   (output source-outline outline/OutlineData (g/fnk [source-outline] source-outline))
 
   (output node-outline outline/OutlineData :cached produce-coll-inst-outline)
-  (output ddf-message g/Any :cached (g/fnk [id source-resource position ^Quat4d rotation-q4 scale]
+  (output ddf-message g/Any :cached (g/fnk [id source-resource position ^Quat4d rotation-q4 scale ddf-properties]
                                            {:id id
                                             :collection (resource/resource->proj-path source-resource)
                                             :position position
                                             :rotation (math/vecmath->clj rotation-q4)
-                                            :scale3 scale}))
+                                            :scale3 scale
+                                            :instance-properties ddf-properties}))
   (output scene g/Any :cached (g/fnk [_node-id transform scene]
                                      (assoc (assoc-deep scene :node-id _node-id)
                                            :transform transform

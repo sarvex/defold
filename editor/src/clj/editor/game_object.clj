@@ -285,10 +285,13 @@
   (output component-ids {g/Str g/NodeID} :cached (g/fnk [component-ids] (reduce conj {} component-ids)))
   (output ddf-component-properties g/Any :cached
           (g/fnk [ref-ddf]
-                 (map (fn [m] (-> m
-                                (select-keys [:id :properties])
-                                (assoc :property-decls (properties/properties->decls (:properties m)))))
-                      ref-ddf))))
+                 (reduce (fn [props m]
+                           (if (empty? (:properties m))
+                             props
+                             (conj props (-> m
+                                           (select-keys [:id :properties])
+                                           (assoc :property-decls (properties/properties->decls (:properties m)))))))
+                         [] ref-ddf))))
 
 (defn- gen-component-id [go-node base]
   (let [ids (map first (g/node-value go-node :component-ids))]

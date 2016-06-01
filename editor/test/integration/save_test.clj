@@ -24,6 +24,7 @@
                           "**/switcher.atlas"
                           "**/atlas_sprite.collection"
                           "**/props.collection"
+                          "**/sub_props.collection"
                           "**/atlas_sprite.go"
                           "**/atlas.sprite"
                           "**/props.go"
