@@ -17,34 +17,35 @@
                            "gui" Gui$SceneDesc})
 
 (deftest save-all
-  (testing "Saving all resource nodes in the project"
-           (let [queries ["**/level1.platformer"
-                          "**/level01.switcher"
-                          "**/env.cubemap"
-                          "**/switcher.atlas"
-                          "**/atlas_sprite.collection"
-                          "**/props.collection"
-                          "**/sub_props.collection"
-                          "**/atlas_sprite.go"
-                          "**/atlas.sprite"
-                          "**/props.go"
-                          "game.project"
-                          "**/super_scene.gui"
-                          "**/scene.gui"]]
-             (with-clean-system
-               (let [workspace (test-util/setup-workspace! world)
-                     project   (test-util/setup-project! workspace)
-                     save-data (group-by :resource (project/save-data project))]
-                 (doseq [query queries]
+  (let [queries ["**/level1.platformer"
+                 "**/level01.switcher"
+                 "**/env.cubemap"
+                 "**/switcher.atlas"
+                 "**/atlas_sprite.collection"
+                 "**/props.collection"
+                 "**/sub_props.collection"
+                 "**/sub_sub_props.collection"
+                 "**/atlas_sprite.go"
+                 "**/atlas.sprite"
+                 "**/props.go"
+                 "game.project"
+                 "**/super_scene.gui"
+                 "**/scene.gui"]]
+    (with-clean-system
+      (let [workspace (test-util/setup-workspace! world)
+            project   (test-util/setup-project! workspace)
+            save-data (group-by :resource (project/save-data project))]
+        (doseq [query queries]
+          (testing (format "Saving %s" query)
                    (let [[resource _] (first (project/find-resources project query))
-                         save (first (get save-data resource))
-                         file (slurp resource)
-                         pb-class (-> resource resource/resource-type :ext ext->proto)]
-                     (if pb-class
-                       (let [pb-save (protobuf/read-text pb-class (StringReader. (:content save)))
-                             pb-disk (protobuf/read-text pb-class resource)
-                             path []
-                             [disk save both] (data/diff (get-in pb-disk path) (get-in pb-save path))]
-                         (is (nil? disk))
-                         (is (nil? save)))
-                       (is (= file (:content save)))))))))))
+                        save (first (get save-data resource))
+                        file (slurp resource)
+                        pb-class (-> resource resource/resource-type :ext ext->proto)]
+                    (if pb-class
+                      (let [pb-save (protobuf/read-text pb-class (StringReader. (:content save)))
+                            pb-disk (protobuf/read-text pb-class resource)
+                            path []
+                            [disk save both] (data/diff (get-in pb-disk path) (get-in pb-save path))]
+                        (is (nil? disk))
+                        (is (nil? save)))
+                      (is (= file (:content save)))))))))))

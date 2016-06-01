@@ -122,7 +122,8 @@
                      [:ddf-message :ref-coll-ddf]
                      [:id :ids]
                      [:build-targets :sub-build-targets]
-                     [:go-inst-ids :go-inst-ids]]]
+                     [:go-inst-ids :go-inst-ids]
+                     [:sub-ddf-properties :ddf-properties]]]
       (g/connect child-id from coll-id to))
     (for [[from to] [[:base-url :base-url]]]
       (g/connect coll-id from child-id to))))
@@ -413,7 +414,7 @@
                                                                  (if (empty? (:properties m))
                                                                    props
                                                                    (conj props m)))
-                                                               [] ddf-properties))))
+                                                               [] (flatten ddf-properties)))))
 
 (defn- flatten-instance-data [data base-id ^Matrix4d base-transform all-child-ids ddf-properties]
   (let [{:keys [resource instance-msg ^Matrix4d transform]} data
@@ -499,7 +500,8 @@
                                                                          [:resource       :source-resource]
                                                                          [:node-outline   :source-outline]
                                                                          [:scene          :scene]
-                                                                         [:ddf-properties :ddf-properties]]
+                                                                         [:ddf-properties :ddf-properties]
+                                                                         [:go-inst-ids    :go-inst-ids]]
                                                               :when (contains? outputs from)]
                                                           (g/connect or-node from self to)))
                                                       (for [[from to] [[:build-targets :build-targets]]]
@@ -535,7 +537,9 @@
                                            :aabb (geom/aabb-transform (or (:aabb scene) (geom/null-aabb)) transform)
                                            :renderable {:passes [pass/selection]})))
   (output build-targets g/Any :cached produce-coll-inst-build-targets)
-  (output go-inst-ids g/Any (g/fnk [go-inst-ids] go-inst-ids)))
+  (output sub-ddf-properties g/Any :cached (g/fnk [id ddf-properties]
+                                                  (map (fn [m] (update m :id (fn [s] (format "%s/%s" id s)))) ddf-properties)))
+  (output go-inst-ids g/Any :cached (g/fnk [id go-inst-ids] (into {} (map (fn [[k v]] [(format "%s/%s" id k) v]) go-inst-ids)))))
 
 (defn- gen-instance-id [coll-node base]
   (let [ids (g/node-value coll-node :ids)]

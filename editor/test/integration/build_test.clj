@@ -322,7 +322,24 @@
         (is (not-empty (:hash-values decl)))
         (is (not-empty (:string-values decl)))))
     ;; Sub-collections should not be built separately
-    (is (not (contains? content-by-source "/script/props.collection")))))
+    (is (not (contains? content-by-source "/script/props.collection"))))
+  (with-build-results "/script/sub_sub_props.collection"
+    (doseq [[res-path pb decl-path] [["/script/sub_sub_props.collection" GameObject$CollectionDesc [:instances 0 :component-properties 0 :property-decls]]]]
+      (let [content (get content-by-source res-path)
+            desc (protobuf/bytes->map pb content)
+            decl (get-in desc decl-path)]
+        (is (not-empty (:number-entries decl)))
+        (is (not-empty (:hash-entries decl)))
+        (is (not-empty (:url-entries decl)))
+        (is (not-empty (:vector3-entries decl)))
+        (is (not-empty (:vector4-entries decl)))
+        (is (not-empty (:quat-entries decl)))
+        (is (not-empty (:bool-entries decl)))
+        (is (not-empty (:float-values decl)))
+        (is (not-empty (:hash-values decl)))
+        (is (not-empty (:string-values decl)))))
+    ;; Sub-collections should not be built separately
+    (is (not (contains? content-by-source "/script/sub_props.collection")))))
 
 (deftest build-gui-templates
   (with-clean-system

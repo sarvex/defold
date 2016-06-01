@@ -78,23 +78,14 @@
 (deftest script-properties-collection
   (with-clean-system
     (let [workspace (tu/setup-workspace! world)
-          project (tu/setup-project! workspace)
-          coll-id (tu/resource-node project "/collection/props.collection")]
-      (dotimes [i 2]
-        (let [outline (tu/outline coll-id [i 0])
-              script-c (:node-id outline)]
-          (is (:outline-overridden? outline))
-          (is (= 3.0 (prop script-c "number")))
-          (is (overridden? script-c "number")))))))
-
-(deftest script-properties-sub-collection
-  (with-clean-system
-    (let [workspace (tu/setup-workspace! world)
-          project (tu/setup-project! workspace)
-          coll-id (tu/resource-node project "/collection/sub_props.collection")]
-      (let [i 0]
-        (let [outline (tu/outline coll-id [0 0 0])
-              script-c (:node-id outline)]
-          (is (:outline-overridden? outline))
-          (is (= 4.0 (prop script-c "number")))
-          (is (overridden? script-c "number")))))))
+          project (tu/setup-project! workspace)]
+      (doseq [[resource paths val] [["/collection/props.collection" [[0 0] [1 0]] 3.0]
+                                    ["/collection/sub_props.collection" [[0 0 0]] 4.0]
+                                    ["/collection/sub_sub_props.collection" [[0 0 0 0]] 5.0]]
+              path paths]
+        (let [coll-id (tu/resource-node project resource)]
+          (let [outline (tu/outline coll-id path)
+                script-c (:node-id outline)]
+            (is (:outline-overridden? outline))
+            (is (= val (prop script-c "number")))
+            (is (overridden? script-c "number"))))))))
