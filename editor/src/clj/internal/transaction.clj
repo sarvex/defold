@@ -450,17 +450,7 @@
   (let [basis (:basis ctx)
         target-id (gt/node-id target)]
     (if ((gt/cascade-deletes (gt/node-type target basis)) target-label)
-      (loop [overrides (ig/overrides basis target-id)
-             ctx ctx]
-        (if-let [or (first overrides)]
-          (let [basis (:basis ctx)
-                or-node (ig/node-by-id-at basis or)
-                override-id (gt/override-id or-node)
-                traverse-fn (ig/override-traverse-fn basis override-id)]
-            (if (traverse-fn basis target-id)
-              (populate-overrides ctx target-id)
-              ctx))
-          ctx))
+      (populate-overrides ctx target-id)
       ctx)))
 
 (defn- ctx-connect [ctx source-id source-label target-id target-label]

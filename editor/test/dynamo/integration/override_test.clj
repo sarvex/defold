@@ -800,3 +800,30 @@
       (is (every? some? (map g/node-by-id [script])))
       (g/transact (g/delete-node script))
       (is (every? nil? (map g/node-by-id [coll inst or-go go comp or-script script]))))))
+
+(deftest auto-add-and-delete
+  (with-clean-system
+    (let [[script] (tx-nodes (g/make-nodes world [script Script]))
+          [go] (tx-nodes (g/make-nodes world [go GameObject]))
+          [[coll0 go-inst0 or-go0]
+           [coll1 go-inst1 or-go1]] (for [i (range 2)]
+                                      (tx-nodes (g/make-nodes world [coll Collection
+                                                                     go-inst GameObjectInstance]
+                                                              (g/connect go-inst :_node-id coll :instances)
+                                                              (let [o (g/override go {:traverse? (constantly true)})
+                                                                    or-go ((:id-mapping o) go)]
+                                                                (concat
+                                                                  (:tx-data o)
+                                                                  (g/connect or-go :_node-id go-inst :source))))))
+          [comp or-script] (tx-nodes (g/make-nodes world [comp Component]
+                                                   (let [o (g/override script {:traverse? (constantly true)})
+                                                         or-script ((:id-mapping o) script)]
+                                                     (concat
+                                                       (:tx-data o)
+                                                       (g/connect or-script :_node-id comp :instance)
+                                                       (g/connect comp :_node-id go :components)))))]
+      (let [all-script-nodes (doall (tree-seq (constantly true) g/overrides script))]
+        (is (= 4 (count all-script-nodes)))
+        (g/transact (g/delete-node comp))
+        (is (= 1 (count (keep g/node-by-id all-script-nodes))))
+        (is (empty? (mapcat g/overrides all-script-nodes)))))))

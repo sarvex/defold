@@ -223,12 +223,25 @@
   (output ddf-message g/Any :cached (g/fnk [id child-ids position ^Quat4d rotation-q4 scale proto-msg ddf-component-properties]
                                            (gen-embed-ddf id child-ids position rotation-q4 scale proto-msg ddf-component-properties))))
 
+(defn- component-resource [comp-id basis]
+  (cond
+    (g/node-instance? basis game-object/ReferencedComponent comp-id)
+    (some-> (g/node-value comp-id :path :basis basis)
+      :resource)
+
+    (g/node-instance? basis game-object/ComponentNode comp-id)
+    (g/node-value comp-id :source-resource :basis basis)))
+
+(defn- overridable-component? [basis node-id]
+  (some-> node-id
+    (component-resource basis)
+    resource/resource-type
+    :tags
+    (contains? :overridable-properties)))
+
 (defn- or-go-traverse? [basis [src-id src-label tgt-id tgt-label]]
-  (if (g/node-instance? basis game-object/ComponentNode src-id)
-    (some-> (g/node-value src-id :source-resource :basis basis)
-      resource/resource-type
-      :tags
-      (contains? :overridable-properties))
+  (or
+    (overridable-component? basis src-id)
     (g/node-instance? basis project/ResourceNode src-id)))
 
 (g/defnode ReferencedGOInstanceNode
@@ -447,18 +460,10 @@
                             (filter (fn [req] (not= CollectionInstanceNode (:node-type req))) reqs))))))
 
 (defn- or-coll-traverse? [basis [src-id src-label tgt-id tgt-label]]
-  (cond
-    (g/node-instance? basis game-object/ComponentNode src-id)
-    (some-> (g/node-value src-id :source-resource :basis basis)
-      resource/resource-type
-      :tags
-      (contains? :overridable-properties))
-
+  (or
+    (overridable-component? basis src-id)
     (g/node-instance? basis project/ResourceNode src-id)
-    true
-
-    (g/node-instance? basis InstanceNode src-id)
-    true))
+    (g/node-instance? basis InstanceNode src-id)))
 
 (g/defnode CollectionInstanceNode
   (inherits scene/ScalableSceneNode)

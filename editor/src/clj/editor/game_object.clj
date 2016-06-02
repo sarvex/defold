@@ -156,7 +156,7 @@
                          (let [project (project/get-project self)]
                            (project/connect-resource-node project new-resource self []
                                                           (fn [comp-node]
-                                                            (let [override (g/override basis comp-node {:traverse? (constantly false)})
+                                                            (let [override (g/override basis comp-node {:traverse? (constantly true)})
                                                                   id-mapping (:id-mapping override)
                                                                   or-node (get id-mapping comp-node)]
                                                               (concat
