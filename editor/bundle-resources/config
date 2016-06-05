@@ -15,3 +15,5 @@ debug = 1
 vmargs = -Ddefold.resourcespath=${bootstrap.resourcespath},-Ddefold.version=${build.version},-Ddefold.sha1=${build.sha1},-Djava.ext.dirs=${launcher.jre}/lib/ext
 [platform]
 osx = -Xdock:icon=${bootstrap.resourcespath}/logo.icns
+windows =
+linux =

@@ -21,7 +21,8 @@
 #include <dlib/safe_windows.h>
 #endif
 
-const char* RESOURCES_PATH_KEY = "bootstrap.resourcespath";
+#define RESOURCES_PATH_KEY ("bootstrap.resourcespath")
+#define MAX_ARGS_SIZE (10 * 1024)
 
 struct ReplaceContext
 {
@@ -32,8 +33,7 @@ struct ReplaceContext
 static const char* ReplaceCallback(void* user_data, const char* key)
 {
     ReplaceContext* context = (ReplaceContext*)user_data;
-    dmConfigFile::HConfig config = (dmConfigFile::HConfig)user_data;
-    const char* value = dmConfigFile::GetString(config, key, 0x0);
+    const char* value = dmConfigFile::GetString(context->m_Config, key, 0x0);
     if (dmStrCaseCmp(key, RESOURCES_PATH_KEY) == 0 && (value == 0x0 || *value == '\0'))
     {
         return context->m_ResourcesPath;
@@ -43,26 +43,37 @@ static const char* ReplaceCallback(void* user_data, const char* key)
 
 static bool ConfigGetString(ReplaceContext* context, const char* key, char* buf, uint32_t buf_len)
 {
-	const char* value = dmConfigFile::GetString(context->m_Config, key, 0x0);
-	if (value != 0x0)
-	{
-		dmTemplate::Result result = dmTemplate::Format(context, buf, buf_len, value, ReplaceCallback);
-		switch (result)
-		{
-		case dmTemplate::RESULT_OK:
+    const char* value = dmConfigFile::GetString(context->m_Config, key, 0x0);
+    if (value != 0x0)
+    {
+        dmTemplate::Result result = dmTemplate::RESULT_OK;
+        char last_buf[buf_len];
+        *last_buf = '\0';
+        dmStrlCpy(buf, value, buf_len);
+        int tries_left = 5;
+        while (result == dmTemplate::RESULT_OK && dmStrCaseCmp(buf, last_buf) != 0 && tries_left > 0)
+        {
+            dmStrlCpy(last_buf, buf, buf_len);
+            result = dmTemplate::Format(context, buf, buf_len, last_buf, ReplaceCallback);
+            --tries_left;
+        }
+        switch (result)
+        {
+        case dmTemplate::RESULT_OK:
             return true;
-		case dmTemplate::RESULT_MISSING_REPLACEMENT:
-			dmLogFatal("One of the replacements in %s could not be resolved: %s", key, value);
-			break;
-		case dmTemplate::RESULT_BUFFER_TOO_SMALL:
-			dmLogFatal("The buffer is too small to account for the replacements.");
-			break;
-		case dmTemplate::RESULT_SYNTAX_ERROR:
-			dmLogFatal("The value at %s has syntax errors: %s", key, value);
-			break;
-		}
-	}
-	return false;
+        case dmTemplate::RESULT_MISSING_REPLACEMENT:
+            dmLogFatal("One of the replacements in %s could not be resolved: %s", key, buf);
+            break;
+        case dmTemplate::RESULT_BUFFER_TOO_SMALL:
+            dmLogFatal("The buffer is too small to account for the replacements in %s.", key);
+            break;
+        case dmTemplate::RESULT_SYNTAX_ERROR:
+            dmLogFatal("The value at %s has syntax errors: %s", key, buf);
+            break;
+        }
+    }
+    dmStrlCpy(buf, "", buf_len);
+    return false;
 }
 
 /*static void MakePath(dmConfigFile::HConfig config, char* resources_path, const char* key, const char* default_value, char* buf, int buf_len)
@@ -83,11 +94,12 @@ static bool ConfigGetString(ReplaceContext* context, const char* key, char* buf,
 }*/
 
 int Launch(int argc, char **argv) {
-    char resources_path[DMPATH_MAX_PATH];
     char default_resources_path[DMPATH_MAX_PATH];
     char config_path[DMPATH_MAX_PATH];
     char java_path[DMPATH_MAX_PATH];
     char jar_path[DMPATH_MAX_PATH];
+    char os_args[MAX_ARGS_SIZE];
+    char vm_args[MAX_ARGS_SIZE];
 
     dmSys::Result r = dmSys::GetResourcesPath(argc, (char**) argv, default_resources_path, sizeof(default_resources_path));
     if (r != dmSys::RESULT_OK) {
@@ -115,7 +127,7 @@ int Launch(int argc, char **argv) {
     context.m_ResourcesPath = dmConfigFile::GetString(config, RESOURCES_PATH_KEY, default_resources_path);
     if (*context.m_ResourcesPath == '\0')
     {
-    	context.m_ResourcesPath = default_resources_path;
+        context.m_ResourcesPath = default_resources_path;
     }
 
     const char* main = dmConfigFile::GetString(config, "launcher.main", "Main");
@@ -129,25 +141,28 @@ int Launch(int argc, char **argv) {
     args[i++] = java_path;
     args[i++] = "-cp";
     args[i++] = jar_path;
-#ifdef __MACH__
-    char icon_arg[DMPATH_MAX_PATH];
-    dmStrlCpy(icon_arg, "-Xdock:icon=", sizeof(icon_arg));
-    dmStrlCat(icon_arg, resources_path, sizeof(icon_arg));
-    dmStrlCat(icon_arg, "/logo.icns", sizeof(icon_arg));
-    args[i++] = icon_arg;
+
+    const char* os_key = "";
+#if defined(__MACH__)
+    os_key = "platform.osx";
+#elif defined(_WIN32)
+    os_key = "platform.windows";
+#elif defined(__linux__)
+    os_key = "platform.linux";
 #endif
+    ConfigGetString(&context, os_key, os_args, sizeof(os_args));
+    char* s, *last;
+    s = dmStrTok(os_args, ",", &last);
+    while (s) {
+        args[i++] = s;
+        s = dmStrTok(0, ",", &last);
+    }
 
-    const char* tmp = dmConfigFile::GetString(config, "launcher.vmargs", 0);
-    char *vm_args = 0;
-    if (tmp) {
-        vm_args = strdup(tmp);
-
-        char* s, *last;
-        s = dmStrTok(vm_args, ",", &last);
-        while (s) {
-            args[i++] = s;
-            s = dmStrTok(0, ",", &last);
-        }
+    ConfigGetString(&context, "launcher.vmargs", vm_args, sizeof(vm_args));
+    s = dmStrTok(vm_args, ",", &last);
+    while (s) {
+        args[i++] = s;
+        s = dmStrTok(0, ",", &last);
     }
 
     args[i++] = (char*) main;
@@ -207,7 +222,6 @@ int Launch(int argc, char **argv) {
     CloseHandle( pi.hThread  );
 
     delete[] buffer;
-    free(vm_args);
     delete[] args;
     dmConfigFile::Delete(config);
 
@@ -219,15 +233,14 @@ int Launch(int argc, char **argv) {
         int er = execv(args[0], (char *const *) args);
         if (er < 0) {
             char buf[2048];
-             strerror_r(errno, buf, sizeof(buf));
-             dmLogFatal("Failed to launch application: %s", buf);
-             exit(127);
+            strerror_r(errno, buf, sizeof(buf));
+            dmLogFatal("Failed to launch application: %s", buf);
+            exit(127);
         }
     }
     int stat;
     wait(&stat);
 
-    free(vm_args);
     delete[] args;
     dmConfigFile::Delete(config);
 
@@ -243,7 +256,6 @@ int main(int argc, char **argv) {
     int ret = Launch(argc, argv);
     while (ret == 17) {
         ret = Launch(argc, argv);
-
     }
     return ret;
 }

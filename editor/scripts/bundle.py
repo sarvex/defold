@@ -233,7 +233,7 @@ def bundle(platform, options):
     config = ConfigParser.ConfigParser()
     config.read('bundle-resources/config')
     config.set('build', 'sha1', sha1)
-    config.set('build', 'version', version)
+    config.set('build', 'version', options.version)
 
     with open('%s/config' % resources_dir, 'wb') as f:
         config.write(f)
