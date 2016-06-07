@@ -21,24 +21,25 @@
 #include <dlib/safe_windows.h>
 #endif
 
+// bootstrap.resourcespath must default to resourcespath of the installation
 #define RESOURCES_PATH_KEY ("bootstrap.resourcespath")
-#define MAX_ARGS_SIZE (10 * 1024)
+#define MAX_ARGS_SIZE (10 * DMPATH_MAX_PATH)
 
 struct ReplaceContext
 {
     dmConfigFile::HConfig m_Config;
+    // Will be set to either bootstrap.resourcespath (if set) or the default installation resources path
     const char* m_ResourcesPath;
 };
 
 static const char* ReplaceCallback(void* user_data, const char* key)
 {
     ReplaceContext* context = (ReplaceContext*)user_data;
-    const char* value = dmConfigFile::GetString(context->m_Config, key, 0x0);
-    if (dmStrCaseCmp(key, RESOURCES_PATH_KEY) == 0 && (value == 0x0 || *value == '\0'))
+    if (dmStrCaseCmp(key, RESOURCES_PATH_KEY) == 0)
     {
         return context->m_ResourcesPath;
     }
-    return value;
+    return dmConfigFile::GetString(context->m_Config, key, 0x0);
 }
 
 static bool ConfigGetString(ReplaceContext* context, const char* key, char* buf, uint32_t buf_len)
@@ -47,7 +48,7 @@ static bool ConfigGetString(ReplaceContext* context, const char* key, char* buf,
     if (value != 0x0)
     {
         dmTemplate::Result result = dmTemplate::RESULT_OK;
-        char last_buf[buf_len];
+        char last_buf[MAX_ARGS_SIZE];
         *last_buf = '\0';
         dmStrlCpy(buf, value, buf_len);
         int tries_left = 5;
@@ -75,23 +76,6 @@ static bool ConfigGetString(ReplaceContext* context, const char* key, char* buf,
     dmStrlCpy(buf, "", buf_len);
     return false;
 }
-
-/*static void MakePath(dmConfigFile::HConfig config, char* resources_path, const char* key, const char* default_value, char* buf, int buf_len)
-{
-    const char* value = dmConfigFile::GetString(config, key, default_value);
-    if (value[0] == '/' || strchr(value, ':')) {
-        dmStrlCpy(buf, "", buf_len);
-    } else {
-        dmStrlCpy(buf, resources_path, buf_len);
-        dmStrlCat(buf, "/", buf_len);
-    }
-    dmStrlCat(buf, value, buf_len);
-
-
-    for (size_t i = 0; i < strlen(buf); i++) {
-        if (buf[i] == '\\') buf[i] = '/';
-    }
-}*/
 
 int Launch(int argc, char **argv) {
     char default_resources_path[DMPATH_MAX_PATH];
@@ -259,3 +243,6 @@ int main(int argc, char **argv) {
     }
     return ret;
 }
+
+#undef RESOURCES_PATH_KEY
+#undef MAX_ARGS_SIZE

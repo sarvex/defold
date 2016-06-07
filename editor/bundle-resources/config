@@ -1,9 +1,10 @@
 [bootstrap]
-# this field does not support replacements
-# if left unset, it defaults to the installation resources path
+# This field does not support replacements.
+# It will probably only be used for testing purposes.
+# If left unset, it defaults to the installation resources path.
 resourcespath =
 [build]
-# these fields are filled in by bundle.py
+# These fields are filled in by bundle.py
 version = 2.0.0
 sha1 = 2.0.0
 [launcher]

@@ -149,7 +149,7 @@ namespace dmConfigFile
             }
             else
             {
-            	line_start = false;
+                line_start = false;
             }
         } while (comment || isspace(c));
 
