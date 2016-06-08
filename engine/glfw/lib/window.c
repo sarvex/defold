@@ -526,7 +526,7 @@ GLFWAPI int GLFWAPIENTRY glfwOpenWindow( int width, int height,
     _glfwWin.active         = GL_TRUE;
     _glfwWin.iconified      = GL_FALSE;
     _glfwWin.mouseLock      = GL_FALSE;
-    _glfwWin.autoPollEvents = GL_TRUE;
+    _glfwWin.autoPollEvents = GL_FALSE;
     _glfwClearInput();
 
     // Unregister all callback functions

@@ -45,6 +45,23 @@ message HideApp {}
 message ToggleProfile {}
 
 
+/*# set graphic thread mode
+ * Set the graphics thread mode
+ * This message can only be sent to the designated <code>@system</code> socket.
+ *
+ * @message
+ * @name set_graphics_thread
+ * @param type 0 means no threading, 1 means threaded flip
+ * @examples
+ * <pre>
+ * msg.post("@system:", "set_graphics_thread", {type = 1}) -- enable threaded flip
+ * </pre>
+ */
+message SetGraphicsThread
+{
+    required int32 type = 1 [default = 0];
+}
+
 
 /*# starts video recording
  * Starts video recording of the game frame-buffer to file. Current video format is the

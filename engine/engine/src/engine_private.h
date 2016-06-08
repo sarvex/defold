@@ -6,6 +6,10 @@
 #include <dlib/configfile.h>
 #include <dlib/hashtable.h>
 #include <dlib/message.h>
+#include <dlib/thread.h>
+#include <dlib/mutex.h>
+#include <dlib/condition_variable.h>
+#include <dlib/profile.h>
 
 #include <resource/resource.h>
 
@@ -134,6 +138,7 @@ namespace dmEngine
         bool                                        m_UseVariableDt;
         bool                                        m_WasIconified;
         bool                                        m_QuitOnEsc;
+        float                                       m_FrameDeltaTime;
         uint64_t                                    m_PreviousFrameTime;
         uint32_t                                    m_UpdateFrequency;
         uint32_t                                    m_Width;
@@ -142,6 +147,20 @@ namespace dmEngine
         float                                       m_InvPhysicalHeight;
 
         RecordData                                  m_RecordData;
+
+
+        dmThread::Thread        m_SimThread;
+        dmMutex::Mutex          m_SimThreadMutex;
+        dmMutex::Mutex          m_SimThreadCompleteMutex;
+        dmConditionVariable::ConditionVariable m_SimThreadSubmitCond;
+        dmConditionVariable::ConditionVariable m_SimThreadCompleteCond;
+
+        uint32_t                m_SimThreadEnabled : 1;
+        volatile uint32_t       m_SimThreadSubmit : 1;
+        volatile uint32_t       m_SimThreadComplete : 1;
+        volatile uint32_t       m_SimThreadSubmitted : 1;
+        volatile uint32_t       m_SimThreadJoin : 1;
+        volatile uint32_t       m_MuteSim : 1;
     };
 
     void ReloadResources(HEngine engine, const char* extension);

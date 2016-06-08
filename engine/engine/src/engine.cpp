@@ -9,7 +9,6 @@
 #include <dlib/dlib.h>
 #include <dlib/dstrings.h>
 #include <dlib/hash.h>
-#include <dlib/profile.h>
 #include <dlib/time.h>
 #include <dlib/math.h>
 #include <dlib/path.h>
@@ -49,6 +48,9 @@ extern "C" {
 namespace dmEngine
 {
 #define SYSTEM_SOCKET_NAME "@system"
+
+    void SimThread(void* arg);
+
 
     void GetWorldTransform(void* user_data, Point3& position, Quat& rotation)
     {
@@ -161,10 +163,17 @@ namespace dmEngine
     , m_Stats()
     , m_WasIconified(true)
     , m_QuitOnEsc(false)
+    , m_FrameDeltaTime(0.0f)
     , m_Width(960)
     , m_Height(640)
     , m_InvPhysicalWidth(1.0f/960)
     , m_InvPhysicalHeight(1.0f/640)
+    , m_SimThreadEnabled(1)
+    , m_SimThreadSubmit(0)
+    , m_SimThreadComplete(0)
+    , m_SimThreadSubmitted(0)
+    , m_SimThreadJoin(0)
+    , m_MuteSim(0)
     {
         m_EngineService = engine_service;
         m_Register = dmGameObject::NewRegister();
@@ -179,6 +188,12 @@ namespace dmEngine
         m_SpriteContext.m_MaxSpriteCount = 0;
         m_SpineModelContext.m_RenderContext = 0x0;
         m_SpineModelContext.m_MaxSpineModelCount = 0;
+
+        m_SimThreadMutex = dmMutex::New();;
+        m_SimThreadCompleteMutex = dmMutex::New();;
+        m_SimThreadSubmitCond = dmConditionVariable::New();
+        m_SimThreadCompleteCond = dmConditionVariable::New();
+        m_SimThread = dmThread::New(SimThread, 256*1024, this, "SimThread");
     }
 
     HEngine New(dmEngineService::HEngineService engine_service)
@@ -188,6 +203,26 @@ namespace dmEngine
 
     void Delete(HEngine engine)
     {
+        engine->m_SimThreadJoin = 1;
+        dmMutex::Lock(engine->m_SimThreadMutex);
+        engine->m_SimThreadSubmit = 1;
+        dmConditionVariable::Signal(engine->m_SimThreadSubmitCond);
+        dmMutex::Unlock(engine->m_SimThreadMutex);
+        dmThread::Join(engine->m_SimThread);
+        engine->m_SimThread = 0x0;
+        engine->m_SimThreadJoin = 0;
+        dmMutex::Delete(engine->m_SimThreadMutex);
+        dmMutex::Delete(engine->m_SimThreadCompleteMutex);
+        dmConditionVariable::Delete(engine->m_SimThreadSubmitCond);
+        dmConditionVariable::Delete(engine->m_SimThreadCompleteCond);
+        engine->m_SimThreadMutex = 0x0;
+        engine->m_SimThreadCompleteMutex = 0x0;
+        engine->m_SimThreadSubmitCond = 0x0;
+        engine->m_SimThreadCompleteCond = 0x0;
+        engine->m_SimThreadSubmit = 0;
+        engine->m_SimThreadComplete = 0;
+
+
         if (engine->m_MainCollection)
             dmResource::Release(engine->m_Factory, engine->m_MainCollection);
         dmGameObject::PostUpdate(engine->m_Register);
@@ -516,6 +551,7 @@ namespace dmEngine
 
         engine->m_UseVariableDt = dmConfigFile::GetInt(engine->m_Config, "display.variable_dt", 0) != 0;
         engine->m_PreviousFrameTime = dmTime::GetTime();
+        engine->m_FrameDeltaTime = 0.0f;
         SetUpdateFrequency(engine, dmConfigFile::GetInt(engine->m_Config, "display.update_frequency", 60));
 
         const uint32_t max_resources = dmConfigFile::GetInt(engine->m_Config, dmResource::MAX_RESOURCES_KEY, 1024);
@@ -891,11 +927,9 @@ bail:
         return a_is_text - b_is_text;
     }
 
-    void Step(HEngine engine)
-    {
-        engine->m_Alive = true;
-        engine->m_RunResult.m_ExitCode = 0;
 
+    void StepSim(HEngine engine)
+    {
         uint64_t time = dmTime::GetTime();
         float fps = engine->m_UpdateFrequency;
         float fixed_dt = 1.0f / fps;
@@ -911,174 +945,254 @@ bail:
             }
         }
         engine->m_PreviousFrameTime = time;
+        engine->m_FrameDeltaTime = dt;
 
-        if (engine->m_Alive)
+        if (engine->m_TrackingContext)
         {
-            if (engine->m_TrackingContext)
-            {
-                DM_PROFILE(Engine, "Tracking")
-                dmTracking::Update(engine->m_TrackingContext, dt);
+            DM_PROFILE(Engine, "Tracking")
+            dmTracking::Update(engine->m_TrackingContext, dt);
+        }
+
+        if (dmGraphics::GetWindowState(engine->m_GraphicsContext, dmGraphics::WINDOW_STATE_ICONIFIED))
+        {
+            // NOTE: Polling the event queue is crucial on iOS for life-cycle management
+            // NOTE: Also running graphics on iOS while transitioning is not permitted and will crash the application
+            //dmHID::Update(engine->m_HidContext);
+            dmTime::Sleep(1000 * 100);
+            // Update time again after the sleep to avoid big leaps after iconified.
+            // In practice, it makes the delta time 1/freq even though we slept for long
+
+            time = dmTime::GetTime();
+            uint64_t i_dt = fixed_dt * 1000000;
+            if (i_dt > time) {
+                engine->m_PreviousFrameTime = 0;
+            } else {
+                engine->m_PreviousFrameTime = time - i_dt;
             }
 
-            if (dmGraphics::GetWindowState(engine->m_GraphicsContext, dmGraphics::WINDOW_STATE_ICONIFIED))
+            engine->m_WasIconified = true;
+            engine->m_MuteSim = 1;
+            return;
+        }
+        else
+        {
+            if (engine->m_WasIconified)
             {
-                // NOTE: Polling the event queue is crucial on iOS for life-cycle management
-                // NOTE: Also running graphics on iOS while transitioning is not permitted and will crash the application
-                dmHID::Update(engine->m_HidContext);
-                dmTime::Sleep(1000 * 100);
-                // Update time again after the sleep to avoid big leaps after iconified.
-                // In practice, it makes the delta time 1/freq even though we slept for long
+                if (engine->m_TrackingContext)
+                {
+                    dmTracking::PostSimpleEvent(engine->m_TrackingContext, "@Invoke");
+                }
+                engine->m_WasIconified = false;
+            }
+        }
 
-                time = dmTime::GetTime();
-                uint64_t i_dt = fixed_dt * 1000000;
-                if (i_dt > time) {
-                    engine->m_PreviousFrameTime = 0;
-                } else {
-                    engine->m_PreviousFrameTime = time - i_dt;
+        {
+            DM_PROFILE(Engine, "Frame");
+
+            // We had buffering problems with the output when running the engine inside the editor
+            // Flushing stdout/stderr solves this problem.
+            fflush(stdout);
+            fflush(stderr);
+
+            if (engine->m_EngineService)
+            {
+                dmEngineService::Update(engine->m_EngineService);
+            }
+
+            {
+                DM_PROFILE(Engine, "Sim");
+
+                dmResource::UpdateFactory(engine->m_Factory);
+
+                //dmHID::Update(engine->m_HidContext);
+                if (dmGraphics::GetWindowState(engine->m_GraphicsContext, dmGraphics::WINDOW_STATE_ICONIFIED))
+                {
+                    // NOTE: This is a bit ugly but os event are polled in dmHID::Update and an iOS application
+                    // might have entered background at this point and OpenGL calls are not permitted and will
+                    // crash the application
+                    engine->m_MuteSim = 1;
+                    return;
                 }
 
-                engine->m_WasIconified = true;
-                return;
+
+                /* Extension updates */
+                if (engine->m_SharedScriptContext) {
+                    dmScript::UpdateExtensions(engine->m_SharedScriptContext);
+                } else {
+                    if (engine->m_GOScriptContext) {
+                        dmScript::UpdateExtensions(engine->m_GOScriptContext);
+                    }
+                    if (engine->m_RenderScriptContext) {
+                        dmScript::UpdateExtensions(engine->m_RenderScriptContext);
+                    }
+                    if (engine->m_GuiScriptContext) {
+                        dmScript::UpdateExtensions(engine->m_GuiScriptContext);
+                    }
+                }
+
+                dmSound::Update();
+
+                dmHID::KeyboardPacket keybdata;
+                dmHID::GetKeyboardPacket(engine->m_HidContext, &keybdata);
+
+                if (engine->m_QuitOnEsc && (dmHID::GetKey(&keybdata, dmHID::KEY_ESC) || !dmGraphics::GetWindowState(engine->m_GraphicsContext, dmGraphics::WINDOW_STATE_OPENED)))
+                {
+                    engine->m_Alive = false;
+                    engine->m_MuteSim = 1;
+                    return;
+                }
+
+                dmInput::UpdateBinding(engine->m_GameInputBinding, dt);
+
+                engine->m_InputBuffer.SetSize(0);
+                dmInput::ForEachActive(engine->m_GameInputBinding, GOActionCallback, engine);
+
+                // Sort input so that text and marked text is triggered last
+                // NOTE: Due to Korean keyboards on iOS will send a backspace sometimes to "replace" a character with a new one,
+                //       we want to make sure these keypresses arrive to the input listeners before the "new" character.
+                //       If the backspace arrive after the text, it will instead remove the new character that
+                //       actually should replace the old one.
+                qsort(engine->m_InputBuffer.Begin(), engine->m_InputBuffer.Size(), sizeof(dmGameObject::InputAction), InputBufferOrderSort);
+
+                dmArray<dmGameObject::InputAction>& input_buffer = engine->m_InputBuffer;
+                uint32_t input_buffer_size = input_buffer.Size();
+                if (input_buffer_size > 0)
+                {
+                    dmGameObject::DispatchInput(engine->m_MainCollection, &input_buffer[0], input_buffer.Size());
+                }
+            }
+        }
+    }
+
+
+    void SimThread(void* arg)
+    {
+        HEngine engine = (HEngine) arg;
+        while(!engine->m_SimThreadJoin)
+        {
+            dmMutex::Lock(engine->m_SimThreadMutex);
+            while(!engine->m_SimThreadSubmit)
+            {
+                dmConditionVariable::Wait(engine->m_SimThreadSubmitCond, engine->m_SimThreadMutex);
+            }
+
+            DM_PROFILE(SimThread, "SimThread");
+            engine->m_SimThreadSubmit = 0;
+            dmMutex::Unlock(engine->m_SimThreadMutex);
+            if(engine->m_SimThreadJoin)
+                break;
+
+            StepSim(engine);
+
+            dmMutex::Lock(engine->m_SimThreadCompleteMutex);
+            engine->m_SimThreadComplete = 1;
+            dmConditionVariable::Signal(engine->m_SimThreadCompleteCond);
+            dmMutex::Unlock(engine->m_SimThreadCompleteMutex);
+        }
+    }
+
+    // Wait for the simthread kicked by KickSimThread to complete. This is not threadsafe and must be called on the same thread as KickSimThread
+    void WaitSimThread(HEngine engine)
+    {
+        if(!engine->m_SimThreadSubmitted)
+            return;
+        DM_PROFILE(WaitSimThread, "WaitSimThread");
+        engine->m_SimThreadSubmitted = 0;
+        dmMutex::Lock(engine->m_SimThreadCompleteMutex);
+        while(!engine->m_SimThreadComplete)
+            dmConditionVariable::Wait(engine->m_SimThreadCompleteCond, engine->m_SimThreadCompleteMutex);
+        engine->m_SimThreadComplete = 0;
+        dmMutex::Unlock(engine->m_SimThreadCompleteMutex);
+    }
+
+    // Kick the simthread. This is not threadsafe and must be called on the same thread as WaitSimThread
+    void KickSimThread(HEngine engine)
+    {
+        if(engine->m_SimThreadSubmitted)
+            return;
+        DM_PROFILE(KickSimThread, "KickSimThread");
+        engine->m_MuteSim = 0;
+        engine->m_SimThreadSubmitted = 1;
+        dmMutex::Lock(engine->m_SimThreadMutex);
+        engine->m_SimThreadSubmit = 1;
+        dmConditionVariable::Signal(engine->m_SimThreadSubmitCond);
+        dmMutex::Unlock(engine->m_SimThreadMutex);
+    }
+
+
+    void Step(HEngine engine)
+    {
+        dmProfile::HProfile profile = dmProfile::Begin();
+
+        // Reset engine state and update HID
+        engine->m_Alive = true;
+        engine->m_RunResult.m_ExitCode = 0;
+        dmHID::Update(engine->m_HidContext);
+
+        if(!engine->m_MuteSim)
+        {
+            // Simulation active, dispatch rendering
+            {
+                // Make the render list that will be used later.
+                dmRender::RenderListBegin(engine->m_RenderContext);
+                dmGameObject::Render(engine->m_MainCollection);
+
+                // Make sure we dispatch messages to the render script
+                // since it could have some "draw_text" messages waiting.
+                if (engine->m_RenderScriptPrototype)
+                {
+                    dmRender::DispatchRenderScriptInstance(engine->m_RenderScriptPrototype->m_Instance);
+                }
+
+                dmRender::RenderListEnd(engine->m_RenderContext);
+
+                if (engine->m_RenderScriptPrototype)
+                {
+                    dmRender::UpdateRenderScriptInstance(engine->m_RenderScriptPrototype->m_Instance);
+                }
+                else
+                {
+                    dmGraphics::SetViewport(engine->m_GraphicsContext, 0, 0, dmGraphics::GetWindowWidth(engine->m_GraphicsContext), dmGraphics::GetWindowHeight(engine->m_GraphicsContext));
+                    dmGraphics::Clear(engine->m_GraphicsContext, dmGraphics::BUFFER_TYPE_COLOR_BIT | dmGraphics::BUFFER_TYPE_DEPTH_BIT | dmGraphics::BUFFER_TYPE_STENCIL_BIT, 0, 0, 0, 0, 1.0, 0);
+                    dmRender::DrawRenderList(engine->m_RenderContext, 0x0, 0x0);
+                }
+
+                dmGameObject::PostUpdate(engine->m_MainCollection);
+                dmGameObject::PostUpdate(engine->m_Register);
+
+                dmRender::ClearRenderObjects(engine->m_RenderContext);
+
+
+                dmMessage::Dispatch(engine->m_SystemSocket, Dispatch, engine);
+            }
+
+            if (dLib::IsDebugMode() && engine->m_ShowProfile)
+            {
+                DM_PROFILE(Profile, "Draw");
+                dmProfile::Pause(true);
+
+                dmRender::RenderListBegin(engine->m_RenderContext);
+                dmProfileRender::Draw(profile, engine->m_RenderContext, engine->m_SystemFontMap);
+                dmRender::RenderListEnd(engine->m_RenderContext);
+                dmRender::SetViewMatrix(engine->m_RenderContext, Matrix4::identity());
+                dmRender::SetProjectionMatrix(engine->m_RenderContext, Matrix4::orthographic(0.0f, dmGraphics::GetWindowWidth(engine->m_GraphicsContext), 0.0f, dmGraphics::GetWindowHeight(engine->m_GraphicsContext), 1.0f, -1.0f));
+                dmRender::DrawRenderList(engine->m_RenderContext, 0x0, 0x0);
+                dmRender::ClearRenderObjects(engine->m_RenderContext);
+                dmProfile::Pause(false);
+            }
+
+            // Kick the sim thread before flipping, which will proceed with CPU simuation even though flip stalls.
+            if(engine->m_SimThreadEnabled)
+            {
+                KickSimThread(engine);
             }
             else
             {
-                if (engine->m_WasIconified)
-                {
-                    if (engine->m_TrackingContext)
-                    {
-                        dmTracking::PostSimpleEvent(engine->m_TrackingContext, "@Invoke");
-                    }
-                    engine->m_WasIconified = false;
-                }
+                StepSim(engine);
             }
 
-            dmProfile::HProfile profile = dmProfile::Begin();
+            // Sim threaded scope
             {
-                DM_PROFILE(Engine, "Frame");
-
-                // We had buffering problems with the output when running the engine inside the editor
-                // Flushing stdout/stderr solves this problem.
-                fflush(stdout);
-                fflush(stderr);
-
-                if (engine->m_EngineService)
-                {
-                    dmEngineService::Update(engine->m_EngineService);
-                }
-
-                {
-                    DM_PROFILE(Engine, "Sim");
-
-                    dmResource::UpdateFactory(engine->m_Factory);
-
-                    dmHID::Update(engine->m_HidContext);
-                    if (dmGraphics::GetWindowState(engine->m_GraphicsContext, dmGraphics::WINDOW_STATE_ICONIFIED))
-                    {
-                        // NOTE: This is a bit ugly but os event are polled in dmHID::Update and an iOS application
-                        // might have entered background at this point and OpenGL calls are not permitted and will
-                        // crash the application
-                        dmProfile::Release(profile);
-                        return;
-                    }
-
-
-                    /* Extension updates */
-                    if (engine->m_SharedScriptContext) {
-                        dmScript::UpdateExtensions(engine->m_SharedScriptContext);
-                    } else {
-                        if (engine->m_GOScriptContext) {
-                            dmScript::UpdateExtensions(engine->m_GOScriptContext);
-                        }
-                        if (engine->m_RenderScriptContext) {
-                            dmScript::UpdateExtensions(engine->m_RenderScriptContext);
-                        }
-                        if (engine->m_GuiScriptContext) {
-                            dmScript::UpdateExtensions(engine->m_GuiScriptContext);
-                        }
-                    }
-
-                    dmSound::Update();
-
-                    dmHID::KeyboardPacket keybdata;
-                    dmHID::GetKeyboardPacket(engine->m_HidContext, &keybdata);
-
-                    if (engine->m_QuitOnEsc && (dmHID::GetKey(&keybdata, dmHID::KEY_ESC) || !dmGraphics::GetWindowState(engine->m_GraphicsContext, dmGraphics::WINDOW_STATE_OPENED)))
-                    {
-                        engine->m_Alive = false;
-                        return;
-                    }
-
-                    dmInput::UpdateBinding(engine->m_GameInputBinding, dt);
-
-                    engine->m_InputBuffer.SetSize(0);
-                    dmInput::ForEachActive(engine->m_GameInputBinding, GOActionCallback, engine);
-
-                    // Sort input so that text and marked text is triggered last
-                    // NOTE: Due to Korean keyboards on iOS will send a backspace sometimes to "replace" a character with a new one,
-                    //       we want to make sure these keypresses arrive to the input listeners before the "new" character.
-                    //       If the backspace arrive after the text, it will instead remove the new character that
-                    //       actually should replace the old one.
-                    qsort(engine->m_InputBuffer.Begin(), engine->m_InputBuffer.Size(), sizeof(dmGameObject::InputAction), InputBufferOrderSort);
-
-                    dmArray<dmGameObject::InputAction>& input_buffer = engine->m_InputBuffer;
-                    uint32_t input_buffer_size = input_buffer.Size();
-                    if (input_buffer_size > 0)
-                    {
-                        dmGameObject::DispatchInput(engine->m_MainCollection, &input_buffer[0], input_buffer.Size());
-                    }
-
-                    dmGameObject::UpdateContext update_context;
-                    update_context.m_DT = dt;
-                    dmGameObject::Update(engine->m_MainCollection, &update_context);
-
-                    // Make the render list that will be used later.
-                    dmRender::RenderListBegin(engine->m_RenderContext);
-                    dmGameObject::Render(engine->m_MainCollection);
-
-                    // Make sure we dispatch messages to the render script
-                    // since it could have some "draw_text" messages waiting.
-                    if (engine->m_RenderScriptPrototype)
-                    {
-                        dmRender::DispatchRenderScriptInstance(engine->m_RenderScriptPrototype->m_Instance);
-                    }
-
-                    dmRender::RenderListEnd(engine->m_RenderContext);
-
-                    if (engine->m_RenderScriptPrototype)
-                    {
-                        dmRender::UpdateRenderScriptInstance(engine->m_RenderScriptPrototype->m_Instance);
-                    }
-                    else
-                    {
-                        dmGraphics::SetViewport(engine->m_GraphicsContext, 0, 0, dmGraphics::GetWindowWidth(engine->m_GraphicsContext), dmGraphics::GetWindowHeight(engine->m_GraphicsContext));
-                        dmGraphics::Clear(engine->m_GraphicsContext, dmGraphics::BUFFER_TYPE_COLOR_BIT | dmGraphics::BUFFER_TYPE_DEPTH_BIT | dmGraphics::BUFFER_TYPE_STENCIL_BIT, 0, 0, 0, 0, 1.0, 0);
-                        dmRender::DrawRenderList(engine->m_RenderContext, 0x0, 0x0);
-                    }
-
-                    dmGameObject::PostUpdate(engine->m_MainCollection);
-                    dmGameObject::PostUpdate(engine->m_Register);
-
-                    dmRender::ClearRenderObjects(engine->m_RenderContext);
-
-
-                    dmMessage::Dispatch(engine->m_SystemSocket, Dispatch, engine);
-                }
-
-                if (dLib::IsDebugMode() && engine->m_ShowProfile)
-                {
-                    DM_PROFILE(Profile, "Draw");
-                    dmProfile::Pause(true);
-
-                    dmRender::RenderListBegin(engine->m_RenderContext);
-                    dmProfileRender::Draw(profile, engine->m_RenderContext, engine->m_SystemFontMap);
-                    dmRender::RenderListEnd(engine->m_RenderContext);
-                    dmRender::SetViewMatrix(engine->m_RenderContext, Matrix4::identity());
-                    dmRender::SetProjectionMatrix(engine->m_RenderContext, Matrix4::orthographic(0.0f, dmGraphics::GetWindowWidth(engine->m_GraphicsContext), 0.0f, dmGraphics::GetWindowHeight(engine->m_GraphicsContext), 1.0f, -1.0f));
-                    dmRender::DrawRenderList(engine->m_RenderContext, 0x0, 0x0);
-                    dmRender::ClearRenderObjects(engine->m_RenderContext);
-                    dmProfile::Pause(false);
-                }
-
                 dmGraphics::Flip(engine->m_GraphicsContext);
 
                 RecordData* record_data = &engine->m_RecordData;
@@ -1100,12 +1214,25 @@ bail:
                     }
                     record_data->m_FrameCount++;
                 }
-
             }
-            dmProfile::Release(profile);
 
-            ++engine->m_Stats.m_FrameCount;
+            // Wait for sim to complete
+            WaitSimThread(engine);
+
+            // Update gameobjects. This involved creating resources and must be done in dictated order of component update, so we stick with doing this in the main thread for now.
+            dmGameObject::UpdateContext update_context;
+            update_context.m_DT = engine->m_FrameDeltaTime;
+            dmGameObject::Update(engine->m_MainCollection, &update_context);
         }
+        else
+        {
+            // Step simulation without using thread
+            engine->m_MuteSim = 0;
+            StepSim(engine);
+        }
+
+        dmProfile::Release(profile);
+        ++engine->m_Stats.m_FrameCount;
     }
 
     static int IsRunning(void* context)
@@ -1241,6 +1368,11 @@ bail:
             else if (descriptor == dmEngineDDF::ToggleProfile::m_DDFDescriptor)
             {
                 self->m_ShowProfile = !self->m_ShowProfile;
+            }
+            else if (descriptor == dmEngineDDF::SetGraphicsThread::m_DDFDescriptor)
+            {
+                dmEngineDDF::SetGraphicsThread* ddf = (dmEngineDDF::SetGraphicsThread*) message->m_Data;
+                self->m_SimThreadEnabled = ddf->m_Type == 1 ? 1 : 0;
             }
             else if (descriptor == dmEngineDDF::StartRecord::m_DDFDescriptor)
             {
