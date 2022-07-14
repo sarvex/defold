@@ -39,6 +39,7 @@ import com.dynamo.bob.textureset.TextureSetGenerator.TextureSetResult;
 import com.dynamo.gamesys.proto.AtlasProto.Atlas;
 import com.dynamo.gamesys.proto.AtlasProto.AtlasAnimation;
 import com.dynamo.gamesys.proto.AtlasProto.AtlasImage;
+import com.dynamo.gamesys.proto.AtlasProto.AtlasPage;
 import com.dynamo.gamesys.proto.Tile.Playback;
 import com.dynamo.gamesys.proto.Tile.SpriteTrimmingMode;
 
@@ -140,6 +141,29 @@ public class AtlasUtil {
         return images;
     }
 
+    public static List<AtlasImage> collectImagesFromPage(AtlasPage atlasPage) {
+        Map<AtlasImageSortKey, AtlasImage> uniqueImages = new HashMap<AtlasImageSortKey, AtlasImage>();
+        List<AtlasImage> images = new ArrayList<AtlasImage>();
+        for (AtlasImage image : atlasPage.getImagesList()) {
+            AtlasImageSortKey key = new AtlasImageSortKey(image.getImage(), image.getSpriteTrimMode());
+            if (!uniqueImages.containsKey(key)) {
+                uniqueImages.put(key, image);
+                images.add(image);
+            }
+        }
+
+        for (AtlasAnimation anim : atlasPage.getAnimationsList()) {
+            for (AtlasImage image : anim.getImagesList() ) {
+                AtlasImageSortKey key = new AtlasImageSortKey(image.getImage(), image.getSpriteTrimMode());
+                if (!uniqueImages.containsKey(key)) {
+                    uniqueImages.put(key, image);
+                    images.add(image);
+                }
+            }
+        }
+        return images;
+    }
+
     private static String pathToId(String path) {
         return FilenameUtils.removeExtension(FilenameUtils.getName(path));
     }
@@ -184,6 +208,27 @@ public class AtlasUtil {
             MappedAnimDesc animDesc = new MappedAnimDesc(pathToId(image.getImage()), Collections.singletonList(transformer.transform(image.getImage())));
             animDescs.add(animDesc);
         }
+        return animDescs;
+    }
+
+    private static List<MappedAnimDesc> createAnimDescsFromPage(AtlasPage page, PathTransformer transformer)
+    {
+        List<MappedAnimDesc> animDescs = new ArrayList<MappedAnimDesc>(page.getAnimationsCount()
+                + page.getImagesCount());
+
+        for (AtlasAnimation anim : page.getAnimationsList()) {
+            List<String> frameIds = new ArrayList<String>();
+            for (AtlasImage image : anim.getImagesList()) {
+                frameIds.add(transformer.transform(image.getImage()));
+            }
+            animDescs.add(new MappedAnimDesc(anim.getId(), frameIds, anim.getPlayback(), anim.getFps(), anim
+                    .getFlipHorizontal() != 0, anim.getFlipVertical() != 0));
+        }
+
+        for (AtlasImage image : page.getImagesList()) {
+            MappedAnimDesc animDesc = new MappedAnimDesc(pathToId(image.getImage()), Collections.singletonList(transformer.transform(image.getImage())));
+            animDescs.add(animDesc);
+        }
 
         return animDescs;
     }
@@ -200,38 +245,60 @@ public class AtlasUtil {
         return 0;
     }
 
-    public static TextureSetResult generateTextureSet(final Project project, IResource atlasResource) throws IOException, CompileExceptionError {
+    private static TextureSetResult generateTextureSetFromImages(Atlas atlas, IResource atlasResource, List<AtlasImage> imageList, List<MappedAnimDesc> animDescs, PathTransformer transformer, int pageIndex) throws IOException, CompileExceptionError {
+        List<String> imagePaths      = new ArrayList<String>();
+        List<Integer> imageHullSizes = new ArrayList<Integer>();
+
+        for (AtlasImage image : imageList) {
+            imagePaths.add(image.getImage());
+            imageHullSizes.add(spriteTrimModeToInt(image.getSpriteTrimMode()));
+        }
+
+        List<IResource> imageResources = toResources(atlasResource, imagePaths);
+        List<BufferedImage> images     = AtlasUtil.loadImages(imageResources);
+
+        for (int i = 0; i < imagePaths.size(); ++i) {
+            imagePaths.set(i, transformer.transform(imagePaths.get(i)));
+        }
+        MappedAnimIterator iterator = new MappedAnimIterator(animDescs, imagePaths);
+
+        return TextureSetGenerator.generate(images, imageHullSizes, imagePaths, iterator,
+                Math.max(0, atlas.getMargin()),
+                Math.max(0, atlas.getInnerPadding()),
+                Math.max(0, atlas.getExtrudeBorders()),
+                pageIndex, true, false, null);
+    }
+
+    public static List<TextureSetResult> generateTextureSet(final Project project, IResource atlasResource) throws IOException, CompileExceptionError {
         TimeProfiler.start("generateTextureSet");
+        List<TextureSetResult> result_list = new ArrayList<TextureSetResult>();
         Atlas.Builder builder = Atlas.newBuilder();
         ProtoUtil.merge(atlasResource, builder);
         Atlas atlas = builder.build();
 
-        List<AtlasImage> atlasImages = collectImages(atlas);
-        List<String> imagePaths = new ArrayList<String>();
-        List<Integer> imageHullSizes = new ArrayList<Integer>();
-        for (AtlasImage image : atlasImages) {
-            imagePaths.add(image.getImage());
-            imageHullSizes.add(spriteTrimModeToInt(image.getSpriteTrimMode()));
-        }
-        List<IResource> imageResources = toResources(atlasResource, imagePaths);
-        List<BufferedImage> images = AtlasUtil.loadImages(imageResources);
         PathTransformer transformer = new PathTransformer() {
             @Override
             public String transform(String path) {
                 return project.getResource(path).getPath();
             }
         };
-        List<MappedAnimDesc> animDescs = createAnimDescs(atlas, transformer);
-        int imagePathCount = imagePaths.size();
-        for (int i = 0; i < imagePathCount; ++i) {
-            imagePaths.set(i, transformer.transform(imagePaths.get(i)));
+
+        // Generate texture set from non-paged images
+        TextureSetResult atlasTextureSetResult = generateTextureSetFromImages(atlas, atlasResource,
+            collectImages(atlas), createAnimDescs(atlas, transformer), transformer, -1);
+
+        result_list.add(atlasTextureSetResult);
+
+        int pageIndex = 0;
+        // Generate texture set from paged images
+        for (AtlasPage page : atlas.getPagesList()) {
+            TextureSetResult atlasPageTextureSetResult = generateTextureSetFromImages(atlas, atlasResource,
+                collectImagesFromPage(page), createAnimDescsFromPage(page, transformer), transformer, pageIndex++);
+
+            result_list.add(atlasPageTextureSetResult);
         }
-        MappedAnimIterator iterator = new MappedAnimIterator(animDescs, imagePaths);
-        TextureSetResult result = TextureSetGenerator.generate(images, imageHullSizes, imagePaths, iterator,
-                Math.max(0, atlas.getMargin()),
-                Math.max(0, atlas.getInnerPadding()),
-                Math.max(0, atlas.getExtrudeBorders()), true, false, null);
+
         TimeProfiler.stop();
-        return result;
+        return result_list;
     }
 }

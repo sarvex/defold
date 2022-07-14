@@ -141,7 +141,7 @@ public class TileSetBuilder extends Builder<Void>  {
 
         int buildDirLen = project.getBuildDirectory().length();
         String texturePath = task.output(1).getPath().substring(buildDirLen);
-        TextureSet textureSet = textureSetBuilder.setTexture(texturePath).build();
+        TextureSet textureSet = textureSetBuilder.addTextures(texturePath).build();
 
         TextureImage texture;
         try {

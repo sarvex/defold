@@ -96,6 +96,7 @@ namespace dmGameSystem
         float x;
         float y;
         float z;
+        float p; // Texture page
         float u;
         float v;
     };
@@ -200,7 +201,7 @@ namespace dmGameSystem
 
         dmGraphics::VertexElement ve[] =
         {
-                {"position", 0, 3, dmGraphics::TYPE_FLOAT, false},
+                {"position", 0, 4, dmGraphics::TYPE_FLOAT, false},
                 {"texcoord0", 1, 2, dmGraphics::TYPE_FLOAT, false},
         };
 
@@ -243,7 +244,13 @@ namespace dmGameSystem
         dmGameSystemDDF::TextureSetAnimation* animation = &texture_set_ddf->m_Animations[anim_id];
         if(texture_set_ddf->m_TexDims.m_Count)
         {
-            const float* td = (const float*) texture_set_ddf->m_TexDims.m_Data + ((animation->m_Start + sprite->m_CurrentAnimationFrame ) << 1);
+            uint32_t tex_dim_offset = 0;
+            uint32_t page_index = animation->m_PageIndex;
+            if (page_index >= 0 && page_index < dmRender::RenderObject::MAX_TEXTURE_COUNT)
+            {
+                tex_dim_offset = texture_set_ddf->m_PageOffsets[page_index].m_TexDims / sizeof(float);
+            }
+            const float* td = (const float*) texture_set_ddf->m_TexDims.m_Data + tex_dim_offset + ((animation->m_Start + sprite->m_CurrentAnimationFrame ) << 1);
             result[0] = td[0];
             result[1] = td[1];
         }
@@ -333,7 +340,7 @@ namespace dmGameSystem
             component->m_Playing = 0;
             component->m_CurrentAnimation = 0x0;
             component->m_CurrentAnimationFrame = 0;
-            dmLogError("Unable to play animation '%s' from texture '%s' since it could not be found.", dmHashReverseSafe64(animation), dmHashReverseSafe64(texture_set->m_TexturePath));
+            dmLogError("Unable to play animation '%s' from texture '%s' since it could not be found.", dmHashReverseSafe64(animation), dmHashReverseSafe64(texture_set->m_TexturePaths[0]));
         }
         return anim_id != 0;
     }
@@ -524,8 +531,16 @@ namespace dmGameSystem
 
                 dmGameSystemDDF::TextureSetAnimation* animation_ddf = &animations[component->m_AnimationID];
 
+                uint32_t tex_coord_offset = 0;
+                uint32_t page_index =  animation_ddf->m_PageIndex;
+                if (page_index >= 0 && page_index < dmRender::RenderObject::MAX_TEXTURE_COUNT)
+                {
+                    // TODO: Maybe divide the offset by the float size in pipeline instead
+                    tex_coord_offset = texture_set->m_TextureSet->m_PageOffsets[page_index].m_TexCoords / sizeof(float);
+                }
+
                 uint32_t frame_index = animation_ddf->m_Start + component->m_CurrentAnimationFrame;
-                const float* tc = &tex_coords[frame_index * 4 * 2];
+                const float* tc = &tex_coords[tex_coord_offset + frame_index * 4 * 2];
                 uint32_t flip_flag = 0;
 
                 // ddf values are guaranteed to be 0 or 1 when saved by the editor
@@ -547,6 +562,7 @@ namespace dmGameSystem
                 vertices[0].x = p0.getX();
                 vertices[0].y = p0.getY();
                 vertices[0].z = p0.getZ();
+                vertices[0].p = (float) page_index;
                 vertices[0].u = tc[tex_lookup[0] * 2];
                 vertices[0].v = tc[tex_lookup[0] * 2 + 1];
 
@@ -554,6 +570,7 @@ namespace dmGameSystem
                 vertices[1].x = p1.getX();
                 vertices[1].y = p1.getY();
                 vertices[1].z = p1.getZ();
+                vertices[1].p = (float) page_index;
                 vertices[1].u = tc[tex_lookup[1] * 2];
                 vertices[1].v = tc[tex_lookup[1] * 2 + 1];
 
@@ -561,6 +578,7 @@ namespace dmGameSystem
                 vertices[2].x = p2.getX();
                 vertices[2].y = p2.getY();
                 vertices[2].z = p2.getZ();
+                vertices[2].p = (float) page_index;
                 vertices[2].u = tc[tex_lookup[2] * 2];
                 vertices[2].v = tc[tex_lookup[2] * 2 + 1];
 
@@ -568,6 +586,7 @@ namespace dmGameSystem
                 vertices[3].x = p3.getX();
                 vertices[3].y = p3.getY();
                 vertices[3].z = p3.getZ();
+                vertices[3].p = (float) page_index;
                 vertices[3].u = tc[tex_lookup[4] * 2];
                 vertices[3].v = tc[tex_lookup[4] * 2 + 1];
 
@@ -621,9 +640,14 @@ namespace dmGameSystem
         ro.m_VertexBuffer = sprite_world->m_VertexBuffer;
         ro.m_IndexBuffer = sprite_world->m_IndexBuffer;
         ro.m_Material = GetMaterial(first, resource);
-        ro.m_Textures[0] = texture_set->m_Texture;
+        //ro.m_Textures[0] = texture_set->m_Textures[0];
         ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
         ro.m_IndexType = sprite_world->m_Is16BitIndex ? dmGraphics::TYPE_UNSIGNED_SHORT : dmGraphics::TYPE_UNSIGNED_INT;
+
+        for (uint32_t i = 0; i < dmRender::RenderObject::MAX_TEXTURE_COUNT; ++i)
+        {
+            ro.m_Textures[i] = texture_set->m_Textures[i];
+        }
 
         // offset in bytes into element buffer
         uint32_t index_offset = ib_begin - sprite_world->m_IndexBufferData;
@@ -778,7 +802,10 @@ namespace dmGameSystem
                     dmGameObject::HInstance listener_instance = dmGameObject::GetInstanceFromIdentifier(dmGameObject::GetCollection(component->m_Instance), component->m_Listener.m_Path);
                     if (!listener_instance)
                     {
-                        dmLogError("Could not send animation_done to instance: %s:%s#%s", dmHashReverseSafe64(component->m_Listener.m_Socket), dmHashReverseSafe64(component->m_Listener.m_Path), dmHashReverseSafe64(component->m_Listener.m_Fragment));
+                        dmLogError("Could not send animation_done to instance: %s:%s#%s",
+                            dmHashReverseSafe64(component->m_Listener.m_Socket),
+                            dmHashReverseSafe64(component->m_Listener.m_Path),
+                            dmHashReverseSafe64(component->m_Listener.m_Fragment));
                         return;
                     }
 
@@ -1172,7 +1199,7 @@ namespace dmGameSystem
         }
         else if (get_property == PROP_TEXTURE[0])
         {
-            return GetResourceProperty(dmGameObject::GetFactory(params.m_Instance), GetTextureSet(component, component->m_Resource)->m_Texture, out_value);
+            return GetResourceProperty(dmGameObject::GetFactory(params.m_Instance), GetTextureSet(component, component->m_Resource)->m_Textures[0], out_value);
         }
         else if (get_property == SPRITE_PROP_ANIMATION)
         {

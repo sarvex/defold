@@ -139,7 +139,8 @@ public class TileSetGenerator {
         Grid grid_size = new Grid(metrics.tilesPerRow, metrics.tilesPerColumn);
         TextureSetResult result = TextureSetGenerator.generate(images, imageHullSizes, names, iterator, 0,
                 tileSet.getInnerPadding(),
-                tileSet.getExtrudeBorders(), false, true, grid_size );
+                tileSet.getExtrudeBorders(), -1,
+                false, true, grid_size);
 
         TextureSet.Builder builder = result.builder;
 

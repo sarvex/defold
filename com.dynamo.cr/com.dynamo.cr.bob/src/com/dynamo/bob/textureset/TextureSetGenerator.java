@@ -299,7 +299,7 @@ public class TextureSetGenerator {
      */
     public static TextureSetResult calculateLayout(List<Rect> images, List<SpriteGeometry> imageHulls, int use_geometries,
                                                 AnimIterator iterator,
-                                               int margin, int innerPadding, int extrudeBorders,
+                                               int margin, int innerPadding, int extrudeBorders, int pageIndex,
                                                boolean rotate, boolean useTileGrid, Grid gridSize) {
 
         int totalSizeIncrease = 2 * (innerPadding + extrudeBorders);
@@ -325,7 +325,7 @@ public class TextureSetGenerator {
         // Contract the sizes rectangles (i.e remove the extrudeBorders from them)
         List<Rect> rects = clipBorders(layout.getRectangles(), extrudeBorders);
 
-        Pair<TextureSet.Builder, List<UVTransform>> vertexData = genVertexData(layout.getWidth(), layout.getHeight(), rects, iterator);
+        Pair<TextureSet.Builder, List<UVTransform>> vertexData = genVertexData(layout.getWidth(), layout.getHeight(), rects, iterator, pageIndex);
 
         vertexData.left.setUseGeometries(use_geometries);
 
@@ -383,7 +383,7 @@ public class TextureSetGenerator {
      * @return {@link AtlasMap}
      */
     public static TextureSetResult generate(List<BufferedImage> images, List<Integer> imageHullSizes, List<String> paths, AnimIterator iterator,
-            int margin, int innerPadding, int extrudeBorders, boolean rotate, boolean useTileGrid, Grid gridSize) {
+            int margin, int innerPadding, int extrudeBorders, int pageIndex, boolean rotate, boolean useTileGrid, Grid gridSize) {
 
         List<Rect> imageRects = rectanglesFromImages(images, paths);
 
@@ -399,7 +399,7 @@ public class TextureSetGenerator {
 
         // The layout step will expand the rect, and possibly rotate them
         TextureSetResult result = calculateLayout(imageRects, imageHulls, use_geometries, iterator,
-                                                        margin, innerPadding, extrudeBorders, rotate, useTileGrid, gridSize);
+                                        margin, innerPadding, extrudeBorders, pageIndex, rotate, useTileGrid, gridSize);
 
         for (int i = 0; i < images.size(); ++i) {
             BufferedImage image = images.get(i);
@@ -504,7 +504,7 @@ public class TextureSetGenerator {
         return new UVTransform(new Point2d(r.x * xs, 1 - r.y * ys), new Vector2d(xs * r.width, -ys * r.height), r.rotated);
     }
 
-    private static Pair<TextureSet.Builder, List<UVTransform>> genVertexData(int width, int height, List<Rect> rects, AnimIterator iterator) {
+    private static Pair<TextureSet.Builder, List<UVTransform>> genVertexData(int width, int height, List<Rect> rects, AnimIterator iterator, int pageIndex) {
         TextureSet.Builder textureSet = TextureSet.newBuilder();
         ArrayList<UVTransform> uvTransforms = new ArrayList<>();
 
@@ -572,13 +572,18 @@ public class TextureSetGenerator {
                 animHeight = ref.height;
             }
 
-            TextureSetAnimation anim = TextureSetAnimation.newBuilder().setId(animDesc.getId()).setStart(startIndex)
+            TextureSetAnimation.Builder textureSetAnimationBuilder = TextureSetAnimation.newBuilder().setId(animDesc.getId()).setStart(startIndex)
                     .setEnd(endIndex).setPlayback(animDesc.getPlayback()).setFps(animDesc.getFps())
                     .setFlipHorizontal(animDesc.isFlipHorizontally() ? 1 : 0)
                     .setFlipVertical(animDesc.isFlipVertically() ? 1 : 0)
-                    .setWidth(animWidth).setHeight(animHeight).build();
+                    .setWidth(animWidth).setHeight(animHeight);
 
-            textureSet.addAnimations(anim);
+            if (pageIndex >= 0)
+            {
+                textureSetAnimationBuilder.setPageIndex(pageIndex);
+            }
+
+            textureSet.addAnimations(textureSetAnimationBuilder.build());
         }
 
         texCoordsBuffer.rewind();
