@@ -99,6 +99,9 @@ namespace dmGameSystem
         float z;
         float u;
         float v;
+        float cx;
+        float cy;
+        float cz;
     };
 
     struct SpriteWorld
@@ -201,8 +204,9 @@ namespace dmGameSystem
 
         dmGraphics::VertexElement ve[] =
         {
-                {"position", 0, 3, dmGraphics::TYPE_FLOAT, false},
+                {"position",  0, 3, dmGraphics::TYPE_FLOAT, false},
                 {"texcoord0", 1, 2, dmGraphics::TYPE_FLOAT, false},
+                {"center",    2, 3, dmGraphics::TYPE_FLOAT, false},
         };
 
         sprite_world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(render_context), ve, sizeof(ve) / sizeof(dmGraphics::VertexElement));
@@ -541,39 +545,35 @@ namespace dmGameSystem
                 }
 
                 const int* tex_lookup = &tex_coord_order[flip_flag * 6];
-
-                const Matrix4& w = component->m_World;
+                const Matrix4& w      = component->m_World;
+                const Vector3 center  = w.getTranslation();
 
                 Vector4 p0 = w * Point3(-0.5f, -0.5f, 0.0f);
-                vertices[0].x = p0.getX();
-                vertices[0].y = p0.getY();
-                vertices[0].z = p0.getZ();
-                vertices[0].u = tc[tex_lookup[0] * 2];
-                vertices[0].v = tc[tex_lookup[0] * 2 + 1];
-
                 Vector4 p1 = w * Point3(-0.5f, 0.5f, 0.0f);
-                vertices[1].x = p1.getX();
-                vertices[1].y = p1.getY();
-                vertices[1].z = p1.getZ();
-                vertices[1].u = tc[tex_lookup[1] * 2];
-                vertices[1].v = tc[tex_lookup[1] * 2 + 1];
-
                 Vector4 p2 = w * Point3(0.5f, 0.5f, 0.0f);
-                vertices[2].x = p2.getX();
-                vertices[2].y = p2.getY();
-                vertices[2].z = p2.getZ();
-                vertices[2].u = tc[tex_lookup[2] * 2];
-                vertices[2].v = tc[tex_lookup[2] * 2 + 1];
-
                 Vector4 p3 = w * Point3(0.5f, -0.5f, 0.0f);
-                vertices[3].x = p3.getX();
-                vertices[3].y = p3.getY();
-                vertices[3].z = p3.getZ();
-                vertices[3].u = tc[tex_lookup[4] * 2];
-                vertices[3].v = tc[tex_lookup[4] * 2 + 1];
 
-                // for (int f = 0; f < 4; ++f)
-                //     printf("  %u: %.2f, %.2f\t%.2f, %.2f\n", f, vertices[f].x, vertices[f].y, vertices[f].u, vertices[f].v );
+                #define SET_VERTEX_QUAD(vert, p, tc_lookup) \
+                    vert.x  = p.getX(); \
+                    vert.y  = p.getY(); \
+                    vert.z  = p.getZ(); \
+                    vert.u  = tc[tc_lookup * 2]; \
+                    vert.v  = tc[tc_lookup * 2 + 1]; \
+                    vert.cx = center.getX(); \
+                    vert.cy = center.getY(); \
+                    vert.cz = center.getZ();
+
+                SET_VERTEX_QUAD(vertices[0], p0, tex_lookup[0]);
+                SET_VERTEX_QUAD(vertices[1], p1, tex_lookup[1]);
+                SET_VERTEX_QUAD(vertices[2], p2, tex_lookup[2]);
+                SET_VERTEX_QUAD(vertices[3], p3, tex_lookup[4]);
+
+                #undef SET_VERTEX_QUAD
+
+            #if 0
+                for (int f = 0; f < 4; ++f)
+                    printf("  %u: %.2f, %.2f\t%.2f, %.2f\n", f, vertices[f].x, vertices[f].y, vertices[f].u, vertices[f].v );
+            #endif
 
                 vertices += 4;
                 indices += 6 * index_type_size;
