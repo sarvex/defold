@@ -185,7 +185,9 @@ namespace dmRender
         dmVMath::Matrix4                m_TextureTransform;
         dmGraphics::HVertexBuffer       m_VertexBuffer;
         dmGraphics::HVertexDeclaration  m_VertexDeclaration;
+        dmGraphics::HVertexDeclaration  m_InstanceDeclaration;
         dmGraphics::HIndexBuffer        m_IndexBuffer;
+        dmGraphics::HVertexBuffer       m_InstanceBuffer;
         HMaterial                       m_Material;
         dmGraphics::HTexture            m_Textures[MAX_TEXTURE_COUNT];
         dmGraphics::PrimitiveType       m_PrimitiveType;
@@ -196,6 +198,8 @@ namespace dmRender
         StencilTestParams               m_StencilTestParams;
         uint32_t                        m_VertexStart;
         uint32_t                        m_VertexCount;
+        uint32_t                        m_InstanceStart;
+        uint32_t                        m_InstanceCount;
         uint8_t                         m_SetBlendFactors : 1;
         uint8_t                         m_SetStencilTest : 1;
         uint8_t                         m_SetFaceWinding : 1;

@@ -1534,6 +1534,10 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         {
              return 4;
         }
+        else if (type == dmGraphics::TYPE_FLOAT_MAT4)
+        {
+            return 16;
+        }
 
         assert(0);
         return 0;
@@ -1554,10 +1558,11 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         vd->m_Stride = 0;
         assert(count <= (sizeof(vd->m_Streams) / sizeof(vd->m_Streams[0]) ) );
 
+        uint32_t logical_index = 0;
         for (uint32_t i=0; i<count; i++)
         {
             vd->m_Streams[i].m_Name = element[i].m_Name;
-            vd->m_Streams[i].m_LogicalIndex = i;
+            vd->m_Streams[i].m_LogicalIndex = element[i].m_Stream;
             vd->m_Streams[i].m_PhysicalIndex = -1;
             vd->m_Streams[i].m_Size = element[i].m_Size;
             vd->m_Streams[i].m_Type = element[i].m_Type;
@@ -1565,6 +1570,15 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             vd->m_Streams[i].m_Offset = vd->m_Stride;
 
             vd->m_Stride += element[i].m_Size * GetTypeSize(element[i].m_Type);
+
+            if (element[i].m_Type == TYPE_FLOAT_MAT4)
+            {
+                logical_index += 4;
+            }
+            else
+            {
+                logical_index++;
+            }
         }
         vd->m_StreamCount = count;
         return vd;
@@ -1598,13 +1612,31 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         {
             glEnableVertexAttribArray(vertex_declaration->m_Streams[i].m_LogicalIndex);
             CHECK_GL_ERROR;
-            glVertexAttribPointer(
+
+            if (vertex_declaration->m_Streams[i].m_Type == TYPE_FLOAT_MAT4)
+            {
+                for (int j = 0; j < 4; ++j)
+                {
+                    glVertexAttribPointer(
+                        vertex_declaration->m_Streams[i].m_LogicalIndex + j,
+                        4, //vertex_declaration->m_Streams[i].m_Size,
+                        GL_FLOAT, // GetOpenGLType(vertex_declaration->m_Streams[i].m_Type),
+                        GL_FALSE, // vertex_declaration->m_Streams[i].m_Normalize,
+                        16, //vertex_declaration->m_Stride,
+                        (const GLvoid*)(sizeof(GLfloat) * i * 4)); //BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                    glVertexAttribDivisor(vertex_declaration->m_Streams[i].m_LogicalIndex + i, 1);
+                }
+            }
+            else
+            {
+                glVertexAttribPointer(
                     vertex_declaration->m_Streams[i].m_LogicalIndex,
                     vertex_declaration->m_Streams[i].m_Size,
                     GetOpenGLType(vertex_declaration->m_Streams[i].m_Type),
                     vertex_declaration->m_Streams[i].m_Normalize,
                     vertex_declaration->m_Stride,
-            BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                    BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+            }
 
             CHECK_GL_ERROR;
         }
@@ -1659,13 +1691,31 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             {
                 glEnableVertexAttribArray(vertex_declaration->m_Streams[i].m_PhysicalIndex);
                 CHECK_GL_ERROR;
-                glVertexAttribPointer(
+
+                if (vertex_declaration->m_Streams[i].m_Type == TYPE_FLOAT_MAT4)
+                {
+                    for (int j = 0; j < 4; ++j)
+                    {
+                        glVertexAttribPointer(
+                            vertex_declaration->m_Streams[i].m_PhysicalIndex + j,
+                            4, //vertex_declaration->m_Streams[i].m_Size,
+                            GL_FLOAT, // GetOpenGLType(vertex_declaration->m_Streams[i].m_Type),
+                            GL_FALSE, // vertex_declaration->m_Streams[i].m_Normalize,
+                            16, //vertex_declaration->m_Stride,
+                            (const GLvoid*)(sizeof(GLfloat) * i * 4)); //BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                        glVertexAttribDivisor(vertex_declaration->m_Streams[i].m_PhysicalIndex + i, 1);
+                    }
+                }
+                else
+                {
+                    glVertexAttribPointer(
                         vertex_declaration->m_Streams[i].m_PhysicalIndex,
                         vertex_declaration->m_Streams[i].m_Size,
                         GetOpenGLType(vertex_declaration->m_Streams[i].m_Type),
                         vertex_declaration->m_Streams[i].m_Normalize,
                         vertex_declaration->m_Stride,
-                BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                        BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                }
 
                 CHECK_GL_ERROR;
             }
@@ -1711,7 +1761,7 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
     }
 
 
-    static void OpenGLDrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, Type type, HIndexBuffer index_buffer)
+    static void OpenGLDrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, uint32_t instance_count, Type type, HIndexBuffer index_buffer)
     {
         DM_PROFILE(__FUNCTION__);
         DM_PROPERTY_ADD_U32(rmtp_DrawCalls, 1);
@@ -1720,7 +1770,17 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
         CHECK_GL_ERROR;
 
-        glDrawElements(GetOpenGLPrimitiveType(prim_type), count, GetOpenGLType(type), (GLvoid*)(uintptr_t) first);
+        GLenum gl_prim_type = GetOpenGLPrimitiveType(prim_type);
+        GLenum gl_type      = GetOpenGLType(type);
+
+        if (instance_count > 0)
+        {
+            glDrawElementsInstanced(gl_prim_type, count, gl_type, (GLvoid*)(uintptr_t) first, instance_count);
+        }
+        else
+        {
+            glDrawElements(gl_prim_type, count, gl_type, (GLvoid*)(uintptr_t) first);
+        }
         CHECK_GL_ERROR
     }
 

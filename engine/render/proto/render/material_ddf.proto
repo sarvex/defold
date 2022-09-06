@@ -78,4 +78,5 @@ message MaterialDesc
     repeated Constant fragment_constants = 7;
     repeated string textures = 8;
     repeated Sampler samplers = 9;
+    optional bool instanced = 10;
 }

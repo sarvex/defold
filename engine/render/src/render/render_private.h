@@ -87,6 +87,7 @@ namespace dmRender
         uint64_t                                m_UserData1;
         uint64_t                                m_UserData2;
         dmRenderDDF::MaterialDesc::VertexSpace  m_VertexSpace;
+        uint8_t                                 m_IsInstanced;
     };
 
     // The order of this enum also defines the order in which the corresponding ROs should be rendered

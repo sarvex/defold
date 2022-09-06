@@ -493,6 +493,16 @@ namespace dmRender
         material->m_VertexSpace = vertex_space;
     }
 
+    bool GetMaterialIsInstanced(HMaterial material)
+    {
+        return material->m_IsInstanced;
+    }
+
+    void SetMaterialIsInstanced(HMaterial material, bool flag)
+    {
+        material->m_IsInstanced = flag;
+    }
+
     dmRenderDDF::MaterialDesc::VertexSpace GetMaterialVertexSpace(HMaterial material)
     {
         return material->m_VertexSpace;

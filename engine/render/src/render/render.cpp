@@ -758,10 +758,16 @@ namespace dmRender
 
             }
 
-            dmGraphics::EnableVertexDeclaration(context, ro->m_VertexDeclaration, ro->m_VertexBuffer, GetMaterialProgram(material));
+            dmGraphics::HProgram program = GetMaterialProgram(material);
+            dmGraphics::EnableVertexDeclaration(context, ro->m_VertexDeclaration, ro->m_VertexBuffer, program);
+
+            if (ro->m_InstanceDeclaration)
+            {
+                dmGraphics::EnableVertexDeclaration(context, ro->m_InstanceDeclaration, ro->m_InstanceBuffer, program);
+            }
 
             if (ro->m_IndexBuffer)
-                dmGraphics::DrawElements(context, ro->m_PrimitiveType, ro->m_VertexStart, ro->m_VertexCount, ro->m_IndexType, ro->m_IndexBuffer);
+                dmGraphics::DrawElements(context, ro->m_PrimitiveType, ro->m_VertexStart, ro->m_VertexCount, ro->m_InstanceCount, ro->m_IndexType, ro->m_IndexBuffer);
             else
                 dmGraphics::Draw(context, ro->m_PrimitiveType, ro->m_VertexStart, ro->m_VertexCount);
 

@@ -231,6 +231,9 @@ namespace dmRender
     uint64_t                        GetMaterialUserData2(HMaterial material);
     void                            SetMaterialUserData2(HMaterial material, uint64_t user_data);
 
+    bool                            GetMaterialIsInstanced(HMaterial material);
+    void                            SetMaterialIsInstanced(HMaterial material, bool flag);
+
     void                            ApplyNamedConstantBuffer(dmRender::HRenderContext render_context, HMaterial material, HNamedConstantBuffer buffer);
 
     void                            ClearMaterialTags(HMaterial material);

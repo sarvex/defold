@@ -623,7 +623,7 @@ namespace dmGraphics
         return ~0;
     }
 
-    static void NullDrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, Type type, HIndexBuffer index_buffer)
+    static void NullDrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, uint32_t instance_count, Type type, HIndexBuffer index_buffer)
     {
         assert(context);
         assert(index_buffer);

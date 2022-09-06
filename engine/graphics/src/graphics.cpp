@@ -568,9 +568,9 @@ namespace dmGraphics
     {
         g_functions.m_HashVertexDeclaration(state, vertex_declaration);
     }
-    void DrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, Type type, HIndexBuffer index_buffer)
+    void DrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, uint32_t instance_count, Type type, HIndexBuffer index_buffer)
     {
-        g_functions.m_DrawElements(context, prim_type, first, count, type, index_buffer);
+        g_functions.m_DrawElements(context, prim_type, first, count, instance_count, type, index_buffer);
     }
     void Draw(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count)
     {
