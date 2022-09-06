@@ -89,6 +89,7 @@ namespace dmGameSystem
         dmArray<dmRig::RigModelVertex>* m_VertexBufferData;
         dmGraphics::HVertexBuffer       m_InstanceBuffer;
         dmArray<uint8_t>                m_InstanceBufferData;
+        dmArray<uint32_t>               m_InstanceRoCount;
         // Temporary scratch array for instances, only used during the creation phase of components
         dmArray<dmGameObject::HInstance> m_ScratchInstances;
         dmRig::HRigContext              m_RigContext;
@@ -491,6 +492,8 @@ namespace dmGameSystem
         dmRender::HMaterial last_material = 0x0;
         uint32_t material_instance_count = 0;
 
+        dmRender::RenderObject* last_ro = 0x0;
+
         world->m_InstanceBufferData.SetSize(0);
 
         for (uint32_t *i=begin;i!=end;i++)
@@ -509,14 +512,55 @@ namespace dmGameSystem
                     world->m_InstanceBufferData.OffsetCapacity(sizeof(dmVMath::Matrix4));
                 }
 
-                uint8_t* transform_buffer = world->m_InstanceBufferData.Begin();
+                if (last_material == 0x0)
+                {
+                    last_material = material;
+                }
+
+                uint8_t* transform_buffer = world->m_InstanceBufferData.End();
                 memcpy(transform_buffer, &component->m_World, sizeof(dmVMath::Matrix4));
 
                 world->m_InstanceBufferData.SetSize(world->m_InstanceBufferData.Size() + sizeof(dmVMath::Matrix4));
 
                 material_instance_count++;
+
+                if (last_ro == 0x0)
+                {
+                    last_ro = world->m_RenderObjects.End();
+                    world->m_RenderObjects.SetSize(world->m_RenderObjects.Size()+1);
+
+                    last_ro->Init();
+                    last_ro->m_VertexDeclaration = world->m_VertexDeclaration;
+                    last_ro->m_VertexBuffer      = mr->m_VertexBuffer;
+                    last_ro->m_Material          = material;
+                    last_ro->m_PrimitiveType     = dmGraphics::PRIMITIVE_TRIANGLES;
+                    last_ro->m_VertexStart       = 0;
+                    last_ro->m_VertexCount       = mr->m_ElementCount;
+                    last_ro->m_WorldTransform    = component->m_World;
+
+                    last_ro->m_InstanceCount       = material_instance_count;
+                    last_ro->m_InstanceBuffer      = world->m_InstanceBuffer;
+                    last_ro->m_InstanceStart       = world->m_InstanceBufferData.Size();
+                    last_ro->m_InstanceDeclaration = world->m_InstanceDeclaration;
+
+                    if (mr->m_IndexBuffer)
+                    {
+                        last_ro->m_IndexBuffer = mr->m_IndexBuffer;
+                        last_ro->m_IndexType = mr->m_IndexBufferElementType;
+                    }
+
+                    for (uint32_t i = 0; i < MAX_TEXTURE_COUNT; ++i)
+                    {
+                        last_ro->m_Textures[i] = GetTexture(component, mr, i);
+                    }
+
+                    if (component->m_RenderConstants) {
+                        dmGameSystem::EnableRenderObjectConstants(last_ro, component->m_RenderConstants);
+                    }
+                }
             }
 
+            /*
             if (last_material != material || !is_instanced)
             {
                 dmRender::RenderObject& ro = *world->m_RenderObjects.End();
@@ -559,45 +603,15 @@ namespace dmGameSystem
                 material_instance_count = 0;
                 last_material = material;
             }
+            */
         }
 
-        /*
-        for (uint32_t *i=begin;i!=end;i++)
+        if (last_ro != 0x0)
         {
-            dmRender::RenderObject& ro = *world->m_RenderObjects.End();
-            world->m_RenderObjects.SetSize(world->m_RenderObjects.Size()+1);
-
-            ModelComponent* component = (ModelComponent*) buf[*i].m_UserData;
-            const ModelResource* mr = component->m_Resource;
-            assert(mr->m_VertexBuffer);
-
-            ro.Init();
-            ro.m_VertexDeclaration = world->m_VertexDeclaration;
-            ro.m_VertexBuffer = mr->m_VertexBuffer;
-            ro.m_Material = GetMaterial(component, mr);
-            ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
-            ro.m_VertexStart = 0;
-            ro.m_VertexCount = mr->m_ElementCount;
-            ro.m_WorldTransform = component->m_World;
-
-            if(mr->m_IndexBuffer)
-            {
-                ro.m_IndexBuffer = mr->m_IndexBuffer;
-                ro.m_IndexType = mr->m_IndexBufferElementType;
-            }
-
-            for(uint32_t i = 0; i < MAX_TEXTURE_COUNT; ++i)
-            {
-                ro.m_Textures[i] = GetTexture(component, mr, i);
-            }
-
-            if (component->m_RenderConstants) {
-                dmGameSystem::EnableRenderObjectConstants(&ro, component->m_RenderConstants);
-            }
-
-            dmRender::AddToRender(render_context, &ro);
+            last_ro->m_InstanceCount = material_instance_count;
+            dmRender::AddToRender(render_context, last_ro);
         }
-        */
+
     }
 
     static inline void RenderBatchWorldVS(ModelWorld* world, dmRender::HMaterial material, dmRender::HRenderContext render_context, dmRender::RenderListEntry *buf, uint32_t* begin, uint32_t* end)

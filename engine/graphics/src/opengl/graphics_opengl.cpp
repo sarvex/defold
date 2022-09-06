@@ -145,6 +145,9 @@ PFNGLUNIFORM4FVPROC glUniform4fv = NULL;
 PFNGLUNIFORMMATRIX4FVPROC glUniformMatrix4fv = NULL;
 PFNGLUNIFORM1IPROC glUniform1i = NULL;
 
+PFNGLVERTEXATTRIBDIVISORPROC glVertexAttribDivisor = NULL;
+PFNGLDRAWELEMENTSINSTANCEDPROC glDrawElementsInstanced = NULL;
+
 #if !defined(GL_ES_VERSION_2_0)
 PFNGLGETSTRINGIPROC glGetStringi = NULL;
 PFNGLGENVERTEXARRAYSPROC glGenVertexArrays = NULL;
@@ -854,6 +857,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         GET_PROC_ADDRESS(glUniform1i, "glUniform1i", PFNGLUNIFORM1IPROC);
         GET_PROC_ADDRESS(glStencilOpSeparate, "glStencilOpSeparate", PFNGLSTENCILOPSEPARATEPROC);
         GET_PROC_ADDRESS(glStencilFuncSeparate, "glStencilFuncSeparate", PFNGLSTENCILFUNCSEPARATEPROC);
+        GET_PROC_ADDRESS(glVertexAttribDivisor, "glVertexAttribDivisor", PFNGLVERTEXATTRIBDIVISORPROC);
+        GET_PROC_ADDRESS(glDrawElementsInstanced, "glDrawElementsInstanced", PFNGLDRAWELEMENTSINSTANCEDPROC);
 #if !defined(GL_ES_VERSION_2_0)
         GET_PROC_ADDRESS(glGetStringi,"glGetStringi",PFNGLGETSTRINGIPROC);
         GET_PROC_ADDRESS(glGenVertexArrays, "glGenVertexArrays", PFNGLGENVERTEXARRAYSPROC);
@@ -1622,9 +1627,9 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
                         4, //vertex_declaration->m_Streams[i].m_Size,
                         GL_FLOAT, // GetOpenGLType(vertex_declaration->m_Streams[i].m_Type),
                         GL_FALSE, // vertex_declaration->m_Streams[i].m_Normalize,
-                        16, //vertex_declaration->m_Stride,
-                        (const GLvoid*)(sizeof(GLfloat) * i * 4)); //BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
-                    glVertexAttribDivisor(vertex_declaration->m_Streams[i].m_LogicalIndex + i, 1);
+                        16 * 4, //vertex_declaration->m_Stride,
+                        (const GLvoid*)(sizeof(GLfloat) * j * 4)); //BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                    glVertexAttribDivisor(vertex_declaration->m_Streams[i].m_LogicalIndex + j, 1);
                 }
             }
             else
@@ -1689,25 +1694,26 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         {
             if (vertex_declaration->m_Streams[i].m_PhysicalIndex != -1)
             {
-                glEnableVertexAttribArray(vertex_declaration->m_Streams[i].m_PhysicalIndex);
-                CHECK_GL_ERROR;
-
                 if (vertex_declaration->m_Streams[i].m_Type == TYPE_FLOAT_MAT4)
                 {
                     for (int j = 0; j < 4; ++j)
                     {
+                        glEnableVertexAttribArray(vertex_declaration->m_Streams[i].m_PhysicalIndex + j);
+                        CHECK_GL_ERROR;
                         glVertexAttribPointer(
                             vertex_declaration->m_Streams[i].m_PhysicalIndex + j,
                             4, //vertex_declaration->m_Streams[i].m_Size,
                             GL_FLOAT, // GetOpenGLType(vertex_declaration->m_Streams[i].m_Type),
                             GL_FALSE, // vertex_declaration->m_Streams[i].m_Normalize,
-                            16, //vertex_declaration->m_Stride,
-                            (const GLvoid*)(sizeof(GLfloat) * i * 4)); //BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
-                        glVertexAttribDivisor(vertex_declaration->m_Streams[i].m_PhysicalIndex + i, 1);
+                            16 * 4, //vertex_declaration->m_Stride,
+                            (const GLvoid*)(sizeof(GLfloat) * j * 4)); //BUFFER_OFFSET(vertex_declaration->m_Streams[i].m_Offset) );   //The starting point of the VBO, for the vertices
+                        glVertexAttribDivisor(vertex_declaration->m_Streams[i].m_PhysicalIndex + j, 1);
                     }
                 }
                 else
                 {
+                    glEnableVertexAttribArray(vertex_declaration->m_Streams[i].m_PhysicalIndex);
+                    CHECK_GL_ERROR;
                     glVertexAttribPointer(
                         vertex_declaration->m_Streams[i].m_PhysicalIndex,
                         vertex_declaration->m_Streams[i].m_Size,
