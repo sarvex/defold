@@ -66,6 +66,7 @@ namespace dmRender
         float m_ShadowColor[4];
         float m_SdfParams[4];
         float m_LayerMasks[3];
+        float m_Pivot[3];
     };
 
     /**

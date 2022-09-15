@@ -206,7 +206,7 @@ namespace dmGameSystem
         {
                 {"position",  0, 3, dmGraphics::TYPE_FLOAT, false},
                 {"texcoord0", 1, 2, dmGraphics::TYPE_FLOAT, false},
-                {"center",    2, 3, dmGraphics::TYPE_FLOAT, false},
+                {"pivot",     2, 3, dmGraphics::TYPE_FLOAT, false},
         };
 
         sprite_world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(render_context), ve, sizeof(ve) / sizeof(dmGraphics::VertexElement));
@@ -456,7 +456,8 @@ namespace dmGameSystem
 
                 const dmGameSystemDDF::SpriteGeometry* geometry = &geometries[frame_index];
 
-                const Matrix4& w = component->m_World;
+                const Matrix4& w     = component->m_World;
+                const Vector3 center = w.getTranslation();
 
                 uint32_t num_points = geometry->m_Vertices.m_Count / 2;
 
@@ -483,12 +484,15 @@ namespace dmGameSystem
                     float u = uvs[0];
                     float v = uvs[1];
 
-                    Vector4 p0 = w * Point3(x, y, 0.0f);
-                    vertices[0].x = ((float*)&p0)[0];
-                    vertices[0].y = ((float*)&p0)[1];
-                    vertices[0].z = ((float*)&p0)[2];
-                    vertices[0].u = u;
-                    vertices[0].v = v;
+                    Vector4 p0     = w * Point3(x, y, 0.0f);
+                    vertices[0].x  = ((float*)&p0)[0];
+                    vertices[0].y  = ((float*)&p0)[1];
+                    vertices[0].z  = ((float*)&p0)[2];
+                    vertices[0].u  = u;
+                    vertices[0].v  = v;
+                    vertices[0].cx = center.getX();
+                    vertices[0].cy = center.getY();
+                    vertices[0].cz = center.getZ();
                 }
 
                 uint32_t index_count = geometry->m_Indices.m_Count;

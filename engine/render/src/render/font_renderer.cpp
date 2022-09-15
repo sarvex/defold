@@ -421,6 +421,7 @@ namespace dmRender
                 {"shadow_color", 4, 4, dmGraphics::TYPE_FLOAT, true},
                 {"sdf_params", 5, 4, dmGraphics::TYPE_FLOAT, false},
                 {"layer_mask", 6, 3, dmGraphics::TYPE_FLOAT, false},
+                {"pivot", 7, 3, dmGraphics::TYPE_FLOAT, false},
         };
 
         text_context.m_VertexDecl = dmGraphics::NewVertexDeclaration(render_context->m_GraphicsContext, ve, sizeof(ve) / sizeof(dmGraphics::VertexElement), sizeof(GlyphVertex));
@@ -704,6 +705,7 @@ namespace dmRender
         const Vector4 face_color    = dmGraphics::UnpackRGBA(te.m_FaceColor);
         const Vector4 outline_color = dmGraphics::UnpackRGBA(te.m_OutlineColor);
         const Vector4 shadow_color  = dmGraphics::UnpackRGBA(te.m_ShadowColor);
+        const Vector3 pivot         = te.m_Transform.getTranslation();
 
         // No support for non-uniform scale with SDF so just peek at the first
         // row to extract scale factor. The purpose of this scaling is to have
@@ -878,7 +880,10 @@ namespace dmRender
                             v.m_SdfParams[0]    = sdf_edge_value; \
                             v.m_SdfParams[1]    = sdf_outline; \
                             v.m_SdfParams[2]    = sdf_smoothing; \
-                            v.m_SdfParams[3]    = sdf_shadow;
+                            v.m_SdfParams[3]    = sdf_shadow; \
+                            v.m_Pivot[0]        = pivot[0]; \
+                            v.m_Pivot[1]        = pivot[1]; \
+                            v.m_Pivot[2]        = pivot[2];
 
                         SET_VERTEX_FONT_PROPERTIES(v1_layer_face)
                         SET_VERTEX_FONT_PROPERTIES(v2_layer_face)

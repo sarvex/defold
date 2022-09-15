@@ -219,6 +219,7 @@ namespace dmParticle
         // Offset 28
         float m_U, m_V;
         // Offset 36
+        float m_PivotX, m_PivotY, m_PivotZ;
     };
 
     /**

@@ -114,8 +114,9 @@ namespace dmGameSystem
             {"position",  0, 3, dmGraphics::TYPE_FLOAT, false},
             {"color",     1, 4, dmGraphics::TYPE_FLOAT, true},
             {"texcoord0", 2, 2, dmGraphics::TYPE_FLOAT, true},
+            {"pivot",     3, 3, dmGraphics::TYPE_FLOAT, false},
         };
-        world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(ctx->m_RenderContext), ve, 3);
+        world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(ctx->m_RenderContext), ve, sizeof(ve) / sizeof(dmGraphics::VertexElement));
         *params.m_World = world;
         return dmGameObject::CREATE_RESULT_OK;
     }
