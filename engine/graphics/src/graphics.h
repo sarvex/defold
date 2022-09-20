@@ -75,16 +75,18 @@ namespace dmGraphics
     // buffer clear types, each value is guaranteed to be separate bits
     enum BufferType
     {
-        BUFFER_TYPE_COLOR0_BIT  = 0x01,
-        BUFFER_TYPE_COLOR1_BIT  = 0x02,
-        BUFFER_TYPE_COLOR2_BIT  = 0x04,
-        BUFFER_TYPE_COLOR3_BIT  = 0x08,
-        BUFFER_TYPE_DEPTH_BIT   = 0x10,
-        BUFFER_TYPE_STENCIL_BIT = 0x20,
+        BUFFER_TYPE_COLOR0_BIT          = 0x01,
+        BUFFER_TYPE_COLOR1_BIT          = 0x02,
+        BUFFER_TYPE_COLOR2_BIT          = 0x04,
+        BUFFER_TYPE_COLOR3_BIT          = 0x08,
+        BUFFER_TYPE_DEPTH_BIT           = 0x10,
+        BUFFER_TYPE_DEPTH_TEXTURE_BIT   = 0x20,
+        BUFFER_TYPE_STENCIL_BIT         = 0x40,
+        BUFFER_TYPE_STENCIL_TEXTURE_BIT = 0x80,
     };
 
     static const uint8_t MAX_BUFFER_COLOR_ATTACHMENTS = 4;
-    static const uint8_t MAX_BUFFER_TYPE_COUNT        = 2 + MAX_BUFFER_COLOR_ATTACHMENTS;
+    static const uint8_t MAX_BUFFER_TYPE_COUNT        = 4 + MAX_BUFFER_COLOR_ATTACHMENTS;
 
     // render states
     enum State
@@ -648,16 +650,20 @@ namespace dmGraphics
 
     const char* GetBufferTypeLiteral(BufferType buffer_type)
     {
+        #define DM_CASE_BUFFER_TYPE_TO_STR(b) case b: return #b;
         switch(buffer_type)
         {
-            case BUFFER_TYPE_COLOR0_BIT:  return "BUFFER_TYPE_COLOR_BIT";
-            case BUFFER_TYPE_COLOR1_BIT:  return "BUFFER_TYPE_COLOR1_BIT";
-            case BUFFER_TYPE_COLOR2_BIT:  return "BUFFER_TYPE_COLOR2_BIT";
-            case BUFFER_TYPE_COLOR3_BIT:  return "BUFFER_TYPE_COLOR3_BIT";
-            case BUFFER_TYPE_DEPTH_BIT:   return "BUFFER_TYPE_DEPTH_BIT";
-            case BUFFER_TYPE_STENCIL_BIT: return "BUFFER_TYPE_STENCIL_BIT";
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_COLOR0_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_COLOR1_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_COLOR2_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_COLOR3_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_DEPTH_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_DEPTH_TEXTURE_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_STENCIL_BIT);
+            DM_CASE_BUFFER_TYPE_TO_STR(BUFFER_TYPE_STENCIL_TEXTURE_BIT);
             default:break;
         }
+        #undef DM_CASE_BUFFER_TYPE_TO_STR
         return "<unknown buffer type>";
     }
 
@@ -665,12 +671,14 @@ namespace dmGraphics
     {
         switch(buffer_type)
         {
-            case BUFFER_TYPE_COLOR0_BIT:  return 0;
-            case BUFFER_TYPE_COLOR1_BIT:  return 1;
-            case BUFFER_TYPE_COLOR2_BIT:  return 2;
-            case BUFFER_TYPE_COLOR3_BIT:  return 3;
-            case BUFFER_TYPE_DEPTH_BIT:   return 4;
-            case BUFFER_TYPE_STENCIL_BIT: return 5;
+            case BUFFER_TYPE_COLOR0_BIT:          return 0;
+            case BUFFER_TYPE_COLOR1_BIT:          return 1;
+            case BUFFER_TYPE_COLOR2_BIT:          return 2;
+            case BUFFER_TYPE_COLOR3_BIT:          return 3;
+            case BUFFER_TYPE_DEPTH_BIT:           return 4;
+            case BUFFER_TYPE_DEPTH_TEXTURE_BIT:   return 5;
+            case BUFFER_TYPE_STENCIL_BIT:         return 6;
+            case BUFFER_TYPE_STENCIL_TEXTURE_BIT: return 7;
             default: break;
         }
         return ~0u;

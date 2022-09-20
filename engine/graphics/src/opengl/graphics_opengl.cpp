@@ -2155,6 +2155,15 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             }
         }
 
+        if (buffer_type_flags & dmGraphics::BUFFER_TYPE_DEPTH_TEXTURE_BIT)
+        {
+            uint8_t depth_texture_index = GetBufferTypeIndex(BUFFER_TYPE_DEPTH_TEXTURE_BIT);
+            rt->m_DepthTexture = NewTexture(context, creation_params[depth_texture_index]);
+            SetTexture(rt->m_DepthTexture, params[depth_texture_index]);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, rt->m_DepthTexture->m_Texture, 0);
+            CHECK_GL_ERROR;
+        }
+
         if(buffer_type_flags & (dmGraphics::BUFFER_TYPE_STENCIL_BIT | dmGraphics::BUFFER_TYPE_DEPTH_BIT))
         {
             if(!(buffer_type_flags & dmGraphics::BUFFER_TYPE_STENCIL_BIT))
@@ -2292,13 +2301,17 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
 
     static HTexture OpenGLGetRenderTargetTexture(HRenderTarget render_target, BufferType buffer_type)
     {
-        if(!(buffer_type == BUFFER_TYPE_COLOR0_BIT  ||
-           buffer_type == BUFFER_TYPE_COLOR0_BIT ||
-           buffer_type == BUFFER_TYPE_COLOR1_BIT ||
-           buffer_type == BUFFER_TYPE_COLOR2_BIT ||
-           buffer_type == BUFFER_TYPE_COLOR3_BIT))
+        if (buffer_type == BUFFER_TYPE_DEPTH_BIT || buffer_type == BUFFER_TYPE_STENCIL_BIT)
         {
             return 0;
+        }
+        else if (buffer_type == BUFFER_TYPE_DEPTH_TEXTURE_BIT)
+        {
+            return render_target->m_DepthTexture;
+        }
+        else if (buffer_type == BUFFER_TYPE_STENCIL_TEXTURE_BIT)
+        {
+            return render_target->m_StencilTexture;
         }
         return render_target->m_ColorBufferTexture[GetBufferTypeIndex(buffer_type)];
     }
@@ -2544,10 +2557,18 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         return HANDLE_RESULT_OK;
     }
 
+    static inline GLint GetDepthBufferInternalFormat(HContext ctx)
+    {
+         return ctx->m_DepthBufferBits == 16 ?
+            DMGRAPHICS_RENDER_BUFFER_FORMAT_DEPTH16 :
+            DMGRAPHICS_RENDER_BUFFER_FORMAT_DEPTH24;
+    }
+
     static void OpenGLSetTexture(HTexture texture, const TextureParams& params)
     {
         DM_PROFILE(__FUNCTION__);
 
+        /*
         // validate write accessibility for format. Some format are not garuanteed to be writeable
         switch (params.m_Format)
         {
@@ -2560,6 +2581,7 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             default:
                 break;
         }
+        */
 
         // Responsibility is on caller to not send in too big textures.
         assert(params.m_Width <= g_Context->m_MaxTextureSize);
@@ -2694,7 +2716,11 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             gl_format = DMGRAPHICS_TEXTURE_FORMAT_RG;
             internal_format = DMGRAPHICS_TEXTURE_FORMAT_RG32F;
             break;
-
+        case TEXTURE_FORMAT_DEPTH:
+            gl_type         = GL_FLOAT;
+            gl_format       = GL_DEPTH_COMPONENT;
+            internal_format = GetDepthBufferInternalFormat(g_Context);
+            break;
         default:
             gl_format = 0;
             assert(0);
@@ -2705,6 +2731,7 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         {
         case TEXTURE_FORMAT_LUMINANCE:
         case TEXTURE_FORMAT_LUMINANCE_ALPHA:
+        case TEXTURE_FORMAT_DEPTH:
         case TEXTURE_FORMAT_RGB:
         case TEXTURE_FORMAT_RGBA:
         case TEXTURE_FORMAT_RGB_16BPP:
