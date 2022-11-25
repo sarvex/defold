@@ -60,10 +60,14 @@ namespace dmGameSystem
 
     struct MaterialResources
     {
-        MaterialResources() : m_FragmentProgram(0), m_VertexProgram(0) {}
+        MaterialResources()
+        {
+            memset(this, 0, sizeof(*this));
+        }
 
         dmGraphics::HFragmentProgram m_FragmentProgram;
-        dmGraphics::HVertexProgram m_VertexProgram;
+        dmGraphics::HVertexProgram   m_VertexProgram;
+        dmGraphics::HTexture         m_Textures[dmRender::RenderObject::MAX_TEXTURE_COUNT];
     };
 
     bool ValidateFormat(dmRenderDDF::MaterialDesc* material_desc)
@@ -73,7 +77,7 @@ namespace dmGameSystem
         return true;
     }
 
-    dmResource::Result AcquireResources(dmResource::HFactory factory, dmRenderDDF::MaterialDesc* ddf, MaterialResources* resources)
+    static dmResource::Result AcquireResources(dmResource::HFactory factory, dmRenderDDF::MaterialDesc* ddf, MaterialResources* resources)
     {
         dmResource::Result factory_e;
         factory_e = dmResource::Get(factory, ddf->m_VertexProgram, (void**) &resources->m_VertexProgram);
@@ -89,6 +93,36 @@ namespace dmGameSystem
             resources->m_VertexProgram = 0x0;
             return factory_e;
         }
+
+        dmGraphics::HTexture textures[dmRender::RenderObject::MAX_TEXTURE_COUNT];
+        memset(textures, 0, dmRender::RenderObject::MAX_TEXTURE_COUNT * sizeof(dmGraphics::HTexture));
+
+        for (uint32_t i = 0; i < ddf->m_Textures.m_Count && i < dmRender::RenderObject::MAX_TEXTURE_COUNT; ++i)
+        {
+            const char* texture_path = ddf->m_Textures[i];
+            if (*texture_path != 0)
+            {
+                factory_e = dmResource::Get(factory, texture_path, (void**) &textures[i]);
+                if (factory_e != dmResource::RESULT_OK)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (factory_e != dmResource::RESULT_OK)
+        {
+            for (uint32_t i = 0; i < dmRender::RenderObject::MAX_TEXTURE_COUNT; ++i)
+            {
+                if (textures[i])
+                {
+                    dmResource::Release(factory, (void*) textures[i]);
+                }
+            }
+            return factory_e;
+        }
+
+        memcpy(resources->m_Textures, textures, sizeof(dmGraphics::HTexture) * dmRender::RenderObject::MAX_TEXTURE_COUNT);
 
         return dmResource::RESULT_OK;
     }
@@ -158,7 +192,7 @@ namespace dmGameSystem
                 (dmVMath::Vector4*) vertex_constant[i].m_Value.m_Data, vertex_constant[i].m_Value.m_Count);
         }
 
-
+        /*
         const char** textures = ddf->m_Textures.m_Data;
         uint32_t texture_count = ddf->m_Textures.m_Count;
         if (texture_count > 0)
@@ -173,6 +207,7 @@ namespace dmGameSystem
                     dmGraphics::TEXTURE_FILTER_DEFAULT, 1.0f);
             }
         }
+        */
 
         dmRenderDDF::MaterialDesc::Sampler* sampler = ddf->m_Samplers.m_Data;
         uint32_t sampler_count = ddf->m_Samplers.m_Count;
@@ -197,7 +232,9 @@ namespace dmGameSystem
         dmResource::Result r = AcquireResources(params.m_Factory, ddf, &resources);
         if (r == dmResource::RESULT_OK)
         {
-            dmRender::HMaterial material = dmRender::NewMaterial(render_context, resources.m_VertexProgram, resources.m_FragmentProgram);
+            dmRender::HMaterial material = dmRender::NewMaterial(render_context,
+                resources.m_VertexProgram, resources.m_FragmentProgram,
+                resources.m_Textures, dmRender::RenderObject::MAX_TEXTURE_COUNT);
 
             dmResource::SResourceDescriptor desc;
             dmResource::Result factory_e;

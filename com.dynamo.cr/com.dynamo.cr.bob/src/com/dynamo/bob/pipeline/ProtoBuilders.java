@@ -301,6 +301,18 @@ public class ProtoBuilders {
             messageBuilder.setVertexProgram(BuilderUtil.replaceExt(messageBuilder.getVertexProgram(), ".vp", ".vpc"));
             BuilderUtil.checkResource(this.project, resource, "fragment program", messageBuilder.getFragmentProgram());
             messageBuilder.setFragmentProgram(BuilderUtil.replaceExt(messageBuilder.getFragmentProgram(), ".fp", ".fpc"));
+
+            List<String> newTextureList = new ArrayList<>();
+            for (String s : messageBuilder.getTexturesList())
+            {
+                System.out.println("tex: " + s);
+                IResource res = BuilderUtil.checkResource(this.project, resource, "texture", s);
+                Task<?> embedTask = this.project.createTask(res);
+                newTextureList.add(replaceTextureName(s));
+            }
+            messageBuilder.clearTextures();
+            messageBuilder.addAllTextures(newTextureList);
+
             return messageBuilder;
         }
     }

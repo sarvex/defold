@@ -39,4 +39,3 @@ fragment_constants {
     w: 1.0
   }
 }
-textures: "tex0"

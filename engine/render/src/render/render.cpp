@@ -830,9 +830,18 @@ namespace dmRender
 
             for (uint32_t i = 0; i < RenderObject::MAX_TEXTURE_COUNT; ++i)
             {
-                dmGraphics::HTexture texture = ro->m_Textures[i];
+                dmGraphics::HTexture texture = material->m_Textures[i];
+
+                if (ro->m_Textures[i])
+                {
+                    texture = ro->m_Textures[i];
+                }
+
                 if (render_context->m_Textures[i])
+                {
                     texture = render_context->m_Textures[i];
+                }
+
                 if (texture)
                 {
                     dmGraphics::EnableTexture(context, i, texture);

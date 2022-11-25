@@ -74,12 +74,14 @@ namespace dmRender
         , m_UserData2(0) // used for hot reloading. stores shader name
         , m_VertexSpace(dmRenderDDF::MaterialDesc::VERTEX_SPACE_LOCAL)
         {
+            memset(m_Textures, 0, sizeof(dmGraphics::HTexture) * dmRender::RenderObject::MAX_TEXTURE_COUNT);
         }
 
         dmRender::HRenderContext                m_RenderContext;
         dmGraphics::HProgram                    m_Program;
         dmGraphics::HVertexProgram              m_VertexProgram;
         dmGraphics::HFragmentProgram            m_FragmentProgram;
+        dmGraphics::HTexture                    m_Textures[dmRender::RenderObject::MAX_TEXTURE_COUNT];
         dmHashTable64<int32_t>                  m_NameHashToLocation;
         dmArray<MaterialConstant>               m_Constants;
         dmArray<Sampler>                        m_Samplers;

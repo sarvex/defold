@@ -60,12 +60,14 @@ public class ModelBuilder extends Builder<Void> {
             taskBuilder.addInput(animations);
         }
         for (String t : modelDescBuilder.getTexturesList()) {
-            IResource res = BuilderUtil.checkResource(this.project, input, "texture", t);
-            Task<?> embedTask = this.project.createTask(res);
-            if (embedTask == null) {
-                throw new CompileExceptionError(input,
-                                                0,
-                                                String.format("Failed to create build task for component '%s'", res.getPath()));
+            if (!t.isEmpty()) {
+                IResource res = BuilderUtil.checkResource(this.project, input, "texture", t);
+                Task<?> embedTask = this.project.createTask(res);
+                if (embedTask == null) {
+                    throw new CompileExceptionError(input,
+                                                    0,
+                                                    String.format("Failed to create build task for component '%s'", res.getPath()));
+                }
             }
         }
         return taskBuilder.build();
@@ -117,8 +119,10 @@ public class ModelBuilder extends Builder<Void> {
 
         List<String> newTextureList = new ArrayList<String>();
         for (String t : modelDescBuilder.getTexturesList()) {
-            BuilderUtil.checkResource(this.project, resource, "texture", t);
-            newTextureList.add(ProtoBuilders.replaceTextureName(t));
+            if (!t.isEmpty()) {
+                BuilderUtil.checkResource(this.project, resource, "texture", t);
+                newTextureList.add(ProtoBuilders.replaceTextureName(t));
+            }
         }
         model.addAllTextures(newTextureList);
         model.setDefaultAnimation(modelDescBuilder.getDefaultAnimation());

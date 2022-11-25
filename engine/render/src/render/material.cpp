@@ -27,7 +27,9 @@ namespace dmRender
 {
     using namespace dmVMath;
 
-    HMaterial NewMaterial(dmRender::HRenderContext render_context, dmGraphics::HVertexProgram vertex_program, dmGraphics::HFragmentProgram fragment_program)
+    HMaterial NewMaterial(dmRender::HRenderContext render_context,
+        dmGraphics::HVertexProgram vertex_program, dmGraphics::HFragmentProgram fragment_program,
+        dmGraphics::HTexture* textures, uint8_t texture_count)
     {
         Material* m = new Material;
         m->m_RenderContext = render_context;
@@ -35,6 +37,11 @@ namespace dmRender
         m->m_FragmentProgram = fragment_program;
         dmGraphics::HContext graphics_context = dmRender::GetGraphicsContext(render_context);
         m->m_Program = dmGraphics::NewProgram(graphics_context, vertex_program, fragment_program);
+
+        for (int i = 0; i < dmMath::Min(dmRender::RenderObject::MAX_TEXTURE_COUNT, (uint32_t) texture_count); ++i)
+        {
+            m->m_Textures[i] = textures[i];
+        }
 
         uint32_t total_constants_count = dmGraphics::GetUniformCount(m->m_Program);
         const uint32_t buffer_size = 128;
