@@ -94,13 +94,37 @@ namespace dmScript
         size_t buffer_len = 0;
         const char* buffer = lua_tolstring(L, 1, &buffer_len);
 
-        bool premult = false;
-        if (top == 2) {
-            premult = lua_toboolean(L, 2);
+        dmImage::ImageLoadOptions opts = {};
+        if (top > 1)
+        {
+            if (lua_isboolean(L, 2))
+            {
+                opts.m_PremultiplyAlpha = lua_toboolean(L, 2);
+            }
+            else if (lua_istable(L, 2))
+            {
+                lua_pushvalue(L, 2);
+                {
+                    lua_getfield(L, -1, "premultiply_alpha");
+                    if (!lua_isnil(L, -1))
+                    {
+                        opts.m_PremultiplyAlpha = lua_toboolean(L, -1);
+                    }
+                    lua_pop(L, 1);
+
+                    lua_getfield(L, -1, "desired_channels");
+                    if (!lua_isnil(L, -1))
+                    {
+                        opts.m_DesiredChannels = lua_tointeger(L, -1);
+                    }
+                    lua_pop(L, 1);
+                }
+                lua_pop(L, 1);
+            }
         }
 
         dmImage::Image image;
-        dmImage::Result r = dmImage::Load(buffer, buffer_len, premult, &image);
+        dmImage::Result r = dmImage::Load(buffer, buffer_len, opts, &image);
         if (r == dmImage::RESULT_OK) {
 
             int bytes_per_pixel = dmImage::BytesPerPixel(image.m_Type);
@@ -129,6 +153,12 @@ namespace dmScript
                     break;
                 case dmImage::TYPE_LUMINANCE:
                     lua_pushliteral(L, "l");
+                    break;
+                case dmImage::TYPE_RGB32F:
+                    lua_pushliteral(L, "rgb32f");
+                    break;
+                case dmImage::TYPE_RGBA32F:
+                    lua_pushliteral(L, "rgba32f");
                     break;
                 default:
                     assert(false);
@@ -170,6 +200,8 @@ namespace dmScript
         SETCONSTANT(TYPE_RGBA, "rgba")
         SETCONSTANT(TYPE_LUMINANCE, "l")
 
+        SETCONSTANT(TYPE_RGB32F, "rgb32f")
+        SETCONSTANT(TYPE_RGBA32F, "rgba32f")
 #undef SETCONSTANT
 
 

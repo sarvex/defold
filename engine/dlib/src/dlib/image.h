@@ -31,6 +31,8 @@ namespace dmImage
         TYPE_RGB        = 0,
         TYPE_RGBA       = 1,
         TYPE_LUMINANCE  = 2,
+        TYPE_RGB32F     = 3,
+        TYPE_RGBA32F    = 4,
     };
 
     struct Image
@@ -59,6 +61,14 @@ namespace dmImage
      * @return RESULT_OK on success
      */
     Result Load(const void* buffer, uint32_t buffer_size, bool premult, Image* image);
+
+    struct ImageLoadOptions
+    {
+        uint8_t m_DesiredChannels  : 3;
+        uint8_t m_PremultiplyAlpha : 1;
+    };
+
+    Result Load(const void* buffer, uint32_t buffer_size, ImageLoadOptions opts, Image* image);
 
     /**
      * Free loaded image

@@ -507,6 +507,8 @@ static int GraphicsTextureFormatToImageFormat(int textureformat)
         case dmGraphics::TEXTURE_FORMAT_RGBA_PVRTC_2BPPV1:  return dmGraphics::TextureImage::TEXTURE_FORMAT_RGBA_PVRTC_2BPPV1;
         case dmGraphics::TEXTURE_FORMAT_RGBA_PVRTC_4BPPV1:  return dmGraphics::TextureImage::TEXTURE_FORMAT_RGBA_PVRTC_4BPPV1;
         case dmGraphics::TEXTURE_FORMAT_RGB_ETC1:           return dmGraphics::TextureImage::TEXTURE_FORMAT_RGB_ETC1;
+        case dmGraphics::TEXTURE_FORMAT_RGB32F:             return dmGraphics::TextureImage::TEXTURE_FORMAT_RGB32F;
+        case dmGraphics::TEXTURE_FORMAT_RGBA32F:            return dmGraphics::TextureImage::TEXTURE_FORMAT_RGBA32F;
     };
     assert(false);
     return -1;
@@ -851,11 +853,22 @@ static int SetTexture(lua_State* L)
     x               = dmMath::Max(0, x);
     y               = dmMath::Max(0, y);
 
-    dmScript::LuaHBuffer* buffer = dmScript::CheckBuffer(L, 3);
-
     uint8_t* data = 0;
     uint32_t datasize = 0;
-    dmBuffer::GetBytes(buffer->m_Buffer, (void**)&data, &datasize);
+
+    if (dmScript::IsBuffer(L, 3))
+    {
+        dmScript::LuaHBuffer* buffer = dmScript::CheckBuffer(L, 3);
+        dmBuffer::GetBytes(buffer->m_Buffer, (void**)&data, &datasize);
+    }
+    else if (lua_isstring(L, 3))
+    {
+        data = (uint8_t*) lua_tolstring(L, 3, (size_t*) &datasize);
+    }
+    else
+    {
+        return luaL_error(L, "Invalid data type, must be buffer or string");
+    }
 
     dmGraphics::TextureImage::Image image  = {};
     dmGraphics::TextureImage texture_image = {};
@@ -2172,6 +2185,15 @@ static void LuaInit(lua_State* L)
     SETGRAPHICSCONSTANT(TEXTURE_FORMAT_R_BC4);
     SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RG_BC5);
     SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RGBA_BC7);
+
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RGB16F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RGB32F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RGBA16F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RGBA32F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_R16F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RG16F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_R32F);
+    SETGRAPHICSCONSTANT(TEXTURE_FORMAT_RG32F);
 
 #undef SETGRAPHICSCONSTANT
 

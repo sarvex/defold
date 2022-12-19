@@ -50,45 +50,118 @@ namespace dmImage
         }
     }
 
-    Result Load(const void* buffer, uint32_t buffer_size, bool premult, Image* image)
+    static Result LoadLinear(const void* buffer, uint32_t buffer_size, ImageLoadOptions opts, Image* image)
     {
         int x, y, comp;
+        float* ret = stbi_loadf_from_memory((const stbi_uc*) buffer, (int) buffer_size, &x, &y, &comp, opts.m_DesiredChannels);
 
-        unsigned char* ret = stbi_load_from_memory((const stbi_uc*) buffer, (int) buffer_size, &x, &y, &comp, 0);
-
-        if (ret) {
+        if (ret)
+        {
             Image i;
-            i.m_Width = (uint32_t) x;
+            i.m_Width  = (uint32_t) x;
             i.m_Height = (uint32_t) y;
-            switch (comp) {
-            case 1:
-                i.m_Type = TYPE_LUMINANCE;
-                break;
-            case 2:
-                // Luminance + alpha. Convert to luminance
-                i.m_Type = TYPE_LUMINANCE;
-                ret = stbi__convert_format(ret, 2, 1, x, y);
-                break;
-            case 3:
-                i.m_Type = TYPE_RGB;
-                break;
-            case 4:
-                i.m_Type = TYPE_RGBA;
-                if (premult) {
-                    Premultiply(ret, x, y);
-                }
-                break;
-            default:
+
+            comp = opts.m_DesiredChannels > 0 ? opts.m_DesiredChannels : comp;
+
+            for (int i = 0; i < x * y * comp; ++i)
+            {
+                if (ret[i] > 1.0)
+                    dmLogInfo("%f", ret[i]);
+            }
+
+            if (comp == 3)
+            {
+                i.m_Type = TYPE_RGB32F;
+            }
+            else if (comp == 4)
+            {
+                i.m_Type = TYPE_RGBA32F;
+            }
+            else
+            {
                 dmLogError("Unexpected number of components in image (%d)", comp);
                 free(ret);
                 return RESULT_IMAGE_ERROR;
             }
+
             i.m_Buffer = (void*) ret;
             *image = i;
-            return RESULT_OK;
-        } else {
+        }
+        else
+        {
             dmLogError("Failed to load image: '%s'", stbi_failure_reason());
             return RESULT_IMAGE_ERROR;
+        }
+
+        return RESULT_OK;
+    }
+
+    static Result Load8Bit(const void* buffer, uint32_t buffer_size, ImageLoadOptions opts, Image* image)
+    {
+        int x, y, comp;
+        unsigned char* ret = stbi_load_from_memory((const stbi_uc*) buffer, (int) buffer_size, &x, &y, &comp, opts.m_DesiredChannels);
+
+        if (ret)
+        {
+            Image i;
+            i.m_Width = (uint32_t) x;
+            i.m_Height = (uint32_t) y;
+            comp = opts.m_DesiredChannels > 0 ? opts.m_DesiredChannels : comp;
+
+            switch (comp)
+            {
+                case 1:
+                    i.m_Type = TYPE_LUMINANCE;
+                    break;
+                case 2:
+                    // Luminance + alpha. Convert to luminance
+                    i.m_Type = TYPE_LUMINANCE;
+                    ret = stbi__convert_format(ret, 2, 1, x, y);
+                    break;
+                case 3:
+                    i.m_Type = TYPE_RGB;
+                    break;
+                case 4:
+                    i.m_Type = TYPE_RGBA;
+                    if (opts.m_PremultiplyAlpha)
+                    {
+                        Premultiply(ret, x, y);
+                    }
+                    break;
+                default:
+                    dmLogError("Unexpected number of components in image (%d)", comp);
+                    free(ret);
+                    return RESULT_IMAGE_ERROR;
+            }
+
+            i.m_Buffer = (void*) ret;
+            *image = i;
+        }
+        else
+        {
+            dmLogError("Failed to load image: '%s'", stbi_failure_reason());
+            return RESULT_IMAGE_ERROR;
+        }
+
+        return RESULT_OK;
+    }
+
+    Result Load(const void* buffer, uint32_t buffer_size, bool premult, Image* image)
+    {
+        ImageLoadOptions opts;
+        opts.m_PremultiplyAlpha = premult;
+        return Load(buffer, buffer_size, opts, image);
+    }
+
+    Result Load(const void* buffer, uint32_t buffer_size, ImageLoadOptions opts, Image* image)
+    {
+        if (stbi_is_hdr_from_memory((const stbi_uc*) buffer, (int) buffer_size))
+        {
+            return LoadLinear(buffer, buffer_size, opts, image);
+        }
+        else
+        {
+            return Load8Bit(buffer, buffer_size, opts, image);
         }
     }
 
@@ -102,12 +175,11 @@ namespace dmImage
     {
         switch (type)
         {
-        case dmImage::TYPE_RGB:
-            return 3;
-        case dmImage::TYPE_RGBA:
-            return 4;
-        case dmImage::TYPE_LUMINANCE:
-            return 1;
+            case dmImage::TYPE_RGB:       return 3;
+            case dmImage::TYPE_RGBA:      return 4;
+            case dmImage::TYPE_LUMINANCE: return 1;
+            case dmImage::TYPE_RGB32F:    return 3 * sizeof(float);
+            case dmImage::TYPE_RGBA32F:   return 4 * sizeof(float);
         }
         return 0;
     }
