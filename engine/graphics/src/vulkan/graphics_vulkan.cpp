@@ -1613,7 +1613,7 @@ bail:
         for (uint32_t i = 0; i < stream_declaration->m_StreamCount; ++i)
         {
             VertexStream& stream        = stream_declaration->m_Streams[i];
-            vd->m_Streams[i].m_NameHash = dmHashString64(stream.m_Name);
+            vd->m_Streams[i].m_NameHash = stream.m_NameHash;//dmHashString64(stream.m_Name);
             vd->m_Streams[i].m_Format   = GetVulkanFormatFromTypeAndSize(stream.m_Type, stream.m_Size);
             vd->m_Streams[i].m_Offset   = vd->m_Stride;
             vd->m_Streams[i].m_Location = 0;
@@ -3461,6 +3461,40 @@ bail:
         DestroyPipeline(context->m_LogicalDevice.m_Device, value);
     }
 
+    uint32_t VulkanGetVertexStride(HProgram prog)
+    {
+        assert(0);
+        return 0;
+    }
+
+    uint32_t VulkanGetVertexStreamCount(HProgram prog)
+    {
+        Program* program_ptr = (Program*) prog;
+        ShaderModule* vertex_shader = program_ptr->m_VertexModule;
+        return vertex_shader->m_AttributeCount;
+    }
+
+    void VulkanGetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type)
+    {
+        Program* program_ptr = (Program*) prog;
+        ShaderModule* vertex_shader = program_ptr->m_VertexModule;
+
+        if (stream_index >= vertex_shader->m_AttributeCount)
+        {
+            *name     = 0;
+            *location = -1;
+            *size     = 0;
+            *type     = (Type) -1;
+        }
+        else
+        {
+            *name     = vertex_shader->m_Attributes[stream_index].m_NameHash; //program_ptr->m_Attributes[stream_index].m_NameHash;
+            *location = vertex_shader->m_Attributes[stream_index].m_Binding; //program_ptr->m_Attributes[stream_index].m_Location;
+            *size     = GetShaderTypeSize(vertex_shader->m_Attributes[stream_index].m_Type) / sizeof(float); //vertex_shader->m_Attributes[stream_index].m_ElementCount; //program_ptr->m_Attributes[stream_index].m_Size;
+            *type     = TYPE_FLOAT; //shaderDataTypeToGraphicsType( vertex_shader->m_Attributes[stream_index].m_Type); //program_ptr->m_Attributes[stream_index].m_Type;
+        }
+    }
+
     static GraphicsAdapterFunctionTable VulkanRegisterFunctionTable()
     {
         GraphicsAdapterFunctionTable fn_table;
@@ -3569,6 +3603,9 @@ bail:
         fn_table.m_GetSupportedExtension = VulkanGetSupportedExtension;
         fn_table.m_IsMultiTargetRenderingSupported = VulkanIsMultiTargetRenderingSupported;
         fn_table.m_GetPipelineState = VulkanGetPipelineState;
+        fn_table.m_GetVertexStride = VulkanGetVertexStride;
+        fn_table.m_GetVertexStreamCount = VulkanGetVertexStreamCount;
+        fn_table.m_GetVertexStream = VulkanGetVertexStream;
         return fn_table;
     }
 }

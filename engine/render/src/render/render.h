@@ -83,6 +83,12 @@ namespace dmRender
         Constant(dmhash_t name_hash, int32_t location);
     };
 
+    struct MaterialVertexAttribute
+    {
+        dmhash_t m_StreamNameHash;
+        dmhash_t m_Propertyhash;
+    };
+
     struct MaterialConstant
     {
         HConstant           m_Constant;
@@ -239,6 +245,10 @@ namespace dmRender
     HPredicate                      NewPredicate();
     void                            DeletePredicate(HPredicate predicate);
     Result                          AddPredicateTag(HPredicate predicate, dmhash_t tag);
+
+    void SetMaterialVertexAttributes(HMaterial material, MaterialVertexAttribute* attributes, uint32_t num_attributes);
+    void GetMaterialVertexAttribute(HMaterial material, uint32_t attribute_index, MaterialVertexAttribute* attribute_out);
+    uint32_t GetMaterialVertexAttributeCount(HMaterial material);
 
 }
 

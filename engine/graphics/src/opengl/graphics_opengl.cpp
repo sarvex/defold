@@ -436,32 +436,61 @@ static void LogFrameBufferError(GLenum status)
         return type_lut[type];
     }
 
+    static uint16_t GetNumComponents(GLenum type)
+    {
+        switch(type)
+        {
+            case GL_FLOAT:        return 1;
+            case GL_FLOAT_VEC2:   return 2;
+            case GL_FLOAT_VEC3:   return 3;
+            case GL_FLOAT_VEC4:   return 4;
+            case GL_FLOAT_MAT2:   return 4;
+            case GL_FLOAT_MAT3:   return 9;
+            case GL_FLOAT_MAT4:   return 16;
+            case GL_FLOAT_MAT2x3: return 6;
+            case GL_FLOAT_MAT2x4: return 8;
+            case GL_FLOAT_MAT3x2: return 6;
+            case GL_FLOAT_MAT3x4: return 12;
+            case GL_FLOAT_MAT4x2: return 8;
+            case GL_FLOAT_MAT4x3: return 12;
+            default:break;
+        }
+
+        assert(0);
+        return -1;
+    }
+
+    /*
+    GL_FLOAT
+    GL_FLOAT_VEC2
+    GL_FLOAT_VEC3
+    GL_FLOAT_VEC4
+    GL_FLOAT_MAT2
+    GL_FLOAT_MAT3
+    GL_FLOAT_MAT4
+    GL_FLOAT_MAT2x3
+    GL_FLOAT_MAT2x4
+    GL_FLOAT_MAT3x2
+    GL_FLOAT_MAT3x4
+    GL_FLOAT_MAT4x2
+    GL_FLOAT_MAT4x3
+    */
+
     static Type GetGraphicsType(GLenum type)
     {
         switch(type)
         {
-            case GL_BYTE:
-                return TYPE_BYTE;
-            case GL_UNSIGNED_BYTE:
-                return TYPE_UNSIGNED_BYTE;
-            case GL_SHORT:
-                return TYPE_SHORT;
-            case GL_UNSIGNED_SHORT:
-                return TYPE_UNSIGNED_SHORT;
-            case GL_INT:
-                return TYPE_INT;
-            case GL_UNSIGNED_INT:
-                return TYPE_UNSIGNED_INT;
-            case GL_FLOAT:
-                return TYPE_FLOAT;
-            case GL_FLOAT_VEC4:
-                return TYPE_FLOAT_VEC4;
-            case GL_FLOAT_MAT4:
-                return TYPE_FLOAT_MAT4;
-            case GL_SAMPLER_2D:
-                return TYPE_SAMPLER_2D;
-            case GL_SAMPLER_CUBE:
-                return TYPE_SAMPLER_CUBE;
+            case GL_BYTE:           return TYPE_BYTE;
+            case GL_UNSIGNED_BYTE:  return TYPE_UNSIGNED_BYTE;
+            case GL_SHORT:          return TYPE_SHORT;
+            case GL_UNSIGNED_SHORT: return TYPE_UNSIGNED_SHORT;
+            case GL_INT:            return TYPE_INT;
+            case GL_UNSIGNED_INT:   return TYPE_UNSIGNED_INT;
+            case GL_FLOAT:          return TYPE_FLOAT;
+            case GL_FLOAT_VEC4:     return TYPE_FLOAT_VEC4;
+            case GL_FLOAT_MAT4:     return TYPE_FLOAT_MAT4;
+            case GL_SAMPLER_2D:     return TYPE_SAMPLER_2D;
+            case GL_SAMPLER_CUBE:   return TYPE_SAMPLER_CUBE;
             default:break;
         }
 
@@ -1526,25 +1555,6 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         return context->m_MaxElementIndices;
     }
 
-    static uint32_t GetTypeSize(dmGraphics::Type type)
-    {
-        if (type == dmGraphics::TYPE_BYTE || type == dmGraphics::TYPE_UNSIGNED_BYTE)
-        {
-            return 1;
-        }
-        else if (type == dmGraphics::TYPE_SHORT || type == dmGraphics::TYPE_UNSIGNED_SHORT)
-        {
-            return 2;
-        }
-        else if (type == dmGraphics::TYPE_INT || type == dmGraphics::TYPE_UNSIGNED_INT || type == dmGraphics::TYPE_FLOAT)
-        {
-             return 4;
-        }
-
-        assert(0);
-        return 0;
-    }
-
     static HVertexDeclaration OpenGLNewVertexDeclarationStride(HContext context, HVertexStreamDeclaration stream_declaration, uint32_t stride)
     {
         HVertexDeclaration vd = NewVertexDeclaration(context, stream_declaration);
@@ -1561,7 +1571,7 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
 
         for (uint32_t i=0; i<stream_declaration->m_StreamCount; i++)
         {
-            vd->m_Streams[i].m_Name          = stream_declaration->m_Streams[i].m_Name;
+            vd->m_Streams[i].m_NameHash      = stream_declaration->m_Streams[i].m_NameHash; // stream_declaration->m_Streams[i].m_Name;
             vd->m_Streams[i].m_LogicalIndex  = i;
             vd->m_Streams[i].m_PhysicalIndex = -1;
             vd->m_Streams[i].m_Size          = stream_declaration->m_Streams[i].m_Size;
@@ -1620,12 +1630,23 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
 
     static void BindVertexDeclarationProgram(HContext context, HVertexDeclaration vertex_declaration, HProgram program)
     {
-
         uint32_t n = vertex_declaration->m_StreamCount;
         VertexDeclaration::Stream* streams = &vertex_declaration->m_Streams[0];
+
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) program);
+
         for (uint32_t i=0; i < n; i++)
         {
-            GLint location = glGetAttribLocation(program, streams[i].m_Name);
+            int32_t location = -1;
+            for (int j = 0; j < program_ptr->m_Attributes.Size(); ++j)
+            {
+                if (program_ptr->m_Attributes[j].m_NameHash == streams[i].m_NameHash)
+                {
+                    location = program_ptr->m_Attributes[j].m_Location;
+                    break;
+                }
+            }
+
             if (location != -1)
             {
                 streams[i].m_PhysicalIndex = location;
@@ -1707,7 +1728,7 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             // TODO: We might want to store a hash of the name already in the vertexdecl,
             //       but currently the OpenGL implementation uses the string to find
             //       correct uniform location (if I recall correctly).
-            dmHashUpdateBuffer32(state, stream.m_Name, strlen(stream.m_Name));
+            dmHashUpdateBuffer32(state, &stream.m_NameHash, sizeof(dmhash_t));
             dmHashUpdateBuffer32(state, &stream.m_LogicalIndex, sizeof(stream.m_LogicalIndex));
             dmHashUpdateBuffer32(state, &stream.m_Size, sizeof(stream.m_Size));
             dmHashUpdateBuffer32(state, &stream.m_Offset, sizeof(stream.m_Offset));
@@ -1783,6 +1804,47 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         return CreateShader(GL_FRAGMENT_SHADER, ddf->m_Source.m_Data, ddf->m_Source.m_Count);
     }
 
+    static void BuildAttributes(OpenGLProgram* program_ptr)
+    {
+        GLint num_attributes;
+        glGetProgramiv(program_ptr->m_Program, GL_ACTIVE_ATTRIBUTES, &num_attributes);
+        CHECK_GL_ERROR;
+
+        program_ptr->m_Attributes.SetCapacity(num_attributes);
+        program_ptr->m_Attributes.SetSize(num_attributes);
+
+        uint32_t stride = 0;
+
+        char attribute_name[256];
+        for (int i = 0; i < num_attributes; ++i)
+        {
+            OpenglVertexAttribute& attr = program_ptr->m_Attributes[i];
+            GLsizei attr_len;
+            GLint   attr_size;
+            GLenum  attr_type;
+            glGetActiveAttrib(program_ptr->m_Program, i,
+                sizeof(attribute_name),
+                &attr_len,
+                &attr_size,
+                &attr_type,
+                attribute_name);
+            CHECK_GL_ERROR;
+
+            int num_components = GetNumComponents(attr_type);
+
+            attr.m_Location = glGetAttribLocation(program_ptr->m_Program, attribute_name);
+            attr.m_NameHash = dmHashString64(attribute_name);
+            attr.m_Type     = TYPE_FLOAT; // GetGraphicsType(attr_type);
+            attr.m_Size     = num_components * attr_size;
+
+            CHECK_GL_ERROR;
+
+            stride += attr_size * num_components * sizeof(float); // GetTypeSize(GetGraphicsType(attr_type));
+        }
+
+        program_ptr->m_Stride = stride;
+    }
+
     static HProgram OpenGLNewProgram(HContext context, HVertexProgram vertex_program, HFragmentProgram fragment_program)
     {
         IncreaseModificationVersion(context);
@@ -1828,15 +1890,21 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             CHECK_GL_ERROR;
             return 0;
         }
-
         CHECK_GL_ERROR;
-        return p;
+
+        OpenGLProgram* program = new OpenGLProgram();
+        program->m_Program = p;
+
+        BuildAttributes(program);
+
+        return (HProgram) program;
     }
 
     static void OpenGLDeleteProgram(HContext context, HProgram program)
     {
         (void) context;
-        glDeleteProgram(program);
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) program);
+        glDeleteProgram(program_ptr->m_Program);
     }
 
     // Tries to compile a shader (either a vertex or fragment) program.
@@ -1938,7 +2006,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
     static void OpenGLEnableProgram(HContext context, HProgram program)
     {
         (void) context;
-        glUseProgram(program);
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) program);
+        glUseProgram(program_ptr->m_Program);
         CHECK_GL_ERROR;
     }
 
@@ -1985,7 +2054,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         {
             return false;
         }
-        glLinkProgram(program);
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) program);
+        glLinkProgram(program_ptr->m_Program);
         CHECK_GL_ERROR;
         return true;
     }
@@ -1993,7 +2063,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
     static uint32_t OpenGLGetUniformCount(HProgram prog)
     {
         GLint count;
-        glGetProgramiv(prog, GL_ACTIVE_UNIFORMS, &count);
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) prog);
+        glGetProgramiv(program_ptr->m_Program, GL_ACTIVE_UNIFORMS, &count);
         CHECK_GL_ERROR;
         return count;
     }
@@ -2003,7 +2074,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         GLint uniform_size;
         GLenum uniform_type;
         GLsizei uniform_name_length;
-        glGetActiveUniform(prog, index, buffer_size, &uniform_name_length, &uniform_size, &uniform_type, buffer);
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) prog);
+        glGetActiveUniform(program_ptr->m_Program, index, buffer_size, &uniform_name_length, &uniform_size, &uniform_type, buffer);
         *type = GetGraphicsType(uniform_type);
         *size = uniform_size;
         CHECK_GL_ERROR;
@@ -2012,7 +2084,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
 
     static int32_t OpenGLGetUniformLocation(HProgram prog, const char* name)
     {
-        GLint location = glGetUniformLocation(prog, name);
+        OpenGLProgram* program_ptr = ((OpenGLProgram*) prog);
+        GLint location = glGetUniformLocation(program_ptr->m_Program, name);
         if (location == -1)
         {
             // Clear error if uniform isn't found
@@ -3169,6 +3242,36 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         CHECK_GL_ERROR;
     }
 
+    uint32_t OpenGLGetVertexStride(HProgram prog)
+    {
+        return ((OpenGLProgram*) prog)->m_Stride;
+    }
+
+    uint32_t OpenGLGetVertexStreamCount(HProgram prog)
+    {
+        return ((OpenGLProgram*) prog)->m_Attributes.Size();
+    }
+
+    void OpenGLGetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type)
+    {
+        OpenGLProgram* program_ptr = (OpenGLProgram*) prog;
+
+        if (stream_index >= program_ptr->m_Attributes.Size())
+        {
+            *name     = 0;
+            *location = -1;
+            *size     = 0;
+            *type     = (Type) -1;
+        }
+        else
+        {
+            *name     = program_ptr->m_Attributes[stream_index].m_NameHash;
+            *location = program_ptr->m_Attributes[stream_index].m_Location;
+            *size     = program_ptr->m_Attributes[stream_index].m_Size;
+            *type     = program_ptr->m_Attributes[stream_index].m_Type;
+        }
+    }
+
     BufferType BUFFER_TYPES[MAX_BUFFER_TYPE_COUNT] = {BUFFER_TYPE_COLOR0_BIT, BUFFER_TYPE_DEPTH_BIT, BUFFER_TYPE_STENCIL_BIT};
 
     GLenum TEXTURE_UNIT_NAMES[32] =
@@ -3316,6 +3419,10 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         fn_table.m_GetSupportedExtension = OpenGLGetSupportedExtension;
         fn_table.m_IsMultiTargetRenderingSupported = OpenGLIsMultiTargetRenderingSupported;
         fn_table.m_GetPipelineState = OpenGLGetPipelineState;
+        fn_table.m_GetVertexStride = OpenGLGetVertexStride;
+        fn_table.m_GetVertexStreamCount = OpenGLGetVertexStreamCount;
+        fn_table.m_GetVertexStream = OpenGLGetVertexStream;
+
         return fn_table;
     }
 }

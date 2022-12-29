@@ -212,6 +212,16 @@ namespace dmGameSystem
 
             dmResource::RegisterResourceReloadedCallback(params.m_Factory, ResourceReloadedCallback, material);
 
+            int attribute_count = 0;
+            dmRender::MaterialVertexAttribute attributes[8];
+            for (; attribute_count < dmMath::Min((uint32_t) 8, ddf->m_VertexAttributes.m_Count); ++attribute_count)
+            {
+                attributes[attribute_count].m_StreamNameHash = dmHashString64(ddf->m_VertexAttributes[attribute_count].m_Name);
+                attributes[attribute_count].m_Propertyhash   = dmHashString64(ddf->m_VertexAttributes[attribute_count].m_Property);
+            }
+
+            dmRender::SetMaterialVertexAttributes(material, attributes, attribute_count);
+
             SetMaterial(params.m_Filename, material, ddf, &resources);
             params.m_Resource->m_Resource = (void*) material;
         }

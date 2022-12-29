@@ -55,12 +55,18 @@ namespace dmGameSystem
             {
                 dmLogError("Default animation '%s' not found", resource->m_DDF->m_DefaultAnimation);
             }
-            return dmResource::RESULT_FORMAT_ERROR;;
+            return dmResource::RESULT_FORMAT_ERROR;
         }
-        else
+
+        resource->m_AttributePropertyMapping = new dmhash_t[resource->m_DDF->m_AttributeMapping.m_Count]; // .SetCapacity(resource->m_DDF->m_AttributeMapping.m_Count);
+        resource->m_AttributePropertyMappingCount = resource->m_DDF->m_AttributeMapping.m_Count;
+
+        for (int i = 0; i < resource->m_DDF->m_AttributeMapping.m_Count; ++i)
         {
-            return dmResource::RESULT_OK;
+            resource->m_AttributePropertyMapping[i] = dmHashString64(resource->m_DDF->m_AttributeMapping[i]);
         }
+
+        return dmResource::RESULT_OK;
     }
 
     void ReleaseResources(dmResource::HFactory factory, SpriteResource* resource)
@@ -71,6 +77,8 @@ namespace dmGameSystem
             dmResource::Release(factory, resource->m_TextureSet);
         if (resource->m_Material != 0x0)
             dmResource::Release(factory, resource->m_Material);
+
+        delete[] resource->m_AttributePropertyMapping;
     }
 
     dmResource::Result ResSpritePreload(const dmResource::ResourcePreloadParams& params)

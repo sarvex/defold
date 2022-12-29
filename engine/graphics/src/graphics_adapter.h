@@ -165,6 +165,10 @@ namespace dmGraphics
     typedef const char* (*GetSupportedExtensionFn)(HContext context, uint32_t index);
     typedef bool (*IsMultiTargetRenderingSupportedFn)(HContext context);
 
+    typedef uint32_t (*GetVertexStrideFn)(HProgram prog);
+    typedef uint32_t (*GetVertexStreamCountFn)(HProgram prog);
+    typedef void (*GetVertexStreamFn)(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type);
+
     struct GraphicsAdapterFunctionTable
     {
         NewContextFn m_NewContext;
@@ -277,6 +281,10 @@ namespace dmGraphics
         GetSupportedExtensionFn m_GetSupportedExtension;
         IsMultiTargetRenderingSupportedFn m_IsMultiTargetRenderingSupported;
         GetPipelineStateFn m_GetPipelineState;
+
+        GetVertexStrideFn      m_GetVertexStride;
+        GetVertexStreamCountFn m_GetVertexStreamCount;
+        GetVertexStreamFn      m_GetVertexStream;
     };
 }
 

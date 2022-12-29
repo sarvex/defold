@@ -24,7 +24,7 @@ namespace dmGraphics
 
     struct VertexStream
     {
-        const char* m_Name;
+        dmhash_t    m_NameHash;
         uint32_t    m_Stream;
         uint32_t    m_Size;
         Type        m_Type;

@@ -197,14 +197,20 @@ namespace dmGraphics
 
     void AddVertexStream(HVertexStreamDeclaration stream_declaration, const char* name, uint32_t size, Type type, bool normalize)
     {
+        AddVertexStream(stream_declaration, dmHashString64(name), size, type, normalize);
+    }
+
+    void AddVertexStream(HVertexStreamDeclaration stream_declaration, uint64_t name_hash, uint32_t size, Type type, bool normalize)
+    {
         if (stream_declaration->m_StreamCount >= MAX_VERTEX_STREAM_COUNT)
         {
-            dmLogError("Unable to add vertex stream '%s', stream declaration has no slots left (max: %d)", name, MAX_VERTEX_STREAM_COUNT);
+            dmLogError("Unable to add vertex stream '%s', stream declaration has no slots left (max: %d)",
+                dmHashReverseSafe64(name_hash), MAX_VERTEX_STREAM_COUNT);
             return;
         }
 
         uint8_t stream_index = stream_declaration->m_StreamCount;
-        stream_declaration->m_Streams[stream_index].m_Name      = name;
+        stream_declaration->m_Streams[stream_index].m_NameHash  = name_hash;
         stream_declaration->m_Streams[stream_index].m_Size      = size;
         stream_declaration->m_Streams[stream_index].m_Type      = type;
         stream_declaration->m_Streams[stream_index].m_Normalize = normalize;
@@ -215,6 +221,25 @@ namespace dmGraphics
     void DeleteVertexStreamDeclaration(HVertexStreamDeclaration stream_declaration)
     {
         delete stream_declaration;
+    }
+
+    uint32_t GetTypeSize(dmGraphics::Type type)
+    {
+        if (type == dmGraphics::TYPE_BYTE || type == dmGraphics::TYPE_UNSIGNED_BYTE)
+        {
+            return 1;
+        }
+        else if (type == dmGraphics::TYPE_SHORT || type == dmGraphics::TYPE_UNSIGNED_SHORT)
+        {
+            return 2;
+        }
+        else if (type == dmGraphics::TYPE_INT || type == dmGraphics::TYPE_UNSIGNED_INT || type == dmGraphics::TYPE_FLOAT)
+        {
+             return 4;
+        }
+
+        assert(0);
+        return 0;
     }
 
     // For estimating resource size
@@ -921,6 +946,18 @@ namespace dmGraphics
     PipelineState GetPipelineState(HContext context)
     {
         return g_functions.m_GetPipelineState(context);
+    }
+    uint32_t GetVertexStride(HProgram prog)
+    {
+        return g_functions.m_GetVertexStride(prog);
+    }
+    uint32_t GetVertexStreamCount(HProgram prog)
+    {
+        return g_functions.m_GetVertexStreamCount(prog);
+    }
+    void GetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type)
+    {
+        return g_functions.m_GetVertexStream(prog, stream_index, name, location, size, type);
     }
 
 #if defined(__MACH__) && ( defined(__arm__) || defined(__arm64__) || defined(IOS_SIMULATOR))

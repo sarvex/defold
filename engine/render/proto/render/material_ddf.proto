@@ -69,6 +69,12 @@ message MaterialDesc
         optional float max_anisotropy     = 6 [default = 1.0];
     }
 
+    message VertexAttribute
+    {
+        required string name = 1;
+        required string property = 2;
+    }
+
     required string name = 1;
     repeated string tags = 2;
     required string vertex_program = 3 [(resource)=true];
@@ -78,4 +84,5 @@ message MaterialDesc
     repeated Constant fragment_constants = 7;
     repeated string textures = 8;
     repeated Sampler samplers = 9;
+    repeated VertexAttribute vertex_attributes = 10;
 }

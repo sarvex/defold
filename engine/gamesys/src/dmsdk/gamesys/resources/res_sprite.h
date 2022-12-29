@@ -26,10 +26,13 @@ namespace dmGameSystem
 {
     struct SpriteResource
     {
-        dmhash_t m_DefaultAnimation;
-        TextureSetResource* m_TextureSet;
+        dmhash_t                     m_DefaultAnimation;
+        TextureSetResource*          m_TextureSet;
         dmGameSystemDDF::SpriteDesc* m_DDF;
-        dmRender::HMaterial m_Material;
+        dmRender::HMaterial          m_Material;
+        //dmArray<dmhash_t>            m_AttributePropertyMapping;
+        dmhash_t*            m_AttributePropertyMapping;
+        uint32_t             m_AttributePropertyMappingCount;
     };
 }
 

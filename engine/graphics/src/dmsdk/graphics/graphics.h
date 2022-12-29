@@ -408,6 +408,8 @@ namespace dmGraphics
      */
     void AddVertexStream(HVertexStreamDeclaration stream_declaration, const char* name, uint32_t size, Type type, bool normalize);
 
+    void AddVertexStream(HVertexStreamDeclaration stream_declaration, uint64_t name_hash, uint32_t size, Type type, bool normalize);
+
     /*#
      * Delete vertex stream declaration
      * @name DeleteVertexStreamDeclaration

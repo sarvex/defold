@@ -94,7 +94,7 @@ namespace dmGraphics
     {
         struct Stream
         {
-            const char* m_Name;
+            dmhash_t    m_NameHash;
             uint16_t    m_LogicalIndex;
             int16_t     m_PhysicalIndex;
             uint16_t    m_Size;
@@ -108,6 +108,21 @@ namespace dmGraphics
         uint16_t    m_Stride;
         HProgram    m_BoundForProgram;
         uint32_t    m_ModificationVersion;
+    };
+
+    struct OpenglVertexAttribute
+    {
+        dmhash_t m_NameHash;
+        int32_t  m_Location;
+        uint16_t m_Size;
+        Type     m_Type;
+    };
+
+    struct OpenGLProgram
+    {
+        GLuint                         m_Program;
+        dmArray<OpenglVertexAttribute> m_Attributes;
+        uint32_t                       m_Stride;
     };
 
     // TODO: Why this one here!? Not used?

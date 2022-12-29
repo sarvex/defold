@@ -27,6 +27,23 @@ namespace dmRender
 {
     using namespace dmVMath;
 
+    void SetMaterialVertexAttributes(HMaterial material, MaterialVertexAttribute* attributes, uint32_t num_attributes)
+    {
+        material->m_VertexAttributes.SetCapacity(num_attributes);
+        material->m_VertexAttributes.SetSize(num_attributes);
+        memcpy(material->m_VertexAttributes.Begin(), attributes, sizeof(MaterialVertexAttribute) * num_attributes);
+    }
+
+    void GetMaterialVertexAttribute(HMaterial material, uint32_t attribute_index, MaterialVertexAttribute* attribute_out)
+    {
+        *attribute_out = material->m_VertexAttributes[attribute_index];
+    }
+
+    uint32_t GetMaterialVertexAttributeCount(HMaterial material)
+    {
+        return material->m_VertexAttributes.Size();
+    }
+
     HMaterial NewMaterial(dmRender::HRenderContext render_context, dmGraphics::HVertexProgram vertex_program, dmGraphics::HFragmentProgram fragment_program)
     {
         Material* m = new Material;
@@ -35,6 +52,20 @@ namespace dmRender
         m->m_FragmentProgram = fragment_program;
         dmGraphics::HContext graphics_context = dmRender::GetGraphicsContext(render_context);
         m->m_Program = dmGraphics::NewProgram(graphics_context, vertex_program, fragment_program);
+
+        /*
+        uint32_t stride       = dmGraphics::GetVertexStride(m->m_Program);
+        uint32_t stream_count = dmGraphics::GetVertexStreamCount(m->m_Program);
+
+        m->m_VertexAttributes.SetCapacity()
+
+        for (int i = 0; i < stream_count; ++i)
+        {
+            int location;
+            dmhash_t name;
+            dmGraphics::GetVertexStream(m->m_Program, i, &name, &location);
+        }
+        */
 
         uint32_t total_constants_count = dmGraphics::GetUniformCount(m->m_Program);
         const uint32_t buffer_size = 128;

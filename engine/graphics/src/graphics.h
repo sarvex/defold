@@ -521,6 +521,10 @@ namespace dmGraphics
     void DisableVertexDeclaration(HContext context, HVertexDeclaration vertex_declaration);
     void HashVertexDeclaration(HashState32 *state, HVertexDeclaration vertex_declaration);
 
+    uint32_t GetVertexStride(HProgram prog);
+    uint32_t GetVertexStreamCount(HProgram prog);
+    void     GetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type);
+
     void DrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, Type type, HIndexBuffer index_buffer);
     void Draw(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count);
 
@@ -648,6 +652,8 @@ namespace dmGraphics
      * @param buffer_size buffer size
      */
     void ReadPixels(HContext context, void* buffer, uint32_t buffer_size);
+
+    uint32_t GetTypeSize(dmGraphics::Type type);
 
     const char* GetBufferTypeLiteral(BufferType buffer_type)
     {
