@@ -764,18 +764,6 @@ namespace dmGameSystem
                             memcpy(pos_offset + features->m_Stride * 1, &w_p1, sizeof(float) * 3);
                             memcpy(pos_offset + features->m_Stride * 2, &w_p2, sizeof(float) * 3);
                             memcpy(pos_offset + features->m_Stride * 3, &w_p3, sizeof(float) * 3);
-
-                            float* f_pos_offset = (float*) pos_offset;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
-
-                            f_pos_offset += features->m_Stride/4;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
-
-                            f_pos_offset += features->m_Stride/4;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
-
-                            f_pos_offset += features->m_Stride/4;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
                         }
 
                         if (features->m_PositionLocal.m_StreamNameHash != 0)
@@ -785,56 +773,15 @@ namespace dmGameSystem
                             memcpy(pos_offset + features->m_Stride * 1, &p1, sizeof(float) * 3);
                             memcpy(pos_offset + features->m_Stride * 2, &p2, sizeof(float) * 3);
                             memcpy(pos_offset + features->m_Stride * 3, &p3, sizeof(float) * 3);
-
-                            float* f_pos_offset = (float*) pos_offset;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
-
-                            f_pos_offset += features->m_Stride/4;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
-
-                            f_pos_offset += features->m_Stride/4;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
-
-                            f_pos_offset += features->m_Stride/4;
-                            //printf("%f, %f, %f\n", f_pos_offset[0], f_pos_offset[1], f_pos_offset[2]);
                         }
                     }
                     if (features->m_Texcoord0.m_StreamNameHash != 0)
                     {
                         uint8_t* tc_offset = vx_data_ptr + features->m_Texcoord0.m_StreamOffset;
-
-                        float* f_tc_offset_0 = (float*) tc_offset;
-                        f_tc_offset_0[0] = tc[tex_lookup[0] * 2 + 0];
-                        f_tc_offset_0[1] = tc[tex_lookup[0] * 2 + 1];
-
-                        float* f_tc_offset_1 = (float*) (tc_offset + features->m_Stride);
-                        f_tc_offset_1[0] = tc[tex_lookup[1] * 2 + 0];
-                        f_tc_offset_1[1] = tc[tex_lookup[1] * 2 + 1];
-
-                        float* f_tc_offset_2 = (float*) (tc_offset + features->m_Stride * 2);
-                        f_tc_offset_2[0] = tc[tex_lookup[2] * 2 + 0];
-                        f_tc_offset_2[1] = tc[tex_lookup[2] * 2 + 1];
-
-                        float* f_tc_offset_3 = (float*) (tc_offset + features->m_Stride * 3);
-                        f_tc_offset_3[0] = tc[tex_lookup[4] * 2 + 0];
-                        f_tc_offset_3[1] = tc[tex_lookup[4] * 2 + 1];
-
-                        float* f_tc_offset = (float*) tc_offset;
-                        //printf("%f, %f\n", f_tc_offset[0], f_tc_offset[1]);
-
-                        f_tc_offset += features->m_Stride/4;
-                        //printf("%f, %f\n", f_tc_offset[0], f_tc_offset[1]);
-
-                        f_tc_offset += features->m_Stride/4;
-                        //printf("%f, %f\n", f_tc_offset[0], f_tc_offset[1]);
-
-                        f_tc_offset += features->m_Stride/4;
-                        //printf("%f, %f\n", f_tc_offset[0], f_tc_offset[1]);
-
-                        //memcpy(tc_offset + features->m_Stride * 0, &tc[tex_lookup[0] * 2], sizeof(float) * 2);
-                        //memcpy(tc_offset + features->m_Stride * 1, &tc[tex_lookup[1] * 2], sizeof(float) * 2);
-                        //memcpy(tc_offset + features->m_Stride * 2, &tc[tex_lookup[2] * 2], sizeof(float) * 2);
-                        //memcpy(tc_offset + features->m_Stride * 3, &tc[tex_lookup[3] * 2], sizeof(float) * 2);
+                        memcpy(tc_offset + features->m_Stride * 0, &tc[tex_lookup[0] * 2], sizeof(float) * 2);
+                        memcpy(tc_offset + features->m_Stride * 1, &tc[tex_lookup[1] * 2], sizeof(float) * 2);
+                        memcpy(tc_offset + features->m_Stride * 2, &tc[tex_lookup[2] * 2], sizeof(float) * 2);
+                        memcpy(tc_offset + features->m_Stride * 3, &tc[tex_lookup[4] * 2], sizeof(float) * 2);
                     }
                 #endif
 
@@ -976,25 +923,6 @@ namespace dmGameSystem
         }
 
         mapping.m_Stride = stride;
-
-        /*
-        for (int i = 0; i < stream_count; ++i)
-        {
-            int location;
-            dmhash_t name;
-            dmGraphics::GetVertexStream(shader_program, i, &name, &location);
-            if (name == g_SpriteFeatureHashes.m_Position)
-            {
-                mapping.m_FeatureStreamLocations[SPRITE_FEATURE_POSITION_WORLD] = location;
-            }
-            else if (name == g_SpriteFeatureHashes.m_Texcoord0)
-            {
-                mapping.m_FeatureStreamLocations[SPRITE_FEATURE_TEXCOORD_0] = location;
-            }
-        }
-        */
-
-        // mapping.m_VertexStride = stride;
     }
 
     static void RenderBatch(SpriteWorld* sprite_world, dmRender::HRenderContext render_context, dmRender::RenderListEntry *buf, uint32_t* begin, uint32_t* end)
@@ -1028,13 +956,14 @@ namespace dmGameSystem
 
         // Fill in vertex buffer
         SpriteVertex* vb_begin = sprite_world->m_VertexBufferWritePtr;
-        uint8_t* ib_begin = (uint8_t*)sprite_world->m_IndexBufferWritePtr;
-        SpriteVertex* vb_iter = vb_begin;
-        uint8_t* ib_iter = ib_begin;
+        uint8_t* ib_begin      = (uint8_t*)sprite_world->m_IndexBufferWritePtr;
+        SpriteVertex* vb_iter  = vb_begin;
+        uint8_t* ib_iter       = ib_begin;
+
         CreateVertexData(sprite_world, &sprite_world->m_FeatureMapping, &vb_iter, &ib_iter, buf, begin, end);
 
         sprite_world->m_VertexBufferWritePtr = vb_iter;
-        sprite_world->m_IndexBufferWritePtr = ib_iter;
+        sprite_world->m_IndexBufferWritePtr  = ib_iter;
 
         ro.Init();
         ro.m_VertexDeclaration = sprite_world->m_VertexDeclaration;
