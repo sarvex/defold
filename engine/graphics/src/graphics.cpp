@@ -215,6 +215,7 @@ namespace dmGraphics
         stream_declaration->m_Streams[stream_index].m_Type      = type;
         stream_declaration->m_Streams[stream_index].m_Normalize = normalize;
         stream_declaration->m_Streams[stream_index].m_Stream    = stream_index;
+        stream_declaration->m_Streams[stream_index].m_Offset    = 0;
         stream_declaration->m_StreamCount++;
     }
 
@@ -947,6 +948,7 @@ namespace dmGraphics
     {
         return g_functions.m_GetPipelineState(context);
     }
+    /*
     uint32_t GetVertexStride(HProgram prog)
     {
         return g_functions.m_GetVertexStride(prog);
@@ -955,9 +957,12 @@ namespace dmGraphics
     {
         return g_functions.m_GetVertexStreamCount(prog);
     }
-    void GetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type)
+    */
+    //void GetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type)
+    bool GetVertexStream(HProgram prog, dmhash_t stream_name, VertexStream* stream)
     {
-        return g_functions.m_GetVertexStream(prog, stream_index, name, location, size, type);
+        //return g_functions.m_GetVertexStream(prog, stream_index, name, location, size, type);
+        return g_functions.m_GetVertexStream(prog, stream_name, stream);
     }
 
 #if defined(__MACH__) && ( defined(__arm__) || defined(__arm64__) || defined(IOS_SIMULATOR))

@@ -3461,6 +3461,7 @@ bail:
         DestroyPipeline(context->m_LogicalDevice.m_Device, value);
     }
 
+    /*
     uint32_t VulkanGetVertexStride(HProgram prog)
     {
         assert(0);
@@ -3493,6 +3494,28 @@ bail:
             *size     = GetShaderTypeSize(vertex_shader->m_Attributes[stream_index].m_Type) / sizeof(float); //vertex_shader->m_Attributes[stream_index].m_ElementCount; //program_ptr->m_Attributes[stream_index].m_Size;
             *type     = TYPE_FLOAT; //shaderDataTypeToGraphicsType( vertex_shader->m_Attributes[stream_index].m_Type); //program_ptr->m_Attributes[stream_index].m_Type;
         }
+    }
+    */
+
+    bool VulkanGetVertexStream(HProgram prog, dmhash_t stream_name, VertexStream* stream)
+    {
+        Program* program_ptr = (Program*) prog;
+        ShaderModule* vertex_shader = program_ptr->m_VertexModule;
+        for (int i = 0; i < vertex_shader->m_AttributeCount; ++i)
+        {
+            if (vertex_shader->m_Attributes[i].m_NameHash == stream_name)
+            {
+                stream->m_NameHash  = vertex_shader->m_Attributes[i].m_NameHash;
+                stream->m_Stream    = vertex_shader->m_Attributes[i].m_Binding;
+                stream->m_Size      = GetShaderTypeSize(vertex_shader->m_Attributes[i].m_Type) / sizeof(float);
+                stream->m_Type      = TYPE_FLOAT;
+                stream->m_Normalize = false;
+                stream->m_Offset    = 0; // REMOVE
+                return true;
+            }
+        }
+
+        return false;
     }
 
     static GraphicsAdapterFunctionTable VulkanRegisterFunctionTable()
@@ -3603,8 +3626,8 @@ bail:
         fn_table.m_GetSupportedExtension = VulkanGetSupportedExtension;
         fn_table.m_IsMultiTargetRenderingSupported = VulkanIsMultiTargetRenderingSupported;
         fn_table.m_GetPipelineState = VulkanGetPipelineState;
-        fn_table.m_GetVertexStride = VulkanGetVertexStride;
-        fn_table.m_GetVertexStreamCount = VulkanGetVertexStreamCount;
+        //fn_table.m_GetVertexStride = VulkanGetVertexStride;
+        //fn_table.m_GetVertexStreamCount = VulkanGetVertexStreamCount;
         fn_table.m_GetVertexStream = VulkanGetVertexStream;
         return fn_table;
     }

@@ -63,6 +63,13 @@ namespace dmRender
         }
     };
 
+    struct MaterialAttributeToStream
+    {
+        MaterialVertexAttribute  m_Attribute;
+        dmGraphics::VertexStream m_Stream;
+        dmhash_t                 m_StreamHash;
+    };
+
     struct Material
     {
         Material()
@@ -83,7 +90,8 @@ namespace dmRender
         dmHashTable64<int32_t>                  m_NameHashToLocation;
         dmArray<MaterialConstant>               m_Constants;
         dmArray<Sampler>                        m_Samplers;
-        dmArray<MaterialVertexAttribute>        m_VertexAttributes;
+        dmArray<MaterialAttributeToStream>      m_VertexAttributes;
+
         uint32_t                                m_TagListKey;      // the key to use with GetMaterialTagList()
         uint64_t                                m_UserData1;
         uint64_t                                m_UserData2;
@@ -236,6 +244,8 @@ namespace dmRender
         dmhash_t                    m_FrustumHash;
 
         dmHashTable32<MaterialTagList>  m_MaterialTagLists;
+
+        dmHashTable32<dmGraphics::HVertexDeclaration> m_VertexDeclarationCache;
 
         HFontMap                    m_SystemFontMap;
 

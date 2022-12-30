@@ -167,7 +167,7 @@ namespace dmGraphics
 
     typedef uint32_t (*GetVertexStrideFn)(HProgram prog);
     typedef uint32_t (*GetVertexStreamCountFn)(HProgram prog);
-    typedef void (*GetVertexStreamFn)(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type);
+    typedef bool (*GetVertexStreamFn)(HProgram prog, dmhash_t stream_name, VertexStream* stream);
 
     struct GraphicsAdapterFunctionTable
     {

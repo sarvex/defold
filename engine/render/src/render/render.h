@@ -247,9 +247,19 @@ namespace dmRender
     Result                          AddPredicateTag(HPredicate predicate, dmhash_t tag);
 
     void SetMaterialVertexAttributes(HMaterial material, MaterialVertexAttribute* attributes, uint32_t num_attributes);
-    void GetMaterialVertexAttribute(HMaterial material, uint32_t attribute_index, MaterialVertexAttribute* attribute_out);
-    uint32_t GetMaterialVertexAttributeCount(HMaterial material);
 
+    //void GetMaterialVertexAttribute(HMaterial material, uint32_t attribute_index, MaterialVertexAttribute* attribute_out);
+    //uint32_t GetMaterialVertexAttributeCount(HMaterial material);
+
+    struct MaterialVertexAttributeBinding
+    {
+        dmGraphics::VertexStream m_Stream;
+        dmhash_t                 m_StreamHash;
+    };
+
+    dmGraphics::HVertexDeclaration GetVertexDeclaration(HRenderContext render_context, MaterialVertexAttributeBinding* bindings, uint32_t bindings_count);
+
+    bool GetMaterialVertexAttributeBinding(HMaterial material, dmhash_t attribute_name, MaterialVertexAttributeBinding* binding);
 }
 
 #endif /* DM_RENDER_H */

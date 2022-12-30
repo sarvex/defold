@@ -278,6 +278,16 @@ namespace dmGraphics
         uint32_t                m_BackgroundColor;
     };
 
+    struct VertexStream
+    {
+        dmhash_t    m_NameHash;
+        uint32_t    m_Stream;
+        uint32_t    m_Size;
+        uint32_t    m_Offset;
+        Type        m_Type;
+        bool        m_Normalize;
+    };
+
     // Parameters structure for NewContext
     struct ContextParams
     {
@@ -521,9 +531,9 @@ namespace dmGraphics
     void DisableVertexDeclaration(HContext context, HVertexDeclaration vertex_declaration);
     void HashVertexDeclaration(HashState32 *state, HVertexDeclaration vertex_declaration);
 
-    uint32_t GetVertexStride(HProgram prog);
-    uint32_t GetVertexStreamCount(HProgram prog);
-    void     GetVertexStream(HProgram prog, uint32_t stream_index, dmhash_t* name, int32_t* location, uint32_t* size, Type* type);
+    //uint32_t GetVertexStride(HProgram prog);
+    //uint32_t GetVertexStreamCount(HProgram prog);
+    bool GetVertexStream(HProgram prog, dmhash_t stream_name, VertexStream* stream);
 
     void DrawElements(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count, Type type, HIndexBuffer index_buffer);
     void Draw(HContext context, PrimitiveType prim_type, uint32_t first, uint32_t count);

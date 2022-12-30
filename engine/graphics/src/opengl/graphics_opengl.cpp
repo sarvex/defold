@@ -3242,6 +3242,7 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         CHECK_GL_ERROR;
     }
 
+    /*
     uint32_t OpenGLGetVertexStride(HProgram prog)
     {
         return ((OpenGLProgram*) prog)->m_Stride;
@@ -3270,6 +3271,27 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
             *size     = program_ptr->m_Attributes[stream_index].m_Size;
             *type     = program_ptr->m_Attributes[stream_index].m_Type;
         }
+    }
+    */
+
+    bool OpenGLGetVertexStream(HProgram prog, dmhash_t stream_name, VertexStream* stream)
+    {
+        OpenGLProgram* program_ptr = (OpenGLProgram*) prog;
+
+        for (int i = 0; i < program_ptr->m_Attributes.Size(); ++i)
+        {
+            if (program_ptr->m_Attributes[i].m_NameHash == stream_name)
+            {
+                stream->m_NameHash  = program_ptr->m_Attributes[i].m_NameHash;
+                stream->m_Stream    = program_ptr->m_Attributes[i].m_Location;
+                stream->m_Size      = program_ptr->m_Attributes[i].m_Size;
+                stream->m_Type      = program_ptr->m_Attributes[i].m_Type;
+                stream->m_Normalize = false;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     BufferType BUFFER_TYPES[MAX_BUFFER_TYPE_COUNT] = {BUFFER_TYPE_COLOR0_BIT, BUFFER_TYPE_DEPTH_BIT, BUFFER_TYPE_STENCIL_BIT};
@@ -3419,8 +3441,8 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         fn_table.m_GetSupportedExtension = OpenGLGetSupportedExtension;
         fn_table.m_IsMultiTargetRenderingSupported = OpenGLIsMultiTargetRenderingSupported;
         fn_table.m_GetPipelineState = OpenGLGetPipelineState;
-        fn_table.m_GetVertexStride = OpenGLGetVertexStride;
-        fn_table.m_GetVertexStreamCount = OpenGLGetVertexStreamCount;
+        //fn_table.m_GetVertexStride = OpenGLGetVertexStride;
+        //fn_table.m_GetVertexStreamCount = OpenGLGetVertexStreamCount;
         fn_table.m_GetVertexStream = OpenGLGetVertexStream;
 
         return fn_table;

@@ -902,4 +902,46 @@ namespace dmRender
         std::sort(predicate->m_Tags, predicate->m_Tags+predicate->m_TagCount);
         return RESULT_OK;
     }
+
+    dmGraphics::HVertexDeclaration GetVertexDeclaration(HRenderContext render_context, MaterialVertexAttributeBinding* bindings, uint32_t bindings_count)
+    {
+        HashState32 hash_state;
+        dmHashInit32(&hash_state, false);
+        for (int i = 0; i < bindings_count; ++i)
+        {
+            dmHashUpdateBuffer32(&hash_state, &bindings->m_StreamHash, sizeof(dmhash_t));
+        }
+
+        uint32_t decl_hash = dmHashFinal32(&hash_state);
+
+        dmGraphics::HVertexDeclaration* decl = render_context->m_VertexDeclarationCache.Get(decl_hash);
+
+        if (!decl)
+        {
+            dmGraphics::HVertexStreamDeclaration stream_declaration = dmGraphics::NewVertexStreamDeclaration(render_context->m_GraphicsContext);
+
+            for (int i = 0; i < bindings_count; ++i)
+            {
+                dmGraphics::VertexStream& stream = bindings[i].m_Stream;
+                dmGraphics::AddVertexStream(stream_declaration, stream.m_NameHash, stream.m_Size, stream.m_Type, stream.m_Normalize);
+            }
+
+            dmGraphics::HVertexDeclaration vx_decl = dmGraphics::NewVertexDeclaration(render_context->m_GraphicsContext, stream_declaration);
+            dmGraphics::DeleteVertexStreamDeclaration(stream_declaration);
+
+            if (render_context->m_VertexDeclarationCache.Full())
+            {
+                uint32_t capacity = render_context->m_VertexDeclarationCache.Capacity();
+                capacity += 8;
+                render_context->m_VertexDeclarationCache.SetCapacity(capacity * 2, capacity);
+            }
+
+            render_context->m_VertexDeclarationCache.Put(decl_hash, vx_decl);
+
+            dmLogInfo("Created new vx binding with hash %u", decl_hash);
+            return vx_decl;
+        }
+
+        return *decl;
+    }
 }

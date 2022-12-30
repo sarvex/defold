@@ -22,15 +22,6 @@ namespace dmGraphics
 {
     const static uint8_t MAX_VERTEX_STREAM_COUNT = 8;
 
-    struct VertexStream
-    {
-        dmhash_t    m_NameHash;
-        uint32_t    m_Stream;
-        uint32_t    m_Size;
-        Type        m_Type;
-        bool        m_Normalize;
-    };
-
     struct VertexStreamDeclaration
     {
         VertexStream m_Streams[MAX_VERTEX_STREAM_COUNT];
