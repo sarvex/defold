@@ -93,12 +93,18 @@ namespace dmGameSystem
         uint16_t                    m_Padding : 6;
     };
 
+    const int MAX_COMPONENT_FEATURES = 8;
+
     struct SpriteFeatureMapping
     {
-        dmRender::MaterialVertexAttributeBinding m_PositionWorld;
-        dmRender::MaterialVertexAttributeBinding m_PositionLocal;
-        dmRender::MaterialVertexAttributeBinding m_Texcoord0;
-        uint32_t m_Stride;
+        dmRender::MaterialVertexAttributeBinding m_FeatureList[MAX_COMPONENT_FEATURES];
+        dmhash_t                                 m_FeatureProperty[MAX_COMPONENT_FEATURES];
+        uint32_t                                 m_FeatureCount : 16;
+        uint32_t                                 m_Stride       : 16;
+
+        //dmRender::MaterialVertexAttributeBinding m_PositionWorld;
+        //dmRender::MaterialVertexAttributeBinding m_PositionLocal;
+        //dmRender::MaterialVertexAttributeBinding m_Texcoord0;
     };
 
     struct SpriteWorld
@@ -702,44 +708,61 @@ namespace dmGameSystem
                 #endif
 
                 #if 1
-                    if (features->m_PositionWorld.m_StreamHash != 0 || features->m_PositionLocal.m_StreamHash != 0)
+
+                    for (int i = 0; i < features->m_FeatureCount; ++i)
                     {
-                        Point3 p0(-0.5f, -0.5f, 0.0f);
-                        Point3 p1(-0.5f, 0.5f, 0.0f);
-                        Point3 p2(0.5f, 0.5f, 0.0f);
-                        Point3 p3(0.5f, -0.5f, 0.0f);
-
-                        if (features->m_PositionWorld.m_StreamHash != 0)
+                        if (features->m_FeatureProperty[i] == SPRITE_PROP_POSITION ||
+                            features->m_FeatureProperty[i] == SPRITE_PROP_POSITION_LOCAL)
                         {
-                            Vector4 w_p0 = w * p0;
-                            Vector4 w_p1 = w * p1;
-                            Vector4 w_p2 = w * p2;
-                            Vector4 w_p3 = w * p3;
+                            Point3 p0(-0.5f, -0.5f, 0.0f);
+                            Point3 p1(-0.5f, 0.5f, 0.0f);
+                            Point3 p2(0.5f, 0.5f, 0.0f);
+                            Point3 p3(0.5f, -0.5f, 0.0f);
 
-                            uint8_t* pos_offset = vertices + features->m_PositionWorld.m_Stream.m_Offset;
+                            if (features->m_FeatureProperty[i] == SPRITE_PROP_POSITION)
+                            {
+                                Vector4 w_p0 = w * p0;
+                                Vector4 w_p1 = w * p1;
+                                Vector4 w_p2 = w * p2;
+                                Vector4 w_p3 = w * p3;
 
-                            memcpy(pos_offset + features->m_Stride * 0, &w_p0, sizeof(float) * 3);
-                            memcpy(pos_offset + features->m_Stride * 1, &w_p1, sizeof(float) * 3);
-                            memcpy(pos_offset + features->m_Stride * 2, &w_p2, sizeof(float) * 3);
-                            memcpy(pos_offset + features->m_Stride * 3, &w_p3, sizeof(float) * 3);
+                                uint8_t* pos_offset = vertices + features->m_FeatureList[i].m_Stream.m_Offset;
+
+                                memcpy(pos_offset + features->m_Stride * 0, &w_p0, sizeof(float) * 3);
+                                memcpy(pos_offset + features->m_Stride * 1, &w_p1, sizeof(float) * 3);
+                                memcpy(pos_offset + features->m_Stride * 2, &w_p2, sizeof(float) * 3);
+                                memcpy(pos_offset + features->m_Stride * 3, &w_p3, sizeof(float) * 3);
+                            }
+                            else
+                            {
+                                uint8_t* pos_offset = vertices + features->m_FeatureList[i].m_Stream.m_Offset;
+                                memcpy(pos_offset + features->m_Stride * 0, &p0, sizeof(float) * 3);
+                                memcpy(pos_offset + features->m_Stride * 1, &p1, sizeof(float) * 3);
+                                memcpy(pos_offset + features->m_Stride * 2, &p2, sizeof(float) * 3);
+                                memcpy(pos_offset + features->m_Stride * 3, &p3, sizeof(float) * 3);
+                            }
                         }
-
-                        if (features->m_PositionLocal.m_StreamHash != 0)
+                        else if (features->m_FeatureProperty[i] == SPRITE_PROP_TEXCOORD0)
                         {
-                            uint8_t* pos_offset = vertices + features->m_PositionLocal.m_Stream.m_Offset;
-                            memcpy(pos_offset + features->m_Stride * 0, &p0, sizeof(float) * 3);
-                            memcpy(pos_offset + features->m_Stride * 1, &p1, sizeof(float) * 3);
-                            memcpy(pos_offset + features->m_Stride * 2, &p2, sizeof(float) * 3);
-                            memcpy(pos_offset + features->m_Stride * 3, &p3, sizeof(float) * 3);
+                            uint8_t* tc_offset = vertices + features->m_FeatureList[i].m_Stream.m_Offset;
+                            memcpy(tc_offset + features->m_Stride * 0, &tc[tex_lookup[0] * 2], sizeof(float) * 2);
+                            memcpy(tc_offset + features->m_Stride * 1, &tc[tex_lookup[1] * 2], sizeof(float) * 2);
+                            memcpy(tc_offset + features->m_Stride * 2, &tc[tex_lookup[2] * 2], sizeof(float) * 2);
+                            memcpy(tc_offset + features->m_Stride * 3, &tc[tex_lookup[4] * 2], sizeof(float) * 2);
                         }
-                    }
-                    if (features->m_Texcoord0.m_StreamHash != 0)
-                    {
-                        uint8_t* tc_offset = vertices + features->m_Texcoord0.m_Stream.m_Offset;
-                        memcpy(tc_offset + features->m_Stride * 0, &tc[tex_lookup[0] * 2], sizeof(float) * 2);
-                        memcpy(tc_offset + features->m_Stride * 1, &tc[tex_lookup[1] * 2], sizeof(float) * 2);
-                        memcpy(tc_offset + features->m_Stride * 2, &tc[tex_lookup[2] * 2], sizeof(float) * 2);
-                        memcpy(tc_offset + features->m_Stride * 3, &tc[tex_lookup[4] * 2], sizeof(float) * 2);
+                        /*
+                        else
+                        {
+                            dmGameObject::ComponentGetPropertyParams params = {};
+                            params.m_Instance = component->m_Instance;
+                            params.m_World = sprite_world;
+                            params.m_UserData = ???
+                            params.m_PropertyId = features->m_FeatureProperty[i];
+                            // SpriteComponent* component = &sprite_world->m_Components.Get(*params.m_UserData);
+                            dmGameObject::PropertyDesc value;
+                            dmGameObject::PropertyResult res = CompSpriteGetProperty(params, value);
+                        }
+                        */
                     }
                 #endif
 
@@ -782,43 +805,21 @@ namespace dmGameSystem
         *ib_where = indices;
     }
 
-    static dmGraphics::HVertexDeclaration GetVertexDeclaration(dmRender::HRenderContext render_context, const SpriteFeatureMapping& features, dmRender::HMaterial material)
-    {
-        dmRender::MaterialVertexAttributeBinding bindings[8];
-        int bindings_count = 0;
-
-        #define SET_BINDING(member) \
-            if (member.m_StreamHash != 0) \
-                bindings[bindings_count++] = member;
-
-        SET_BINDING(features.m_PositionWorld);
-        SET_BINDING(features.m_PositionLocal);
-        SET_BINDING(features.m_Texcoord0);
-        #undef SET_BINDING
-
-        if (bindings_count > 0)
-        {
-            return dmRender::GetVertexDeclaration(render_context, bindings, bindings_count);
-        }
-
-        assert(0);
-        return 0;
-    }
-
     static void FillSpriteFeatureMapping(SpriteFeatureMapping& mapping, dmRender::HMaterial material)
     {
         memset(&mapping, 0, sizeof(SpriteFeatureMapping));
 
-        #define GET_BINDING(prop, member) \
-            if (dmRender::GetMaterialVertexAttributeBinding(material, prop, &member)) \
+        #define GET_BINDING(prop) \
+            if (dmRender::GetMaterialVertexAttributeBinding(material, prop, &mapping.m_FeatureList[mapping.m_FeatureCount])) \
             { \
-                member.m_Stream.m_Offset = mapping.m_Stride; \
-                mapping.m_Stride += dmGraphics::GetTypeSize(member.m_Stream.m_Type) * member.m_Stream.m_Size; \
+                mapping.m_FeatureList[mapping.m_FeatureCount].m_Stream.m_Offset = mapping.m_Stride; \
+                mapping.m_Stride += dmGraphics::GetTypeSize(mapping.m_FeatureList[mapping.m_FeatureCount].m_Stream.m_Type) * mapping.m_FeatureList[mapping.m_FeatureCount].m_Stream.m_Size; \
+                mapping.m_FeatureProperty[mapping.m_FeatureCount] = prop; \
+                mapping.m_FeatureCount++; \
             }
-
-        GET_BINDING(SPRITE_PROP_POSITION,       mapping.m_PositionWorld);
-        GET_BINDING(SPRITE_PROP_POSITION_LOCAL, mapping.m_PositionLocal);
-        GET_BINDING(SPRITE_PROP_TEXCOORD0,      mapping.m_Texcoord0);
+        GET_BINDING(SPRITE_PROP_POSITION);
+        GET_BINDING(SPRITE_PROP_POSITION_LOCAL);
+        GET_BINDING(SPRITE_PROP_TEXCOORD0);
         #undef GET_BINDING
     }
 
@@ -849,7 +850,7 @@ namespace dmGameSystem
 
         FillSpriteFeatureMapping(sprite_world->m_FeatureMapping, material);
 
-        sprite_world->m_VertexDeclaration = GetVertexDeclaration(render_context, sprite_world->m_FeatureMapping, material);
+        sprite_world->m_VertexDeclaration = dmRender::GetVertexDeclaration(render_context, sprite_world->m_FeatureMapping.m_FeatureList, sprite_world->m_FeatureMapping.m_FeatureCount);
 
         // Fill in vertex buffer
         uint8_t* vb_begin = sprite_world->m_VertexBufferWritePtr;

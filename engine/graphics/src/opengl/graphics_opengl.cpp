@@ -1747,6 +1747,9 @@ static uintptr_t GetExtProcAddress(const char* name, const char* extension_name,
         glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
         CHECK_GL_ERROR;
 
+        // JG: We could add index offset using https://registry.khronos.org/OpenGL-Refpages/gl4/html/glDrawElementsBaseVertex.xhtml
+        //     for for when we mix different vertex layouts with the same vertex buffer!
+
         glDrawElements(GetOpenGLPrimitiveType(prim_type), count, GetOpenGLType(type), (GLvoid*)(uintptr_t) first);
         CHECK_GL_ERROR
     }

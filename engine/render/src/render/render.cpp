@@ -905,6 +905,11 @@ namespace dmRender
 
     dmGraphics::HVertexDeclaration GetVertexDeclaration(HRenderContext render_context, MaterialVertexAttributeBinding* bindings, uint32_t bindings_count)
     {
+        if (bindings_count == 0)
+        {
+            return 0;
+        }
+
         HashState32 hash_state;
         dmHashInit32(&hash_state, false);
         for (int i = 0; i < bindings_count; ++i)
