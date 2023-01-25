@@ -53,6 +53,8 @@ namespace dmGameSystem
 {
     using namespace dmVMath;
 
+    const uint8_t MAX_TEXTURE_SET_COUNT = 4;
+
     struct SpriteComponent
     {
         dmGameObject::HInstance     m_Instance;
@@ -69,7 +71,7 @@ namespace dmGameSystem
         uint32_t                    m_AnimationID;
         SpriteResource*             m_Resource;
         HComponentRenderConstants   m_RenderConstants;
-        TextureSetResource*         m_TextureSet;
+        TextureSetResource*         m_TextureSet[MAX_TEXTURE_SET_COUNT];
         dmRender::HMaterial         m_Material;
         /// Currently playing animation
         dmhash_t                    m_CurrentAnimation;
@@ -93,13 +95,18 @@ namespace dmGameSystem
         uint16_t                    m_Padding : 6;
     };
 
+    struct TextureChannel
+    {
+        float u;
+        float v;
+    };
+
     struct SpriteVertex
     {
         float x;
         float y;
         float z;
-        float u;
-        float v;
+        TextureChannel m_Uvs[MAX_TEXTURE_SET_COUNT];
     };
 
     struct SpriteWorld
@@ -108,7 +115,7 @@ namespace dmGameSystem
         dmArray<dmRender::RenderObject*> m_RenderObjects;
         dmArray<float>                  m_BoundingVolumes;
         uint32_t                        m_RenderObjectsInUse;
-        dmGraphics::HVertexDeclaration  m_VertexDeclaration;
+        dmGraphics::HVertexDeclaration  m_VertexDeclaration[MAX_TEXTURE_SET_COUNT];
         dmGraphics::HVertexBuffer       m_VertexBuffer;
         SpriteVertex*                   m_VertexBufferData;
         SpriteVertex*                   m_VertexBufferWritePtr;
@@ -117,7 +124,7 @@ namespace dmGameSystem
         uint32_t                        m_IndexCount;
         uint8_t*                        m_IndexBufferData;
         uint8_t*                        m_IndexBufferWritePtr;
-        uint8_t                         m_Is16BitIndex : 1;
+        uint8_t                         m_Is16BitIndex   : 1;
         uint8_t                         m_ReallocBuffers : 1;
     };
 
@@ -168,6 +175,22 @@ namespace dmGameSystem
         sprite_world->m_ReallocBuffers = 0;
     }
 
+    static dmGraphics::HVertexDeclaration CreateSpriteVertexDeclaration(dmGraphics::HContext graphics_context, int texcoord_channels)
+    {
+        dmGraphics::HVertexStreamDeclaration stream_declaration = dmGraphics::NewVertexStreamDeclaration(graphics_context);
+        dmGraphics::AddVertexStream(stream_declaration, "position", 3, dmGraphics::TYPE_FLOAT, false);
+
+        char texcoord_buf[32] = {};
+        for (int i = 0; i < texcoord_channels; ++i)
+        {
+            snprintf(texcoord_buf, sizeof(texcoord_buf), "texcoord%d", i);
+            dmGraphics::AddVertexStream(stream_declaration, texcoord_buf, 2, dmGraphics::TYPE_FLOAT, false);
+        }
+        dmGraphics::HVertexDeclaration decl = dmGraphics::NewVertexDeclaration(graphics_context, stream_declaration);
+        dmGraphics::DeleteVertexStreamDeclaration(stream_declaration);
+        return decl;
+    }
+
     dmGameObject::CreateResult CompSpriteNewWorld(const dmGameObject::ComponentNewWorldParams& params)
     {
         SpriteContext* sprite_context = (SpriteContext*)params.m_Context;
@@ -180,11 +203,18 @@ namespace dmGameSystem
         memset(sprite_world->m_Components.GetRawObjects().Begin(), 0, sizeof(SpriteComponent) * comp_count);
         sprite_world->m_RenderObjectsInUse = 0;
 
+        /*
         dmGraphics::HVertexStreamDeclaration stream_declaration = dmGraphics::NewVertexStreamDeclaration(dmRender::GetGraphicsContext(render_context));
         dmGraphics::AddVertexStream(stream_declaration, "position", 3, dmGraphics::TYPE_FLOAT, false);
         dmGraphics::AddVertexStream(stream_declaration, "texcoord0", 2, dmGraphics::TYPE_FLOAT, false);
         sprite_world->m_VertexDeclaration = dmGraphics::NewVertexDeclaration(dmRender::GetGraphicsContext(render_context), stream_declaration);
         dmGraphics::DeleteVertexStreamDeclaration(stream_declaration);
+        */
+
+        for (int i = 0; i < MAX_TEXTURE_SET_COUNT; ++i)
+        {
+            sprite_world->m_VertexDeclaration[i] = CreateSpriteVertexDeclaration(dmRender::GetGraphicsContext(render_context), i + 1);
+        }
 
         sprite_world->m_VertexBuffer = 0;
         sprite_world->m_VertexBufferData = 0;
@@ -204,7 +234,14 @@ namespace dmGameSystem
             delete sprite_world->m_RenderObjects[i];
         }
 
-        dmGraphics::DeleteVertexDeclaration(sprite_world->m_VertexDeclaration);
+        for (int i = 0; i < MAX_TEXTURE_SET_COUNT; ++i)
+        {
+            if (sprite_world->m_VertexDeclaration[i] != 0x0)
+            {
+                dmGraphics::DeleteVertexDeclaration(sprite_world->m_VertexDeclaration[i]);
+            }
+        }
+
         dmGraphics::DeleteVertexBuffer(sprite_world->m_VertexBuffer);
         free(sprite_world->m_VertexBufferData);
         dmGraphics::DeleteIndexBuffer(sprite_world->m_IndexBuffer);
@@ -237,13 +274,37 @@ namespace dmGameSystem
         return component->m_Material ? component->m_Material : resource->m_Material;
     }
 
-    static inline TextureSetResource* GetTextureSet(const SpriteComponent* component, const SpriteResource* resource) {
-        return component->m_TextureSet ? component->m_TextureSet : resource->m_TextureSet;
+    static inline void GetTextureSet(const SpriteComponent* component, const SpriteResource* resource,
+        TextureSetResource** texture_sets_out, int8_t* num_texture_sets)
+    {
+        uint8_t count = 0;
+        for (int i = 0; i < MAX_TEXTURE_SET_COUNT; ++i)
+        {
+            if (component->m_TextureSet[i])
+            {
+                texture_sets_out[i] = (TextureSetResource*) component->m_TextureSet[i];
+            }
+            else
+            {
+                texture_sets_out[i] = (TextureSetResource*) resource->m_TextureSet[i];
+            }
+
+            if (texture_sets_out[i])
+            {
+                count++;
+            }
+        }
+        *num_texture_sets = count;
     }
 
     static void UpdateCurrentAnimationFrame(SpriteComponent* component) {
-        TextureSetResource* texture_set = GetTextureSet(component, component->m_Resource);
-        dmGameSystemDDF::TextureSet* texture_set_ddf = texture_set->m_TextureSet;
+
+        TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+        int8_t texture_set_count;
+        GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+        TextureSetResource* texture_set                     = texture_sets[0];
+        dmGameSystemDDF::TextureSet* texture_set_ddf        = texture_set->m_TextureSet;
         dmGameSystemDDF::TextureSetAnimation* animation_ddf = &texture_set_ddf->m_Animations[component->m_AnimationID];
 
         // Set frame from cursor (tileindex or animframe)
@@ -276,9 +337,13 @@ namespace dmGameSystem
         }
     }
 
-    static bool PlayAnimation(SpriteComponent* component, dmhash_t animation, float offset, float playback_rate)
+    static bool PlayAnimation(SpriteComponent* component, int texture_set_ix, dmhash_t animation, float offset, float playback_rate)
     {
-        TextureSetResource* texture_set = GetTextureSet(component, component->m_Resource);
+        TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+        int8_t texture_set_count;
+        GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+        TextureSetResource* texture_set = texture_sets[texture_set_ix];
         uint32_t* anim_id = texture_set->m_AnimationIds.Get(animation);
         if (anim_id)
         {
@@ -327,10 +392,14 @@ namespace dmGameSystem
         SpriteResource* resource = component->m_Resource;
         dmGameSystemDDF::SpriteDesc* ddf = resource->m_DDF;
         dmRender::HMaterial material = GetMaterial(component, resource);
-        TextureSetResource* texture_set = GetTextureSet(component, resource);
+
+        TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+        int8_t texture_set_count;
+        GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
         dmHashInit32(&state, reverse);
         dmHashUpdateBuffer32(&state, &material, sizeof(material));
-        dmHashUpdateBuffer32(&state, &texture_set, sizeof(texture_set));
+        dmHashUpdateBuffer32(&state, &texture_sets, sizeof(TextureSetResource*) * texture_set_count);
         dmHashUpdateBuffer32(&state, &ddf->m_BlendMode, sizeof(ddf->m_BlendMode));
         if (component->m_RenderConstants) {
             dmGameSystem::HashRenderConstants(component->m_RenderConstants, &state);
@@ -375,7 +444,13 @@ namespace dmGameSystem
             component->m_Size[1] = component->m_Resource->m_DDF->m_Size.getY();
         }
 
-        PlayAnimation(component, resource->m_DefaultAnimation, 0.0f, 1.0f);
+        for (int i = 0; i < MAX_TEXTURE_SET_COUNT; ++i)
+        {
+            if (resource->m_DefaultAnimation[i])
+            {
+                PlayAnimation(component, i, resource->m_DefaultAnimation[i], 0.0f, 1.0f);
+            }
+        }
 
         *params.m_UserData = (uintptr_t)index;
         return dmGameObject::CREATE_RESULT_OK;
@@ -390,9 +465,14 @@ namespace dmGameSystem
         if (component->m_Material) {
             dmResource::Release(factory, component->m_Material);
         }
-        if (component->m_TextureSet) {
-            dmResource::Release(factory, component->m_TextureSet);
+
+        for (int i = 0; i < MAX_TEXTURE_SET_COUNT; ++i)
+        {
+            if (component->m_TextureSet[i]) {
+                dmResource::Release(factory, component->m_TextureSet[i]);
+            }
         }
+
         if (component->m_RenderConstants)
         {
             dmGameSystem::DestroyRenderConstants(component->m_RenderConstants);
@@ -472,8 +552,8 @@ namespace dmGameSystem
                 vertices->x = p.getX();
                 vertices->y = p.getY();
                 vertices->z = p.getZ();
-                vertices->u = us[x];
-                vertices->v = vs[y];
+                //vertices->u = us[x];
+                //vertices->v = vs[y];
                 vertices++;
             }
         }
@@ -541,11 +621,17 @@ namespace dmGameSystem
         {
             uint32_t component_index                            = (uint32_t)buf[*i].m_UserData;
             const SpriteComponent* component                    = (const SpriteComponent*) &components[component_index];
-            TextureSetResource* texture_set                     = GetTextureSet(component, component->m_Resource);
-            dmGameSystemDDF::TextureSet* texture_set_ddf        = texture_set->m_TextureSet;
-            dmGameSystemDDF::TextureSetAnimation* animations    = texture_set_ddf->m_Animations.m_Data;
-            dmGameSystemDDF::TextureSetAnimation* animation_ddf = &animations[component->m_AnimationID];
 
+            TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+            int8_t texture_set_count;
+            GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+            // TextureSetResource* texture_set                     = texture_sets[0];
+            // dmGameSystemDDF::TextureSet* texture_set_ddf        = texture_set->m_TextureSet;
+            // dmGameSystemDDF::TextureSetAnimation* animations    = texture_set_ddf->m_Animations.m_Data;
+            // dmGameSystemDDF::TextureSetAnimation* animation_ddf = &animations[component->m_AnimationID];
+
+            /*
             if (texture_set_ddf->m_UseGeometries != 0)
             {
                 const dmGameSystemDDF::SpriteGeometry* geometries = texture_set_ddf->m_Geometries.m_Data;
@@ -582,8 +668,8 @@ namespace dmGameSystem
                     vertices[0].x = ((float*)&p0)[0];
                     vertices[0].y = ((float*)&p0)[1];
                     vertices[0].z = ((float*)&p0)[2];
-                    vertices[0].u = u;
-                    vertices[0].v = v;
+                    //vertices[0].u = u;
+                    //vertices[0].v = v;
                 }
 
                 uint32_t index_count = geometry->m_Indices.m_Count;
@@ -606,7 +692,9 @@ namespace dmGameSystem
                 vertex_offset += num_points;
             }
             else
+            */
             {
+                /*
                 uint32_t frame_index    = animation_ddf->m_Start + component->m_CurrentAnimationFrame;
                 const float* tex_coords = (const float*) texture_set_ddf->m_TexCoords.m_Data;
                 const float* tc         = &tex_coords[frame_index * 4 * 2];
@@ -625,6 +713,7 @@ namespace dmGameSystem
 
                 const int* tex_lookup = &tex_coord_order[flip_flag * 6];
                 const Matrix4& w      = component->m_World;
+                */
 
                 // Output vertices in either a single quad format or slice-9 format
                 // ==================================================================
@@ -641,6 +730,7 @@ namespace dmGameSystem
                 //      as outputting a single quad since the density of the texture coordinates
                 //      are the same everywhere across the surface, and we would just be
                 //      submitting more vertices than needed.
+                /*
                 if (component->m_UseSlice9)
                 {
                     int flipx = animation_ddf->m_FlipHorizontal ^ component->m_FlipHorizontal;
@@ -656,25 +746,65 @@ namespace dmGameSystem
                     vertex_offset += SPRITE_VERTEX_COUNT_SLICE9;
                 }
                 else
+                */
                 {
-                    #define SET_SPRITE_VERTEX(vert, p, tc_index)   \
+                    const Matrix4& w = component->m_World;
+
+                    #define SET_SPRITE_VERTEX_POS(vert, p, tc_index)   \
                         vert.x = p.getX();                         \
                         vert.y = p.getY();                         \
-                        vert.z = p.getZ();                         \
-                        vert.u = tc[tex_lookup[tc_index] * 2 + 0]; \
-                        vert.v = tc[tex_lookup[tc_index] * 2 + 1];
+                        vert.z = p.getZ();
+                        //vert.u = tc[tex_lookup[tc_index] * 2 + 0]; \
+                        //vert.v = tc[tex_lookup[tc_index] * 2 + 1];
 
                     Vector4 p0 = w * Point3(-0.5f, -0.5f, 0.0f);
                     Vector4 p1 = w * Point3(-0.5f, 0.5f, 0.0f);
                     Vector4 p2 = w * Point3(0.5f, 0.5f, 0.0f);
                     Vector4 p3 = w * Point3(0.5f, -0.5f, 0.0f);
 
-                    SET_SPRITE_VERTEX(vertices[0], p0, 0);
-                    SET_SPRITE_VERTEX(vertices[1], p1, 1);
-                    SET_SPRITE_VERTEX(vertices[2], p2, 2);
-                    SET_SPRITE_VERTEX(vertices[3], p3, 4);
+                    SET_SPRITE_VERTEX_POS(vertices[0], p0, 0);
+                    SET_SPRITE_VERTEX_POS(vertices[1], p1, 1);
+                    SET_SPRITE_VERTEX_POS(vertices[2], p2, 2);
+                    SET_SPRITE_VERTEX_POS(vertices[3], p3, 4);
 
-                    #undef SET_SPRITE_VERTEX
+                    for (int t = 0; t < texture_set_count; ++t)
+                    {
+                        TextureSetResource* texture_set                     = texture_sets[t];
+                        dmGameSystemDDF::TextureSet* texture_set_ddf        = texture_set->m_TextureSet;
+                        dmGameSystemDDF::TextureSetAnimation* animations    = texture_set_ddf->m_Animations.m_Data;
+                        dmGameSystemDDF::TextureSetAnimation* animation_ddf = &animations[component->m_AnimationID];
+
+                        uint32_t frame_index    = animation_ddf->m_Start + component->m_CurrentAnimationFrame;
+                        const float* tex_coords = (const float*) texture_set_ddf->m_TexCoords.m_Data;
+                        const float* tc         = &tex_coords[frame_index * 4 * 2];
+                        uint32_t flip_flag      = 0;
+
+                        // ddf values are guaranteed to be 0 or 1 when saved by the editor
+                        // component values are guaranteed to be 0 or 1
+                        if (animation_ddf->m_FlipHorizontal ^ component->m_FlipHorizontal)
+                        {
+                            flip_flag = 1;
+                        }
+                        if (animation_ddf->m_FlipVertical ^ component->m_FlipVertical)
+                        {
+                            flip_flag |= 2;
+                        }
+
+                        const int* tex_lookup = &tex_coord_order[flip_flag * 6];
+
+                        #define SET_SPRITE_VERTEX_UV(vert, tci, tc_index)         \
+                            vert.m_Uvs[tci].u = tc[tex_lookup[tc_index] * 2 + 0]; \
+                            vert.m_Uvs[tci].v = tc[tex_lookup[tc_index] * 2 + 1];
+
+                        SET_SPRITE_VERTEX_UV(vertices[0], t, 0);
+                        SET_SPRITE_VERTEX_UV(vertices[1], t, 1);
+                        SET_SPRITE_VERTEX_UV(vertices[2], t, 2);
+                        SET_SPRITE_VERTEX_UV(vertices[3], t, 4);
+
+                        #undef SET_SPRITE_VERTEX_UV
+                    }
+
+                    #undef SET_SPRITE_VERTEX_POS
 
                 #if 0
                     for (int f = 0; f < 4; ++f)
@@ -722,7 +852,10 @@ namespace dmGameSystem
         assert(first->m_Enabled);
 
         SpriteResource* resource = first->m_Resource;
-        TextureSetResource* texture_set = GetTextureSet(first, resource);
+
+        TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+        int8_t texture_set_count;
+        GetTextureSet(first, resource, texture_sets, &texture_set_count);
 
         // Although we generally like to preallocate it, we cannot since we
         // 1) don't want to preallocate max_sprite number of render objects and
@@ -747,13 +880,18 @@ namespace dmGameSystem
         sprite_world->m_IndexBufferWritePtr = ib_iter;
 
         ro.Init();
-        ro.m_VertexDeclaration = sprite_world->m_VertexDeclaration;
-        ro.m_VertexBuffer = sprite_world->m_VertexBuffer;
-        ro.m_IndexBuffer = sprite_world->m_IndexBuffer;
-        ro.m_Material = GetMaterial(first, resource);
-        ro.m_Textures[0] = texture_set->m_Texture;
-        ro.m_PrimitiveType = dmGraphics::PRIMITIVE_TRIANGLES;
-        ro.m_IndexType = sprite_world->m_Is16BitIndex ? dmGraphics::TYPE_UNSIGNED_SHORT : dmGraphics::TYPE_UNSIGNED_INT;
+        ro.m_VertexDeclaration = sprite_world->m_VertexDeclaration[MAX_TEXTURE_SET_COUNT-1]; //  texture_set_count-1]; // sprite_world->m_VertexDeclaration;
+        ro.m_VertexBuffer      = sprite_world->m_VertexBuffer;
+        ro.m_IndexBuffer       = sprite_world->m_IndexBuffer;
+        ro.m_Material          = GetMaterial(first, resource);
+        ro.m_PrimitiveType     = dmGraphics::PRIMITIVE_TRIANGLES;
+        ro.m_IndexType         = sprite_world->m_Is16BitIndex ? dmGraphics::TYPE_UNSIGNED_SHORT : dmGraphics::TYPE_UNSIGNED_INT;
+
+        for (int i = 0; i < texture_set_count; ++i)
+        {
+            if (texture_sets[i])
+                ro.m_Textures[i] = texture_sets[i]->m_Texture;
+        }
 
         // offset in bytes into element buffer
         uint32_t index_offset = ib_begin - sprite_world->m_IndexBufferData;
@@ -891,7 +1029,11 @@ namespace dmGameSystem
             if (!component->m_Enabled || !component->m_Playing)
                 continue;
 
-            TextureSetResource* texture_set = GetTextureSet(component, component->m_Resource);
+            TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+            int8_t texture_set_count;
+            GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+            TextureSetResource* texture_set = texture_sets[0];
             dmGameSystemDDF::TextureSet* texture_set_ddf = texture_set->m_TextureSet;
             dmGameSystemDDF::TextureSetAnimation* animation_ddf = &texture_set_ddf->m_Animations[component->m_AnimationID];
 
@@ -950,7 +1092,11 @@ namespace dmGameSystem
 
             if (component->m_Playing && component->m_AddedToUpdate)
             {
-                TextureSetResource* texture_set = GetTextureSet(component, component->m_Resource);
+                TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+                int8_t texture_set_count;
+                GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+                TextureSetResource* texture_set = texture_sets[0];
                 dmGameSystemDDF::TextureSet* texture_set_ddf = texture_set->m_TextureSet;
                 dmGameSystemDDF::TextureSetAnimation* animation_ddf = &texture_set_ddf->m_Animations[component->m_AnimationID];
 
@@ -995,7 +1141,11 @@ namespace dmGameSystem
             if (!component->m_Enabled || !component->m_AddedToUpdate)
                 continue;
 
-            TextureSetResource* texture_set = GetTextureSet(component, component->m_Resource);
+            TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+            int8_t texture_set_count;
+            GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+            TextureSetResource* texture_set = texture_sets[0];
             if (texture_set->m_TextureSet->m_UseGeometries != 0)
             {
                 dmGameSystemDDF::TextureSet* texture_set_ddf        = texture_set->m_TextureSet;
@@ -1241,7 +1391,7 @@ namespace dmGameSystem
             if (params.m_Message->m_Id == dmGameSystemDDF::PlayAnimation::m_DDFDescriptor->m_NameHash)
             {
                 dmGameSystemDDF::PlayAnimation* ddf = (dmGameSystemDDF::PlayAnimation*)params.m_Message->m_Data;
-                if (PlayAnimation(component, ddf->m_Id, ddf->m_Offset, ddf->m_PlaybackRate))
+                if (PlayAnimation(component, 0, ddf->m_Id, ddf->m_Offset, ddf->m_PlaybackRate))
                 {
                     component->m_Listener = params.m_Message->m_Sender;
                     component->m_FunctionRef = params.m_Message->m_UserData2;
@@ -1295,7 +1445,10 @@ namespace dmGameSystem
         SpriteWorld* sprite_world = (SpriteWorld*)params.m_World;
         SpriteComponent* component = &sprite_world->m_Components.Get(*params.m_UserData);
         if (component->m_Playing)
-            PlayAnimation(component, component->m_CurrentAnimation, component->m_AnimTimer, component->m_PlaybackRate);
+        {
+            // TODO
+            PlayAnimation(component, 0, component->m_CurrentAnimation, component->m_AnimTimer, component->m_PlaybackRate);
+        }
     }
 
     dmGameObject::PropertyResult CompSpriteGetProperty(const dmGameObject::ComponentGetPropertyParams& params, dmGameObject::PropertyDesc& out_value)
@@ -1328,11 +1481,21 @@ namespace dmGameSystem
         }
         else if (get_property == PROP_IMAGE)
         {
-            return GetResourceProperty(dmGameObject::GetFactory(params.m_Instance), GetTextureSet(component, component->m_Resource), out_value);
+            TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+            int8_t texture_set_count;
+            GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+            TextureSetResource* texture_set = texture_sets[0];
+            return GetResourceProperty(dmGameObject::GetFactory(params.m_Instance), texture_set->m_Texture, out_value);
         }
         else if (get_property == PROP_TEXTURE[0])
         {
-            return GetResourceProperty(dmGameObject::GetFactory(params.m_Instance), GetTextureSet(component, component->m_Resource)->m_Texture, out_value);
+            TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+            int8_t texture_set_count;
+            GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+            TextureSetResource* texture_set = texture_sets[0];
+            return GetResourceProperty(dmGameObject::GetFactory(params.m_Instance), texture_set->m_Texture, out_value);
         }
         else if (get_property == SPRITE_PROP_ANIMATION)
         {
@@ -1390,11 +1553,15 @@ namespace dmGameSystem
             // Since the animation referred to the old texture, we need to update it
             if (res == dmGameObject::PROPERTY_RESULT_OK)
             {
-                TextureSetResource* texture_set = GetTextureSet(component, component->m_Resource);
+                TextureSetResource* texture_sets[MAX_TEXTURE_SET_COUNT];
+                int8_t texture_set_count;
+                GetTextureSet(component, component->m_Resource, texture_sets, &texture_set_count);
+
+                TextureSetResource* texture_set = texture_sets[0];
                 uint32_t* anim_id = texture_set->m_AnimationIds.Get(component->m_CurrentAnimation);
                 if (anim_id)
                 {
-                    PlayAnimation(component, component->m_CurrentAnimation, GetCursor(component), component->m_PlaybackRate);
+                    PlayAnimation(component, 0, component->m_CurrentAnimation, GetCursor(component), component->m_PlaybackRate);
                 }
                 else
                 {

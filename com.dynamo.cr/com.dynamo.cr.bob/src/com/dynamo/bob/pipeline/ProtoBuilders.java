@@ -217,10 +217,25 @@ public class ProtoBuilders {
         @Override
         protected SpriteDesc.Builder transform(Task<Void> task, IResource resource, SpriteDesc.Builder messageBuilder)
                 throws IOException, CompileExceptionError {
+
+            for (int i=0; i < messageBuilder.getTileSetCount(); i++) {
+                String tileSet = messageBuilder.getTileSet(i);
+                System.out.println("tileSet: " + tileSet);
+                BuilderUtil.checkResource(this.project, resource, "tile source", tileSet);
+                tileSet = BuilderUtil.replaceExt(tileSet, "tileset", "t.texturesetc");
+                tileSet = BuilderUtil.replaceExt(tileSet, "tilesource", "t.texturesetc");
+                tileSet = BuilderUtil.replaceExt(tileSet, "atlas", "a.texturesetc");
+                messageBuilder.setTileSet(i, tileSet);
+            }
+
+            /*
             BuilderUtil.checkResource(this.project, resource, "tile source", messageBuilder.getTileSet());
             messageBuilder.setTileSet(BuilderUtil.replaceExt(messageBuilder.getTileSet(), "tileset", "t.texturesetc"));
             messageBuilder.setTileSet(BuilderUtil.replaceExt(messageBuilder.getTileSet(), "tilesource", "t.texturesetc"));
             messageBuilder.setTileSet(BuilderUtil.replaceExt(messageBuilder.getTileSet(), "atlas", "a.texturesetc"));
+            messageBuilder.setMaterial(BuilderUtil.replaceExt(messageBuilder.getMaterial(), "material", "materialc"));
+            */
+
             messageBuilder.setMaterial(BuilderUtil.replaceExt(messageBuilder.getMaterial(), "material", "materialc"));
             return messageBuilder;
         }

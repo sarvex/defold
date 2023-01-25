@@ -27,13 +27,25 @@ namespace dmGameSystem
     {
         // Add-alpha is deprecated because of premultiplied alpha and replaced by Add
         if (resource->m_DDF->m_BlendMode == dmGameSystemDDF::SpriteDesc::BLEND_MODE_ADD_ALPHA)
-            resource->m_DDF->m_BlendMode = dmGameSystemDDF::SpriteDesc::BLEND_MODE_ADD;
-
-        dmResource::Result fr = dmResource::Get(factory, resource->m_DDF->m_TileSet, (void**)&resource->m_TextureSet);
-        if (fr != dmResource::RESULT_OK)
         {
-            return fr;
+            resource->m_DDF->m_BlendMode = dmGameSystemDDF::SpriteDesc::BLEND_MODE_ADD;
         }
+
+        TextureSetResource* texture_sets[dmRender::RenderObject::MAX_TEXTURE_COUNT] = {0};
+
+        dmResource::Result fr = dmResource::RESULT_OK;
+
+        for (int i = 0; i < resource->m_DDF->m_TileSet.m_Count; ++i)
+        {
+            fr = dmResource::Get(factory, resource->m_DDF->m_TileSet[i], (void**) &texture_sets[i]); // (void**)&resource->m_TextureSet);
+            if (fr != dmResource::RESULT_OK)
+            {
+                return fr;
+            }
+        }
+
+        memcpy(resource->m_TextureSet, texture_sets, sizeof(texture_sets));
+
         fr = dmResource::Get(factory, resource->m_DDF->m_Material, (void**)&resource->m_Material);
         if (fr != dmResource::RESULT_OK)
         {
@@ -44,31 +56,40 @@ namespace dmGameSystem
             dmLogError("Failed to create Sprite component. This component only supports materials with the Vertex Space property set to 'vertex-space-world'");
             return dmResource::RESULT_NOT_SUPPORTED;
         }
-        resource->m_DefaultAnimation = dmHashString64(resource->m_DDF->m_DefaultAnimation);
-        if (!resource->m_TextureSet->m_AnimationIds.Get(resource->m_DefaultAnimation))
+
+        for (int i = 0; i < resource->m_DDF->m_DefaultAnimation.m_Count; ++i)
         {
-            if (resource->m_DDF->m_DefaultAnimation == 0 || resource->m_DDF->m_DefaultAnimation[0] == '\0')
+            resource->m_DefaultAnimation[i] = dmHashString64(resource->m_DDF->m_DefaultAnimation[i]);
+
+            if (!resource->m_TextureSet[i]->m_AnimationIds.Get(resource->m_DefaultAnimation[i]))
             {
-                dmLogError("No default animation specified");
+                if (resource->m_DDF->m_DefaultAnimation[i] == 0 || resource->m_DDF->m_DefaultAnimation[i][0] == '\0')
+                {
+                    dmLogError("No default animation specified");
+                }
+                else
+                {
+                    dmLogError("Default animation '%s' not found", resource->m_DDF->m_DefaultAnimation[i]);
+                }
+                return dmResource::RESULT_FORMAT_ERROR;;
             }
-            else
-            {
-                dmLogError("Default animation '%s' not found", resource->m_DDF->m_DefaultAnimation);
-            }
-            return dmResource::RESULT_FORMAT_ERROR;;
         }
-        else
-        {
-            return dmResource::RESULT_OK;
-        }
+
+        return dmResource::RESULT_OK;
     }
 
     void ReleaseResources(dmResource::HFactory factory, SpriteResource* resource)
     {
         if (resource->m_DDF != 0x0)
             dmDDF::FreeMessage(resource->m_DDF);
-        if (resource->m_TextureSet != 0x0)
-            dmResource::Release(factory, resource->m_TextureSet);
+
+        for (int i = 0; i < dmRender::RenderObject::MAX_TEXTURE_COUNT; ++i)
+        {
+            if (resource->m_TextureSet[i] != 0x0)
+            {
+                dmResource::Release(factory, resource->m_TextureSet[i]);
+            }
+        }
         if (resource->m_Material != 0x0)
             dmResource::Release(factory, resource->m_Material);
     }
@@ -82,7 +103,11 @@ namespace dmGameSystem
             return dmResource::RESULT_FORMAT_ERROR;
         }
 
-        dmResource::PreloadHint(params.m_HintInfo, ddf->m_TileSet);
+        for (int i = 0; i < ddf->m_TileSet.m_Count; ++i)
+        {
+            dmResource::PreloadHint(params.m_HintInfo, ddf->m_TileSet[i]);
+        }
+
         dmResource::PreloadHint(params.m_HintInfo, ddf->m_Material);
 
         *params.m_PreloadData = ddf;
