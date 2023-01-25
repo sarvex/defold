@@ -24,8 +24,8 @@ message SpriteDesc
         SIZE_MODE_AUTO      = 1 [(displayName) = "Auto"];
     }
 
-    required string tile_set            = 1 [(resource)=true];
-    required string default_animation   = 2;
+    repeated string tile_set            = 1 [(resource)=true];
+    repeated string default_animation   = 2;
     optional string material            = 3 [(resource)=true, default="/builtins/materials/sprite.material"];
     optional BlendMode blend_mode       = 4 [default = BLEND_MODE_ALPHA];
     optional dmMath.Vector4 slice9      = 5;

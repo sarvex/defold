@@ -297,29 +297,47 @@
   [anim-ids]
   (sort-by str/lower-case anim-ids))
 
+(defn- produce-aabb [animations]
+  (geom/empty-bounding-box)
+  #_(if animation
+    (let [animation-width (* 0.5 (:width animation))
+          animation-height (* 0.5 (:height animation))]
+      (geom/make-aabb (Point3d. (- animation-width) (- animation-height) 0)
+                      (Point3d. animation-width animation-height 0)))
+    geom/empty-bounding-box))
+
+(defn- vset [v i value]
+  (prn v i value)
+  (let [c (count v)
+        v (if (<= c i) (into v (repeat (- i c) nil)) v)]
+    (println "VSET" (assoc v i value))
+    (assoc v i value)))
+
 (g/defnode SpriteNode
   (inherits resource-node/ResourceNode)
 
-  (property image resource/Resource
-            (value (gu/passthrough image-resource))
+  (property images resource/ResourceVec
+            (value (gu/passthrough image-resources))
             (set (fn [evaluation-context self old-value new-value]
-                   (project/resource-setter evaluation-context self old-value new-value
-                                            [:resource :image-resource]
-                                            [:anim-data :anim-data]
-                                            [:anim-ids :anim-ids]
-                                            [:gpu-texture :gpu-texture]
-                                            [:build-targets :dep-build-targets])))
-            (dynamic error (g/fnk [_node-id image anim-data]
-                                  (or (validation/prop-error :info _node-id :image validation/prop-nil? image "Image")
-                                      (validation/prop-error :fatal _node-id :image validation/prop-resource-not-exists? image "Image")
-                                      (when (nil? anim-data) ; nil from :substitute on input.
-                                        (g/->error _node-id :image :fatal image "the assigned Image has internal errors")))))
-            (dynamic edit-type (g/constantly
-                                 {:type resource/Resource
-                                  :ext ["atlas" "tilesource"]})))
+                   (let [project (project/get-project (:basis evaluation-context) self)
+                         connections [[:resource :image-resources]
+                                      [:anim-data :anim-datas]
+                                      [:anim-ids :anim-ids]
+                                      [:gpu-texture :gpu-textures]
+                                      [:build-targets :dep-build-targets]]]
+                     (concat
+                       (for [r old-value]
+                         (if r
+                           (project/disconnect-resource-node evaluation-context project r self connections)
+                           (g/disconnect project :nil-resource self :image-resources)))
+                       (for [r new-value]
+                         (if r
+                           (:tx-data (project/connect-resource-node evaluation-context project r self connections))
+                           (g/connect project :nil-resource self :image-resources)))))))
+            (dynamic visible (g/constantly false)))
 
-  (property default-animation g/Str
-            (dynamic error (g/fnk [_node-id image anim-ids default-animation]
+  (property default-animations g/Str :array
+            #_#_(dynamic error (g/fnk [_node-id image anim-ids default-animation]
                                   (when image
                                     (or (validation/prop-error :fatal _node-id :default-animation validation/prop-empty? default-animation "Default Animation")
                                         (validation/prop-error :fatal _node-id :default-animation validation/prop-anim-missing? default-animation anim-ids)))))
@@ -359,10 +377,10 @@
             (dynamic read-only? (g/fnk [size-mode] (= :size-mode-auto size-mode)))
             (dynamic edit-type (g/constantly {:type types/Vec4 :labels ["L" "T" "R" "B"]})))
 
-  (input image-resource resource/Resource)
-  (input anim-data g/Any :substitute nil)
-  (input anim-ids g/Any)
-  (input gpu-texture g/Any)
+  (input image-resources resource/Resource :array)
+  (input anim-datas g/Any :array :substitute nil)
+  (input anim-ids g/Any :array)
+  (input gpu-textures g/Any :array)
   (input dep-build-targets g/Any :array)
 
   (input material-resource resource/Resource)
@@ -373,17 +391,31 @@
   (output tex-params g/Any (g/fnk [material-samplers material-shader default-tex-params]
                              (or (some-> material-samplers first material/sampler->tex-params)
                                  default-tex-params)))
-  (output gpu-texture g/Any (g/fnk [gpu-texture tex-params] (texture/set-params gpu-texture tex-params)))
-  (output animation g/Any (g/fnk [anim-data default-animation] (get anim-data default-animation))) ; TODO - use placeholder animation
-  (output aabb AABB (g/fnk [animation] (if animation
-                                         (let [animation-width (* 0.5 (:width animation))
-                                               animation-height (* 0.5 (:height animation))]
-                                           (geom/make-aabb (Point3d. (- animation-width) (- animation-height) 0)
-                                                           (Point3d. animation-width animation-height 0)))
-                                         geom/empty-bounding-box)))
+  (output gpu-textures g/Any :array #_ (g/fnk [gpu-texture tex-params] (texture/set-params gpu-texture tex-params)))
+  (output animations g/Any :array #_ (g/fnk [anim-datas default-animation] (get anim-datas default-animation))) ; TODO - use placeholder animation
+  (output aabb AABB produce-aabb)
   (output save-value g/Any produce-save-value)
   (output scene g/Any :cached produce-scene)
-  (output build-targets g/Any :cached produce-build-targets))
+  (output build-targets g/Any :cached produce-build-targets)
+  (output _properties g/Properties :cached (g/fnk [_node-id _declared-properties images material-samplers]
+                                             (let [resource-type (get-in _declared-properties [:properties :material :type])
+                                                   prop-entry {:node-id _node-id
+                                                               :type resource-type
+                                                               :edit-type {:type resource/Resource
+                                                                           :ext ["atlas" "tilesource"]}}
+                                                   keys (map :name material-samplers)
+                                                   p (->> keys
+                                                          (map-indexed (fn [i s]
+                                                                         [(keyword (format "texture%d" i))
+                                                                          (-> prop-entry
+                                                                              (assoc :value (get images i)
+                                                                                     :label s)
+                                                                              (assoc-in [:edit-type :set-fn]
+                                                                                        (fn [_evaluation-context self old-value new-value]
+                                                                                          (g/update-property self :images vset i new-value))))])))]
+                                               (-> _declared-properties
+                                                   (update :properties into p)
+                                                   (update :display-order into (map first p)))))))
 
 (defn load-sprite [project self resource sprite]
   (let [image    (workspace/resolve-resource resource (:tile-set sprite))
