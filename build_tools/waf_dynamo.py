@@ -21,7 +21,7 @@ from waflib.Task import RUN_ME
 from BuildUtility import BuildUtility, BuildUtilityException, create_build_utility
 import sdk
 
-if not 'DYNAMO_HOME' in os.environ:
+if 'DYNAMO_HOME' not in os.environ:
     print ("You must define DYNAMO_HOME. Have you run './script/build.py shell' ?", file=sys.stderr)
     sys.exit(1)
 
@@ -29,13 +29,13 @@ def is_platform_private(platform):
     return platform in ['arm64-nx64', 'x86_64-ps4']
 
 for platform in ('nx64', 'ps4'):
-    path = os.path.join(os.path.dirname(__file__), 'waf_dynamo_%s.py' % platform)
+    path = os.path.join(os.path.dirname(__file__), f'waf_dynamo_{platform}.py')
     if not os.path.exists(path):
         continue
     import imp
     sys.dont_write_bytecode = True
     imp.load_source('waf_dynamo_private', path)
-    print("Imported %s from %s" % ('waf_dynamo_private', path))
+    print(f"Imported waf_dynamo_private from {path}")
     import waf_dynamo_private
     sys.dont_write_bytecode = False
     break
@@ -82,7 +82,9 @@ SDK_ROOT=sdk.SDK_ROOT
 ANDROID_ROOT=SDK_ROOT
 ANDROID_BUILD_TOOLS_VERSION = '33.0.1'
 ANDROID_NDK_API_VERSION='19' # Android 4.4
-ANDROID_NDK_ROOT=os.path.join(SDK_ROOT,'android-ndk-r%s' % sdk.ANDROID_NDK_VERSION)
+ANDROID_NDK_ROOT = os.path.join(
+    SDK_ROOT, f'android-ndk-r{sdk.ANDROID_NDK_VERSION}'
+)
 ANDROID_TARGET_API_LEVEL='33' # Android 13.0
 ANDROID_MIN_API_LEVEL='19'
 ANDROID_64_NDK_API_VERSION='21' # Android 5.0
@@ -172,7 +174,7 @@ def apidoc_extract_task(bld, src):
                 ns = default_namespace
             if ns not in elements:
                 elements[ns] = []
-            elements[ns].append('/' + comment_str + '*/')
+            elements[ns].append(f'/{comment_str}*/')
         return elements
 
     import waflib.Node
@@ -185,13 +187,13 @@ def apidoc_extract_task(bld, src):
         for s in src:
             n = bld.path.find_resource(s)
             if not n:
-                print("Couldn't find resource: %s" % s)
+                print(f"Couldn't find resource: {s}")
                 continue
             with open(n.abspath(), encoding='utf8') as in_f:
                 source = in_f.read()
                 for k,v in chain(elements.items(), ns_elements(source).items()):
-                    if k == None:
-                        print("Missing namespace definition in " + n.abspath())
+                    if k is None:
+                        print(f"Missing namespace definition in {n.abspath()}")
                     ret[k] = ret[k] + v
         return ret
 
@@ -207,7 +209,7 @@ def apidoc_extract_task(bld, src):
         target = []
         for ns in elements.keys():
             if ns is not None:
-                target.append(ns + '.apidoc')
+                target.append(f'{ns}.apidoc')
         return bld(rule=write_docs, name='apidoc_extract', source = src, target = target)
 
 
@@ -224,7 +226,9 @@ def dmsdk_add_file(bld, target, source):
 def dmsdk_add_files(bld, target, source):
     d = bld.path.find_dir(source)
     if d is None:
-        print("Could not find source file/dir '%s' from dir '%s'" % (source,bld.path.abspath()))
+        print(
+            f"Could not find source file/dir '{source}' from dir '{bld.path.abspath()}'"
+        )
         sys.exit(1)
     bld_sdk_files = d.abspath()
     bld_path = bld.path.abspath()
@@ -240,16 +244,16 @@ def dmsdk_add_files(bld, target, source):
     apidoc_extract_task(bld, doc_files)
 
 def getAndroidNDKArch(target_arch):
-    return 'arm64' if 'arm64' == target_arch else 'arm'
+    return 'arm64' if target_arch == 'arm64' else 'arm'
 
 def getAndroidArch(target_arch):
-    return 'arm64-v8a' if 'arm64' == target_arch else 'armeabi-v7a'
+    return 'arm64-v8a' if target_arch == 'arm64' else 'armeabi-v7a'
 
 def getAndroidCompilerName(target_arch, api_version):
     if target_arch == 'arm64':
-        return 'aarch64-linux-android%s-clang' % (api_version)
+        return f'aarch64-linux-android{api_version}-clang'
     else:
-        return 'armv7a-linux-androideabi%s-clang' % (api_version)
+        return f'armv7a-linux-androideabi{api_version}-clang'
 
 def getAndroidNDKAPIVersion(target_arch):
     if target_arch == 'arm64':
@@ -260,23 +264,21 @@ def getAndroidNDKAPIVersion(target_arch):
 def getAndroidCompileFlags(target_arch):
     # NOTE compared to armv7-android:
     # -mthumb, -mfloat-abi, -mfpu are implicit on aarch64, removed from flags
-    if 'arm64' == target_arch:
+    if target_arch == 'arm64':
         return ['-D__aarch64__', '-DGOOGLE_PROTOBUF_NO_RTTI', '-march=armv8-a', '-fvisibility=hidden']
-    # NOTE:
-    # -fno-exceptions added
     else:
         return ['-D__ARM_ARCH_5__', '-D__ARM_ARCH_5T__', '-D__ARM_ARCH_5E__', '-D__ARM_ARCH_5TE__', '-DGOOGLE_PROTOBUF_NO_RTTI', '-march=armv7-a', '-mfloat-abi=softfp', '-mfpu=vfp', '-fvisibility=hidden']
 
 def getAndroidLinkFlags(target_arch):
-    if 'arm64' == target_arch:
+    if target_arch == 'arm64':
         return ['-Wl,--no-undefined', '-Wl,-z,noexecstack', '-landroid', '-fpic', '-z', 'text']
     else:
         return ['-Wl,--fix-cortex-a8', '-Wl,--no-undefined', '-Wl,-z,noexecstack', '-landroid', '-fpic', '-z', 'text']
 
 # from osx.py
 def apply_framework(self):
+    frameworkpath_st='-F%s'
     for x in self.to_list(self.env['FRAMEWORKPATH']):
-        frameworkpath_st='-F%s'
         self.env.append_unique('CXXFLAGS',frameworkpath_st%x)
         self.env.append_unique('CFLAGS',frameworkpath_st%x)
         self.env.append_unique('LINKFLAGS',frameworkpath_st%x)

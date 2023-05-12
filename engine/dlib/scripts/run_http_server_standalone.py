@@ -59,4 +59,4 @@ config.set("server", "socket_ssl_test", server_sockets.getint("server", "socket_
 configfilepath = os.path.basename("unittest_data.cfg")
 with open(configfilepath, 'w') as f:
     config.write(f)
-    print("Wrote test config file: %s" % configfilepath)
+    print(f"Wrote test config file: {configfilepath}")

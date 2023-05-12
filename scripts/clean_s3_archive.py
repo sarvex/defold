@@ -40,5 +40,5 @@ for key in bucket.list(prefix = archive_root):
     parts = key.name.split("/")
     sha1 = parts[1]
     if sha1 not in keep:
-        print("Deleting %s" % key.name)
+        print(f"Deleting {key.name}")
         key.delete()

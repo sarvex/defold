@@ -45,18 +45,18 @@ def transform_refdoc(doc):
         elif e['type'] == 'METHOD':
             methods.append(e)
 
-    t = {}
-    t['functions'] = functions
-    t['methods'] = methods
-    t['macros'] = macros
-    t['messages'] = messages
-    t['constants'] = constants
-    t['properties'] = properties
-    t['structs'] = structs
-    t['enums'] = enums
-    t['typedefs'] = typedefs
-    t['info'] = doc['info']
-    return t
+    return {
+        'functions': functions,
+        'methods': methods,
+        'macros': macros,
+        'messages': messages,
+        'constants': constants,
+        'properties': properties,
+        'structs': structs,
+        'enums': enums,
+        'typedefs': typedefs,
+        'info': doc['info'],
+    }
 
 # Merge doc2 into doc1
 def merge_refdocs(doc1, doc2):
@@ -117,15 +117,13 @@ if __name__ == '__main__':
     index = {}
     orig_json = ''
     for name in args[:-1]:
-        f = open(name, 'rb')
-        raw_json = json.loads(f.read())
-        jsondata, index = transform_doc(raw_json, options.version, jsondata, index)
-        f.close()
-
+        with open(name, 'rb') as f:
+            raw_json = json.loads(f.read())
+            jsondata, index = transform_doc(raw_json, options.version, jsondata, index)
     output_dir = args[-1]
 
     for namespace in jsondata:
-        output_file = os.path.join(output_dir, namespace + '.json')
+        output_file = os.path.join(output_dir, f'{namespace}.json')
         f = open(output_file, "wb")
         json.dump(jsondata[namespace], f, indent = 2)
 

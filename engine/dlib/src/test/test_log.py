@@ -30,16 +30,12 @@ def connect():
     s.connect(('localhost', port))
 
     code, msg = recv_line(s).split(' ', 1)
-    if int(code) == 0:
-        return s
-    else:
-        return None
+    return s if int(code) == 0 else None
 
 # open connections until failure
 sockets = []
 while True:
-    s = connect()
-    if s:
+    if s := connect():
         sockets.append(s)
     else:
         break
@@ -61,5 +57,5 @@ l2 = recv_line(sock)
 sock.shutdown(socket.SHUT_RDWR)
 sock.close()
 
-assert l1 == 'WARNING:DLIB: a warning 123', 'got %s' % l1
-assert l2 == 'ERROR:DLIB: an error 456', 'got %s' % l2
+assert l1 == 'WARNING:DLIB: a warning 123', f'got {l1}'
+assert l2 == 'ERROR:DLIB: an error 456', f'got {l2}'

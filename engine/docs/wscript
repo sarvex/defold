@@ -21,7 +21,6 @@ def init(ctx):
 
 def configure(conf):
     conf.recurse('src')
-    pass
 
 def clean(conf):
     # Clean up src
@@ -39,8 +38,10 @@ def build(bld):
     # Find all the built .apidoc files in the engine tree
     apidoc_files = []
     for root, dirs, files in os.walk('..'):
-        for filename in fnmatch.filter(files, '*.apidoc'):
-            apidoc_files.append(os.path.join(root, filename))
+        apidoc_files.extend(
+            os.path.join(root, filename)
+            for filename in fnmatch.filter(files, '*.apidoc')
+        )
     # Concat per namespace into 'src'
     namespace_files = {}
     for apidoc_file in apidoc_files:
@@ -50,7 +51,7 @@ def build(bld):
         namespace_files[namespace].append(apidoc_file)
     for ns, files in namespace_files.items():
         comments = '\n'.join([waflib.Utils.readf(f) for f in files])
-        with open('src/%s.apidoc_' % ns, 'w') as out_f:
+        with open(f'src/{ns}.apidoc_', 'w') as out_f:
             out_f.write(comments)
     bld.recurse('src')
     TestContext.initialize_test_context(test_context, bld)
@@ -65,7 +66,9 @@ def shutdown(self):
         return
     if not getattr(waflib.Options.options, 'skip_tests', False):
         python_path = os.environ.get('PYTHONPATH', '')
-        os.environ['PYTHONPATH'] = 'src' + os.pathsep + 'build/default/src' + os.pathsep + python_path
-        ret = os.system('python %s' % 'src/test/test_script_doc.py')
+        os.environ[
+            'PYTHONPATH'
+        ] = f'src{os.pathsep}build/default/src{os.pathsep}{python_path}'
+        ret = os.system('python src/test/test_script_doc.py')
         if ret != 0:
             sys.exit(1)

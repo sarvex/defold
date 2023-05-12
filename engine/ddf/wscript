@@ -58,7 +58,7 @@ def build(bld):
     # We need to add default/src/ddf to PYTHONPATH here. (ddf_extensions_pb2.py and plugin_pb2.py)
     # Only required 'in' ddf-lib.
     python_path = os.environ.get('PYTHONPATH', '')
-    os.environ['PYTHONPATH'] = 'src' + os.pathsep + 'src/ddf' + os.pathsep + python_path
+    os.environ['PYTHONPATH'] = f'src{os.pathsep}src/ddf{os.pathsep}{python_path}'
 
     bld.recurse('src')
     TestContext.initialize_test_context(test_context, bld)

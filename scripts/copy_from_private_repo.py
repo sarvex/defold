@@ -19,42 +19,35 @@ import os, sys, shutil, subprocess
 
 PLATFORMS=[]
 for p in ['nx64', 'ps4', 'ps5']:
-    PLATFORMS.append(p)
-    PLATFORMS.append(p.upper())
-
-FILE_PATTERNS=[]
-FILE_PATTERNS.append('private.py')
-FILE_PATTERNS.append('private.sh')
-FILE_PATTERNS.append('private.yml')
-# Until we've move the platform specific changes to _<platform>.appmanifest
-FILE_PATTERNS.append('private.appmanifest')
-FILE_PATTERNS.append('.appmanifest')
-
-FILE_PATTERNS.append('SwitchBundler.java') # todo: Rename to "NX64Bundler.java"
-FILE_PATTERNS.append('switch')
-FILE_PATTERNS.append('ps4')
-FILE_PATTERNS.append('ps5')
-
-FILE_PATTERNS.append('meta.edn') # TODO: create meta.edn plugins for extensions
-FILE_PATTERNS.append('meta.properties') # TODO: create meta.edn plugins for extensions
-FILE_PATTERNS.append('build.xml') # TODO: make a strategy here
-
+    PLATFORMS.extend((p, p.upper()))
+FILE_PATTERNS = [
+    'private.py',
+    'private.sh',
+    'private.yml',
+    'private.appmanifest',
+    '.appmanifest',
+    'SwitchBundler.java',
+    'switch',
+    'ps4',
+    'ps5',
+    'meta.edn',
+    'meta.properties',
+    'build.xml',
+]
 #FILE_PATTERNS.append('com.dynamo.cr.bob') # TODO: until we've fixed the above bob cases
 
-LOCAL_PATTERNS=[]
-LOCAL_PATTERNS.append('.pyc')
-LOCAL_PATTERNS.append('.git/')
-LOCAL_PATTERNS.append('generated/')
-LOCAL_PATTERNS.append('dist/')
-LOCAL_PATTERNS.append('build/')
-LOCAL_PATTERNS.append('editor/target/classes/')
-LOCAL_PATTERNS.append('dynamo_home')
+LOCAL_PATTERNS = [
+    '.pyc',
+    '.git/',
+    'generated/',
+    'dist/',
+    'build/',
+    'editor/target/classes/',
+    'dynamo_home',
+]
 
 def is_local_file(path):
-    for pattern in LOCAL_PATTERNS:
-        if pattern in path:
-            return True
-    return False
+    return any(pattern in path for pattern in LOCAL_PATTERNS)
 
 def is_private_file(path):
     for pattern in PLATFORMS+FILE_PATTERNS:
@@ -66,7 +59,7 @@ def is_private_file(path):
 def is_git_tracked(path, cwd):
     #oldcwd = os.getcwd()
     #os.chdir(cwd)
-    cmd = 'git ls-files --error-unmatch %s' % path
+    cmd = f'git ls-files --error-unmatch {path}'
     #r = os.system(cmd)
 
     process = subprocess.Popen(cmd.split(), cwd=cwd)
@@ -111,7 +104,7 @@ if __name__ == '__main__':
             if is_private_file(relative_path):
                 continue
 
-            tgtfile = tgt + '/' + relative_path
+            tgtfile = f'{tgt}/{relative_path}'
 
             #print "path", path
             #print "relative_path", relative_path
@@ -122,6 +115,6 @@ if __name__ == '__main__':
 
             copy_file(path, tgtfile)
 
-            #exit(1)
+                    #exit(1)
 
     print("Done!")

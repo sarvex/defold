@@ -31,7 +31,7 @@ def UpdateState():
             mtime = os.stat(name)[stat.ST_MTIME]
             oldmtime = state.get(name, 0)
             if mtime != oldmtime:
-                changed.append(os.path.join(sub_path, f + "c"))
+                changed.append(os.path.join(sub_path, f"{f}c"))
             state[name] = mtime
     return changed
 
@@ -52,8 +52,8 @@ def tick():
         if result == 0:
             try:
                 for f in changed:
-                    print("Reloading: " + f)
-                    request = urllib.urlopen("http://localhost:8001/reload/" + f)
+                    print(f"Reloading: {f}")
+                    request = urllib.urlopen(f"http://localhost:8001/reload/{f}")
                 label.config(text = "Success!", foreground = "#080")
             except:
                 label.config(text = "No connection!", foreground = "#880")

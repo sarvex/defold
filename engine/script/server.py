@@ -29,11 +29,7 @@ class Handler(BaseHTTPRequestHandler):
         to_send = ""
         if self.path == "/":
             a,b = self.headers.get('X-A', None), self.headers.get('X-B', None)
-            if a and b:
-                to_send = 'Hello %s%s' % (a, b)
-            else:
-                to_send = 'Hello'
-
+            to_send = f'Hello {a}{b}' if a and b else 'Hello'
         elif self.path.startswith('/sleep'):
 
             tokens = self.path.split('/')
@@ -42,7 +38,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     sleeptime = float(tokens[2])
                 except:
-                    self.send_response(500, "Could not parse time argument as float: %s" % self.path)
+                    self.send_response(500, f"Could not parse time argument as float: {self.path}")
                     self.send_header("Content-type", "text/plain")
                     self.end_headers()
                     self.wfile.write(to_send.encode('ascii'))

@@ -45,7 +45,7 @@ def gen_dc(task):
     buf = io.BytesIO()
 
     frames = []
-    for i in range(sample_count):
+    for _ in range(sample_count):
         a = 0.8 * 32768
         if channels == 1:
             buf.write(struct.pack('h', int(a)))
@@ -60,15 +60,14 @@ def build(bld):
     platform = bld.env['PLATFORM']
 
     if 'web' in platform:
-        lib_dirs = {}
-        lib_dirs['library_sound.js'] = '../src/js'
+        lib_dirs = {'library_sound.js': '../src/js'}
         bld.env['JS_LIB_PATHS'] = lib_dirs
 
     elif 'win32' in platform:
-        src_dir = "%s/ext/lib/%s" % (bld.env['PREFIX'], platform)
+        src_dir = f"{bld.env['PREFIX']}/ext/lib/{platform}"
         if not waflib.Options.options.skip_build_tests:
-          copy_file_task(bld, "%s/OpenAL32.dll" % src_dir)
-          copy_file_task(bld, "%s/wrap_oal.dll" % src_dir)
+            copy_file_task(bld, f"{src_dir}/OpenAL32.dll")
+            copy_file_task(bld, f"{src_dir}/wrap_oal.dll")
 
     wavs = ["booster_on_sfx.wav",
             "door_opening.wav",
@@ -78,47 +77,47 @@ def build(bld):
             "def2938.wav"]
 
     if not waflib.Options.options.skip_build_tests:
-      for rate in [22050, 32000, 44000, 44100]:
-          for tone in [440, 2000]:
-              for channels in [1, 2]:
-                  frames = 2 * rate
-                  name = '%s_tone_%d_%d_%d.wav' % (["mono", "stereo"][channels-1], tone, rate, frames)
-                  wavs.append(name)
-                  bld(target = name,
-                      tone = tone,
-                      rate = rate,
-                      frames = frames,
-                      channels = channels,
-                      ramp = False,
-                      rule = gen_tone,)
+        for rate in [22050, 32000, 44000, 44100]:
+            for tone in [440, 2000]:
+                for channels in [1, 2]:
+                    frames = 2 * rate
+                    name = '%s_tone_%d_%d_%d.wav' % (["mono", "stereo"][channels-1], tone, rate, frames)
+                    wavs.append(name)
+                    bld(target = name,
+                        tone = tone,
+                        rate = rate,
+                        frames = frames,
+                        channels = channels,
+                        ramp = False,
+                        rule = gen_tone,)
 
-      for rate in [32000]:
-          for tone in [440]:
-              channels = 1
-              frames = 2 * rate
-              name = '%s_toneramp_%d_%d_%d.wav' % (["mono", "stereo"][channels-1], tone, rate, frames)
-              wavs.append(name)
-              bld(target = name,
-                  tone = tone,
-                  rate = rate,
-                  frames = frames,
-                  channels = channels,
-                  ramp = True,
-                  rule = gen_tone)
+        channels = 1
+        for rate in [32000]:
+            for tone in [440]:
+                frames = 2 * rate
+                name = '%s_toneramp_%d_%d_%d.wav' % (["mono", "stereo"][channels-1], tone, rate, frames)
+                wavs.append(name)
+                bld(target = name,
+                    tone = tone,
+                    rate = rate,
+                    frames = frames,
+                    channels = channels,
+                    ramp = True,
+                    rule = gen_tone)
 
-      for rate in [44100]:
-          channels = 1
-          frames = 2 * rate
-          name = '%s_dc_%d_%d.wav' % (["mono", "stereo"][channels-1], rate, frames)
-          wavs.append(name)
-          bld(target = name,
-              rate = rate,
-              frames = frames,
-              channels = channels,
-              ramp = True,
-              rule = gen_dc)
+        channels = 1
+        for rate in [44100]:
+            frames = 2 * rate
+            name = '%s_dc_%d_%d.wav' % (["mono", "stereo"][channels-1], rate, frames)
+            wavs.append(name)
+            bld(target = name,
+                rate = rate,
+                frames = frames,
+                channels = channels,
+                ramp = True,
+                rule = gen_dc)
 
-      bld.add_group()
+        bld.add_group()
 
     embedded_wavs = bld.stlib(features = 'cxx embed test',
                                      target = 'embedded_wavs',
@@ -136,13 +135,8 @@ def build(bld):
         exported_symbols = ["DefaultSoundDevice", "AudioDecoderWav", "AudioDecoderStbVorbis", "AudioDecoderTremolo"]
         soundlibs.append('TREMOLO')
 
-    if bld.env.PLATFORM in ['arm64-nx64', 'x86_64-ps4']:
-        pass
-    else:
-        soundlibs.append('OPENAL')
-        soundlibs.append('DMGLFW')
-        soundlibs.append('OPENGL')
-
+    if bld.env.PLATFORM not in ['arm64-nx64', 'x86_64-ps4']:
+        soundlibs.extend(('OPENAL', 'DMGLFW', 'OPENGL'))
     if 'TREMOLO' in soundlibs:
         bld.program(features = 'cxx embed test',
                     includes = '../../src .',

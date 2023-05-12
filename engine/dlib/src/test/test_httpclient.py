@@ -18,9 +18,8 @@ shutil.rmtree('tmp/http_files', True)
 os.mkdir('tmp/http_files')
 
 def http_file(name, content):
-    f = open('tmp/http_files/%s' % name, 'w')
-    f.write(content)
-    f.close()
+    with open(f'tmp/http_files/{name}', 'w') as f:
+        f.write(content)
 
 http_file('a.txt', 'You will find this data in a.txt and d.txt')
 http_file('b.txt', 'Some data in file b')

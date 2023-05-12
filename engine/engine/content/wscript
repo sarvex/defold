@@ -47,7 +47,10 @@ def build(bld):
                            use_compression=True)
 
     for d in ['fonts', 'input', 'render', 'materials', 'graphics', 'scripts', 'docs', 'ca-certificates']:
-        bld.install_files('${PREFIX}/content/builtins/%s' % d, bld.path.ant_glob('builtins/%s/*' % d))
+        bld.install_files(
+            '${PREFIX}/content/builtins/%s' % d,
+            bld.path.ant_glob(f'builtins/{d}/*'),
+        )
 
     start_dir = bld.path.find_dir('builtins')
     bld.install_files('${PREFIX}/content/builtins', start_dir.ant_glob('manifests/**/*'), cwd = start_dir, relative_trick = True)

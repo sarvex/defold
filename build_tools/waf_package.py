@@ -37,5 +37,5 @@ def glob_files(patterns, cwd=None):
     return out
 
 def create_tar(files, cwd, target):
-    cmd = 'tar zcf %s %s' % (target, ' '.join(files))
+    cmd = f"tar zcf {target} {' '.join(files)}"
     run.command(cmd.split(), cwd=cwd)

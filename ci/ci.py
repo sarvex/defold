@@ -31,12 +31,11 @@ def call(args, failonerror = True):
     output = ''
     while True:
         line = process.stdout.readline().decode()
-        if line != '':
-            output += line
-            print(line.rstrip())
-        else:
+        if line == '':
             break
 
+        output += line
+        print(line.rstrip())
     if process.wait() != 0 and failonerror:
         exit(1)
 
@@ -53,17 +52,17 @@ def platform_from_host():
         return "x86_64-win32"
 
 def aptget(package):
-    call("sudo apt-get install -y --no-install-recommends " + package)
+    call(f"sudo apt-get install -y --no-install-recommends {package}")
 
 def aptfast(package):
-    call("sudo apt-fast install -y --no-install-recommends " + package)
+    call(f"sudo apt-fast install -y --no-install-recommends {package}")
 
 def choco(package):
-    call("choco install " + package + " -y")
+    call(f"choco install {package} -y")
 
 
 def mingwget(package):
-    call("mingw-get install " + package)
+    call(f"mingw-get install {package}")
 
 
 def setup_keychain(args):
@@ -74,15 +73,15 @@ def setup_keychain(args):
     # create new keychain
     print("Creating keychain")
     # call("security delete-keychain {}".format(keychain_name))
-    call("security create-keychain -p {} {}".format(keychain_pass, keychain_name))
+    call(f"security create-keychain -p {keychain_pass} {keychain_name}")
 
     # set the new keychain as the default keychain
     print("Setting keychain as default")
-    call("security default-keychain -s {}".format(keychain_name))
+    call(f"security default-keychain -s {keychain_name}")
 
     # unlock the keychain
     print("Unlock keychain")
-    call("security unlock-keychain -p {} {}".format(keychain_pass, keychain_name))
+    call(f"security unlock-keychain -p {keychain_pass} {keychain_name}")
 
     # decode and import cert to keychain
     print("Decoding certificate")
@@ -92,16 +91,18 @@ def setup_keychain(args):
         file.write(base64.decodebytes(args.keychain_cert.encode()))
     print("Importing certificate")
     # -A = allow access to the keychain without warning (https://stackoverflow.com/a/19550453)
-    call("security import {} -k {} -P {} -A".format(cert_path, keychain_name, cert_pass))
+    call(f"security import {cert_path} -k {keychain_name} -P {cert_pass} -A")
     os.remove(cert_path)
 
     # required since macOS Sierra https://stackoverflow.com/a/40039594
-    call("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k {} {}".format(keychain_pass, keychain_name))
+    call(
+        f"security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k {keychain_pass} {keychain_name}"
+    )
     # prevent the keychain from auto-locking
-    call("security set-keychain-settings {}".format(keychain_name))
+    call(f"security set-keychain-settings {keychain_name}")
 
     # add the keychain to the keychain search list
-    call("security list-keychains -d user -s {}".format(keychain_name))
+    call(f"security list-keychains -d user -s {keychain_name}")
 
     print("Done with keychain setup")
 
@@ -123,7 +124,7 @@ def setup_windows_cert(args):
 def install(args):
     # installed tools: https://github.com/actions/virtual-environments/blob/main/images/linux/Ubuntu2004-Readme.md
     system = platform.system()
-    print("Installing dependencies for system '%s' " % (system))
+    print(f"Installing dependencies for system '{system}' ")
     if system == "Linux":
         # we use apt-fast to speed up apt-get downloads
         # https://github.com/ilikenwf/apt-fast
@@ -176,23 +177,26 @@ def build_engine(platform, channel, with_valgrind = False, with_asan = False, wi
                 skip_docs = False, skip_builtins = False, archive = False):
 
     install_sdk = ''
-    if not platform in ('x86_64-macos', 'arm64-macos', 'arm64-ios', 'x86_64-ios'):
+    if platform not in (
+        'x86_64-macos',
+        'arm64-macos',
+        'arm64-ios',
+        'x86_64-ios',
+    ):
         install_sdk = 'install_sdk'
 
-    args = ('python scripts/build.py distclean %s install_ext' % install_sdk).split()
+    args = f'python scripts/build.py distclean {install_sdk} install_ext'.split()
 
-    opts = []
     waf_opts = []
 
-    opts.append('--platform=%s' % platform)
-
-    if platform == 'js-web' or platform == 'wasm-web':
+    opts = [f'--platform={platform}']
+    if platform in ['js-web', 'wasm-web']:
         args.append('install_ems')
 
     args.append('build_engine')
 
     if channel:
-        opts.append('--channel=%s' % channel)
+        opts.append(f'--channel={channel}')
 
     if archive:
         args.append('archive_engine')
@@ -230,48 +234,43 @@ def build_engine(platform, channel, with_valgrind = False, with_asan = False, wi
 
 def build_editor2(channel, engine_artifacts = None, skip_tests = False):
     host_platform = platform_from_host()
-    if not host_platform in PLATFORMS_DESKTOP:
+    if host_platform not in PLATFORMS_DESKTOP:
         return
 
     opts = []
 
     if engine_artifacts:
-        opts.append('--engine-artifacts=%s' % engine_artifacts)
+        opts.append(f'--engine-artifacts={engine_artifacts}')
 
-    opts.append('--channel=%s' % channel)
+    opts.append(f'--channel={channel}')
 
     if skip_tests:
         opts.append('--skip-tests')
 
     opts_string = ' '.join(opts)
 
-    call('python scripts/build.py distclean install_ext build_editor2 --platform=%s %s' % (host_platform, opts_string))
+    call(
+        f'python scripts/build.py distclean install_ext build_editor2 --platform={host_platform} {opts_string}'
+    )
     for platform in PLATFORMS_DESKTOP:
-        call('python scripts/build.py bundle_editor2 --platform=%s %s' % (platform, opts_string))
+        call(
+            f'python scripts/build.py bundle_editor2 --platform={platform} {opts_string}'
+        )
 
 def download_editor2(channel, platform = None):
     host_platform = platform_from_host()
-    if platform is None:
-        platforms = PLATFORMS_DESKTOP
-    else:
-        platforms = [platform]
-
-    opts = []
-    opts.append('--channel=%s' % channel)
-
-    install_sdk = ''
-    if 'win32' in host_platform: # until we can find the signtool in a faster way on CI
-        install_sdk ='install_sdk'
-
+    platforms = PLATFORMS_DESKTOP if platform is None else [platform]
+    opts = [f'--channel={channel}']
+    install_sdk = 'install_sdk' if 'win32' in host_platform else ''
     for platform in platforms:
-        call('python scripts/build.py %s install_ext download_editor2 --platform=%s %s' % (install_sdk, platform, ' '.join(opts)))
+        call(
+            f"python scripts/build.py {install_sdk} install_ext download_editor2 --platform={platform} {' '.join(opts)}"
+        )
 
 
 def sign_editor2(platform, windows_cert = None, windows_cert_pass = None):
     args = 'python scripts/build.py sign_editor2'.split()
-    opts = []
-
-    opts.append('--platform=%s' % platform)
+    opts = [f'--platform={platform}']
 
     if windows_cert:
         windows_cert = os.path.abspath(windows_cert)
@@ -279,11 +278,11 @@ def sign_editor2(platform, windows_cert = None, windows_cert_pass = None):
             print("Certificate file not found:", windows_cert)
             sys.exit(1)
         print("Using cert", windows_cert)
-        opts.append('--windows-cert=%s' % windows_cert)
+        opts.append(f'--windows-cert={windows_cert}')
 
     if windows_cert_pass:
         windows_cert_pass = os.path.abspath(windows_cert_pass)
-        opts.append("--windows-cert-pass=%s" % windows_cert_pass)
+        opts.append(f"--windows-cert-pass={windows_cert_pass}")
 
     cmd = ' '.join(args + opts)
     call(cmd)
@@ -296,35 +295,30 @@ def notarize_editor2(notarization_username = None, notarization_password = None,
 
     # args = 'python scripts/build.py download_editor2 notarize_editor2 archive_editor2'.split()
     args = 'python scripts/build.py notarize_editor2'.split()
-    opts = []
-
-    opts.append('--platform=x86_64-macos')
-
-    opts.append('--notarization-username="%s"' % notarization_username)
-    opts.append('--notarization-password="%s"' % notarization_password)
+    opts = [
+        '--platform=x86_64-macos',
+        f'--notarization-username="{notarization_username}"',
+        f'--notarization-password="{notarization_password}"',
+    ]
 
     if notarization_itc_provider:
-        opts.append('--notarization-itc-provider="%s"' % notarization_itc_provider)
+        opts.append(f'--notarization-itc-provider="{notarization_itc_provider}"')
 
     cmd = ' '.join(args + opts)
     call(cmd)
 
 
 def archive_editor2(channel, engine_artifacts = None, platform = None):
-    if platform is None:
-        platforms = PLATFORMS_DESKTOP
-    else:
-        platforms = [platform]
-
-    opts = []
-    opts.append("--channel=%s" % channel)
-
+    platforms = PLATFORMS_DESKTOP if platform is None else [platform]
+    opts = [f"--channel={channel}"]
     if engine_artifacts:
-        opts.append('--engine-artifacts=%s' % engine_artifacts)
+        opts.append(f'--engine-artifacts={engine_artifacts}')
 
     opts_string = ' '.join(opts)
     for platform in platforms:
-        call('python scripts/build.py install_ext archive_editor2 --platform=%s %s' % (platform, opts_string))
+        call(
+            f'python scripts/build.py install_ext archive_editor2 --platform={platform} {opts_string}'
+        )
 
 def distclean():
     call("python scripts/build.py distclean")
@@ -333,36 +327,29 @@ def distclean():
 def install_ext(platform = None):
     opts = []
     if platform:
-        opts.append('--platform=%s' % platform)
+        opts.append(f'--platform={platform}')
 
-    call("python scripts/build.py install_ext %s" % ' '.join(opts))
+    call(f"python scripts/build.py install_ext {' '.join(opts)}")
 
 def build_bob(channel, branch = None):
     args = "python scripts/build.py install_ext sync_archive build_bob archive_bob".split()
-    opts = []
-    opts.append("--channel=%s" % channel)
-
+    opts = [f"--channel={channel}"]
     cmd = ' '.join(args + opts)
     call(cmd)
 
 
 def release(channel):
     args = "python scripts/build.py install_ext release".split()
-    opts = []
-    opts.append("--channel=%s" % channel)
-
-    token = get_github_token()
-    if token:
-        opts.append("--github-token=%s" % token)
+    opts = [f"--channel={channel}"]
+    if token := get_github_token():
+        opts.append(f"--github-token={token}")
 
     cmd = ' '.join(args + opts)
     call(cmd)
 
 def build_sdk(channel):
     args = "python scripts/build.py install_ext build_sdk".split()
-    opts = []
-    opts.append("--channel=%s" % channel)
-
+    opts = [f"--channel={channel}"]
     cmd = ' '.join(args + opts)
     call(cmd)
 
@@ -396,13 +383,13 @@ def is_workflow_enabled_in_repo():
         return True # all workflows are enabled by default
 
     workflow = os.environ.get('GITHUB_WORKFLOW', '')
-    if workflow in ('CI - Main',):
-        return True
-    return False
+    return workflow in ('CI - Main',)
 
 def main(argv):
     if not is_workflow_enabled_in_repo():
-        print("Workflow '{}' is disabled in repo '{}'. Skipping".format(os.environ.get('GITHUB_WORKFLOW', ''), os.environ.get('GITHUB_REPOSITORY', '')))
+        print(
+            f"Workflow '{os.environ.get('GITHUB_WORKFLOW', '')}' is disabled in repo '{os.environ.get('GITHUB_REPOSITORY', '')}'. Skipping"
+        )
         return
 
     parser = ArgumentParser()
@@ -436,14 +423,18 @@ def main(argv):
     platform = args.platform
 
     if platform and not is_platform_supported(platform):
-        print("Platform {} is private and the repo '{}' cannot build for this platform. Skipping".format(platform, os.environ.get('GITHUB_REPOSITORY', '')))
+        print(
+            f"Platform {platform} is private and the repo '{os.environ.get('GITHUB_REPOSITORY', '')}' cannot build for this platform. Skipping"
+        )
         return;
 
     # saving lots of CI minutes and waiting by not building the editor, which we don't use
     if is_repo_private():
         for command in args.commands:
             if 'editor' in command:
-                print("Platform {} is private we've disabled building the editor. Skipping".format(platform))
+                print(
+                    f"Platform {platform} is private we've disabled building the editor. Skipping"
+                )
                 return
 
     branch = get_branch()
@@ -485,11 +476,23 @@ def main(argv):
         editor_channel = "dev"
         engine_artifacts = args.engine_artifacts or "archived"
 
-    print("Using branch={} engine_channel={} editor_channel={} engine_artifacts={}".format(branch, engine_channel, editor_channel, engine_artifacts))
+    print(
+        f"Using branch={branch} engine_channel={engine_channel} editor_channel={editor_channel} engine_artifacts={engine_artifacts}"
+    )
 
     # execute commands
     for command in args.commands:
-        if command == "engine":
+        if command == "archive-editor":
+            archive_editor2(editor_channel, engine_artifacts = engine_artifacts, platform = platform)
+        elif command == "bob":
+            build_bob(engine_channel, branch = branch)
+        elif command == "build-editor":
+            build_editor2(editor_channel, engine_artifacts = engine_artifacts, skip_tests = skip_editor_tests)
+        elif command == "distclean":
+            distclean()
+        elif command == "download-editor":
+            download_editor2(editor_channel, platform = platform)
+        elif command == "engine":
             if not platform:
                 raise Exception("No --platform specified.")
             build_engine(
@@ -505,38 +508,28 @@ def main(argv):
                 skip_build_tests = args.skip_build_tests,
                 skip_builtins = args.skip_builtins,
                 skip_docs = args.skip_docs)
-        elif command == "build-editor":
-            build_editor2(editor_channel, engine_artifacts = engine_artifacts, skip_tests = skip_editor_tests)
-        elif command == "download-editor":
-            download_editor2(editor_channel, platform = platform)
+        elif command == "install":
+            install(args)
+        elif command == "install_ext":
+            install_ext(platform = platform)
         elif command == "notarize-editor":
             notarize_editor2(
                 notarization_username = args.notarization_username,
                 notarization_password = args.notarization_password,
                 notarization_itc_provider = args.notarization_itc_provider)
-        elif command == "sign-editor":
-            if not platform:
-                raise Exception("No --platform specified.")
-            sign_editor2(platform, windows_cert = args.windows_cert, windows_cert_pass = args.windows_cert_pass)
-        elif command == "archive-editor":
-            archive_editor2(editor_channel, engine_artifacts = engine_artifacts, platform = platform)
-        elif command == "bob":
-            build_bob(engine_channel, branch = branch)
-        elif command == "sdk":
-            build_sdk(engine_channel)
-        elif command == "smoke":
-            smoke_test()
-        elif command == "install":
-            install(args)
-        elif command == "install_ext":
-            install_ext(platform = platform)
-        elif command == "distclean":
-            distclean()
         elif command == "release":
             if make_release:
                 release(release_channel)
             else:
-                print("Branch '%s' is not configured for automatic release from CI" % branch)
+                print(f"Branch '{branch}' is not configured for automatic release from CI")
+        elif command == "sdk":
+            build_sdk(engine_channel)
+        elif command == "sign-editor":
+            if not platform:
+                raise Exception("No --platform specified.")
+            sign_editor2(platform, windows_cert = args.windows_cert, windows_cert_pass = args.windows_cert_pass)
+        elif command == "smoke":
+            smoke_test()
         else:
             print("Unknown command {0}".format(command))
 

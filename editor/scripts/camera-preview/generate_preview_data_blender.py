@@ -29,7 +29,7 @@ def generate(path, outpath):
     out_json = {}
 
     for x in bpy.context.scene.objects:
-        if not x.type == 'MESH':
+        if x.type != 'MESH':
             continue
         bpy.ops.object.select_all(action='DESELECT')
         x.select_set(True)
@@ -43,14 +43,10 @@ def generate(path, outpath):
             p_0 = x.data.vertices[vx_0].co
             p_1 = x.data.vertices[vx_1].co
 
-            # Note: The y and z are flipped here
-            #       Blender has a right handed coordinate system so we need to account for that
-            edge_list.append([p_0.x, p_0.z, p_0.y])
-            edge_list.append([p_1.x, p_1.z, p_1.y])
-
+            edge_list.extend(([p_0.x, p_0.z, p_0.y], [p_1.x, p_1.z, p_1.y]))
         out_json[x.name] = edge_list
 
-    print("Defold: Writing json to file " + outpath)
+    print(f"Defold: Writing json to file {outpath}")
 
     with open(outpath, 'w') as f:
         f.write(json.dumps(out_json))

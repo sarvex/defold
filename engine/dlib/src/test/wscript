@@ -10,7 +10,7 @@ def create_test(bld, name, extra_libs = None, extra_features = None, embed_sourc
 
     # Sometimes, we need to disable certain tests until they're supported
     if not platform_supports_feature(bld.env.PLATFORM, name, {}):
-        print ("Skipping test '%s' due to platform missing feature" % name)
+        print(f"Skipping test '{name}' due to platform missing feature")
         return
 
     build_util = create_build_utility(bld.env)
@@ -21,31 +21,28 @@ def create_test(bld, name, extra_libs = None, extra_features = None, embed_sourc
     if 'DM_IPV6_UNSUPPORTED' in os.environ:
         req_defines += ['DM_IPV6_UNSUPPORTED']
 
-    req_features = ['cxx', 'cprogram']
     req_includes = ['../../src']
-    req_embed = None
-
     if extra_libs is None:
         extra_libs = []
 
-    if not 'PLATFORM_SOCKET' in extra_libs:
+    if 'PLATFORM_SOCKET' not in extra_libs:
         extra_libs.append('PLATFORM_SOCKET')
 
     req_includes.insert(0, '..')
 
     platform_source = ''
-    platform_source_path = '%s/test_platform.cpp' % build_util.get_target_os()
-    if os.path.exists('src/test/' + platform_source_path):
-        platform_source = ' ' + platform_source_path
+    platform_source_path = f'{build_util.get_target_os()}/test_platform.cpp'
+    if os.path.exists(f'src/test/{platform_source_path}'):
+        platform_source = f' {platform_source_path}'
 
-    req_features.append('test')
+    req_features = ['cxx', 'cprogram', 'test']
     if skip_run:
         req_features.append('skip_test')
     if extra_features != None:
         req_features.extend(extra_features)
     if extra_libs != None:
         req_libs.extend(extra_libs)
-    if extra_local_libs == None:
+    if extra_local_libs is None:
         extra_local_libs = []
     if extra_defines != None:
         req_defines.extend(extra_defines)
@@ -58,24 +55,24 @@ def create_test(bld, name, extra_libs = None, extra_features = None, embed_sourc
         local_libs += ['profile','remotery']
 
     if exclude_libs != None:
-        req_libs = [x for x in req_libs if not x in exclude_libs]
-        extra_local_libs = [x for x in extra_local_libs if not x in exclude_libs]
+        req_libs = [x for x in req_libs if x not in exclude_libs]
+        extra_local_libs = [x for x in extra_local_libs if x not in exclude_libs]
         local_libs = [x for x in local_libs if x not in exclude_libs]
 
-    if embed_source != None:
-        req_embed = embed_source
+    req_embed = embed_source if embed_source != None else None
     if extra_includes != None:
         req_includes.extend(extra_includes)
 
-    use_lib_list = '%s %s %s' % (' '.join(req_libs), ' '.join(local_libs), ' '.join(extra_local_libs))
+    use_lib_list = f"{' '.join(req_libs)} {' '.join(local_libs)} {' '.join(extra_local_libs)}"
     task_args = {
         'features': ' '.join(req_features),
-        'source': (name + '.cpp' + platform_source).split() + bld.path.ant_glob('../dlib/testutil.cpp'),
+        'source': f'{name}.cpp{platform_source}'.split()
+        + bld.path.ant_glob('../dlib/testutil.cpp'),
         'use': use_lib_list,
-        'web_libs': ['library_sys.js'], # part of dlib, which we're testing
+        'web_libs': ['library_sys.js'],
         'includes': req_includes,
         'defines': req_defines,
-        'target': target_name or name
+        'target': target_name or name,
     }
 
     if req_embed != None:
@@ -84,8 +81,7 @@ def create_test(bld, name, extra_libs = None, extra_features = None, embed_sourc
     test = bld(**task_args)
     test.install_path = None
 
-    js_lib_paths = {}
-    js_lib_paths['library_sys.js'] = '../src/dlib/js'
+    js_lib_paths = {'library_sys.js': '../src/dlib/js'}
     test.env['JS_LIB_PATHS'] = js_lib_paths
 
 def configure(conf):
@@ -104,18 +100,9 @@ def build(bld):
     if bld.env.PLATFORM in ('arm64-ios', 'x86_64-ios'):
         extra_defines = ['DM_NO_SYSTEM_FUNCTION'] # Needed because we wish to build the tests for all platforms, but not all platforms have the system() function
 
-    skip_run = False
-    if 'web' in bld.env['PLATFORM']:
-        skip_run = True # Emscripten/Nodejs doesn't support popen()
-
-    skip_http_run = False
-    if 'win32' in bld.env['PLATFORM']:
-        skip_http_run = True
-
-    skip_ssdp = False
-    if 'win32' in bld.env['PLATFORM'] or sdk.is_wsl():
-        skip_ssdp = True
-
+    skip_run = 'web' in bld.env['PLATFORM']
+    skip_http_run = 'win32' in bld.env['PLATFORM']
+    skip_ssdp = bool('win32' in bld.env['PLATFORM'] or sdk.is_wsl())
     create_test(bld, 'test_memory')
 
     create_test(bld, 'test_align', extra_libs = ['THREAD'])

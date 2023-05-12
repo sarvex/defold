@@ -43,8 +43,14 @@ class ModelViewer(pyglet.window.Window):
         self.Material = material_ddf_pb2.MaterialDesc()
         self.Material.ParseFromString(open(material_file, "rb").read())
 
-        self.VertexShader = self.LoadShader(os.path.join(content_dir, self.Material.VertexProgram) +  ".vpc", GL_VERTEX_PROGRAM_ARB)
-        self.FragmentShader = self.LoadShader(os.path.join(content_dir, self.Material.FragmentProgram) + ".fpc", GL_FRAGMENT_PROGRAM_ARB)
+        self.VertexShader = self.LoadShader(
+            f"{os.path.join(content_dir, self.Material.VertexProgram)}.vpc",
+            GL_VERTEX_PROGRAM_ARB,
+        )
+        self.FragmentShader = self.LoadShader(
+            f"{os.path.join(content_dir, self.Material.FragmentProgram)}.fpc",
+            GL_FRAGMENT_PROGRAM_ARB,
+        )
 
         self.Texture0 = None
         # New texture format not yet supported

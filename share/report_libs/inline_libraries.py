@@ -32,7 +32,7 @@ for entry in os.listdir(JS_DIR):
     if entry.endswith(".js"):
         full_path = os.path.join(JS_DIR, entry)
         with open(full_path, 'r') as js_file:
-            js_concat += "/* source: " + full_path + " */\n"
+            js_concat += f"/* source: {full_path}" + " */\n"
             js_concat += js_file.read() + "\n"
 
 # gather css files
@@ -40,7 +40,7 @@ for entry in os.listdir(CSS_DIR):
     if entry.endswith(".css"):
         full_path = os.path.join(CSS_DIR, entry)
         with open(full_path, 'r') as css_file:
-            css_concat += "/* source: " + full_path + " */\n"
+            css_concat += f"/* source: {full_path}" + " */\n"
             css_concat += css_file.read() + "\n"
 
 
@@ -55,7 +55,7 @@ for entry in os.listdir(IMAGES_DIR):
     mime_string = mimetypes.types_map[file_extension]
     with open(full_path, "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read())
-        url_data_string = "url(data:" + mime_string + ";base64," + encoded_string + ")"
+        url_data_string = f"url(data:{mime_string};base64,{encoded_string})"
         css_concat = url_re.sub(url_data_string, css_concat)
 
 

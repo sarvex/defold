@@ -30,6 +30,6 @@ def is_valid(ctx):
 	return ctx != None
 
 def initialize_test_context(ctx, bld):
-	if ctx == None:
+	if ctx is None:
 		return
 	ctx.initialize(bld.env, bld.get_all_task_gen())

@@ -27,10 +27,10 @@ import os
 # Script to add '/' in front of all resource. A blue-print script on how to automate content changes
 
 def is_resource(field_desc):
-    for options_field_desc, value in field_desc.GetOptions().ListFields():
-        if options_field_desc.name == 'resource' and value:
-            return True
-    return False
+    return any(
+        options_field_desc.name == 'resource' and value
+        for options_field_desc, value in field_desc.GetOptions().ListFields()
+    )
 
 def fix_resource_files(msg):
     import google.protobuf
@@ -49,10 +49,9 @@ def fix_resource_files(msg):
             if field.label == FieldDescriptor.LABEL_REPEATED:
                 for i, x in enumerate(value):
                     if not x.startswith('/'):
-                        value[i] = '/' + x
-            else:
-                if not value.startswith('/'):
-                    setattr(msg, field.name, '/' + value)
+                        value[i] = f'/{x}'
+            elif not value.startswith('/'):
+                setattr(msg, field.name, f'/{value}')
 
 class ProtofileType(object):
     ext_to_protofile_type = {}
@@ -68,27 +67,25 @@ def process_file(file_name):
     if ProtofileType.ext_to_protofile_type.has_key(ext):
         type = ProtofileType.ext_to_protofile_type[ext]
 
-        msg = eval('type.py_module.' + type.msg_type)() # Call constructor on message type
+        msg = eval(f'type.py_module.{type.msg_type}')()
         with open(file_name, 'rb') as in_f:
             google.protobuf.text_format.Merge(in_f.read(), msg)
         msg_str = str(msg)
         fix_resource_files(msg)
         if ext == '.go':
             for embedded in msg.embedded_components:
-                embedded_type = ProtofileType.ext_to_protofile_type['.' + embedded.type]
-                embedded_msg = eval('embedded_type.py_module.' + embedded_type.msg_type)() # Call constructor on message type
+                embedded_type = ProtofileType.ext_to_protofile_type[f'.{embedded.type}']
+                embedded_msg = eval(f'embedded_type.py_module.{embedded_type.msg_type}')()
                 google.protobuf.text_format.Merge(embedded.data, embedded_msg)
                 fix_resource_files(embedded_msg)
                 embedded.data = str(embedded_msg)
         msg_str_prim = str(msg)
         if msg_str != msg_str_prim:
             with open(file_name, 'wb') as out_f:
-                print('Updating %s' % file_name)
+                print(f'Updating {file_name}')
                 out_f.write(msg_str_prim)
-#        print msg
-
     else:
-        print('Unsupported extension %s' % ext)
+        print(f'Unsupported extension {ext}')
 
 ProtofileType('.collection', 'gameobject_ddf_pb2', 'CollectionDesc')
 ProtofileType('.go', 'gameobject_ddf_pb2', 'PrototypeDesc')

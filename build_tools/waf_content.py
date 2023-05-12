@@ -27,11 +27,11 @@ from importlib.machinery import PathFinder
 
 class DefoldImporter(PathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if not "ddf_pb2" in fullname:
+        if "ddf_pb2" not in fullname:
             return None
 
         tokens = fullname.split(".")
-        subpath = os.path.sep.join(tokens) + ".py"
+        subpath = f"{os.path.sep.join(tokens)}.py"
         spec = None
         for x in sys.path:
             p = os.path.join(x, subpath)
@@ -76,11 +76,7 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
                     validate_resource_files(task, value)
             elif is_resource(field):
 
-                if field.label == FieldDescriptor.LABEL_REPEATED:
-                    lst = value
-                else:
-                    lst = [value]
-
+                lst = value if field.label == FieldDescriptor.LABEL_REPEATED else [value]
                 for x in lst:
                     if field.label == FieldDescriptor.LABEL_OPTIONAL and len(x) == 0:
                         # Skip not specified optional fields
@@ -90,11 +86,17 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
                         continue
 
                     if not x.startswith('/'):
-                        print ('%s:0: error: resource path is not absolute "%s"' % (task.inputs[0].srcpath(), x), file=sys.stderr)
+                        print(
+                            f'{task.inputs[0].srcpath()}:0: error: resource path is not absolute "{x}"',
+                            file=sys.stderr,
+                        )
                         return False
                     path = os.path.join(task.generator.content_root, x[1:])
                     if not os.path.exists(path):
-                        print ('%s:0: error: is missing dependent resource file "%s"' % (task.inputs[0].srcpath(), x), file=sys.stderr)
+                        print(
+                            f'{task.inputs[0].srcpath()}:0: error: is missing dependent resource file "{x}"',
+                            file=sys.stderr,
+                        )
                         return False
         return True
 
@@ -103,7 +105,7 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
             import google.protobuf.text_format
             mod = __import__(module)
             # NOTE: We can't use getattr. msg_type could of form "foo.bar"
-            msg = eval('mod.' + msg_type)() # Call constructor on message type
+            msg = eval(f'mod.{msg_type}')()
             with open(task.inputs[0].srcpath(), 'rb') as in_f:
                 google.protobuf.text_format.Merge(in_f.read(), msg)
 
@@ -118,12 +120,13 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
 
             return 0
         except (google.protobuf.text_format.ParseError,e):
-            print ('%s:%s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+            print(f'{task.inputs[0].srcpath()}:{str(e)}', file=sys.stderr)
             return 1
 
         except (google.protobuf.message.EncodeError,e):
-            print ('%s:%s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+            print(f'{task.inputs[0].srcpath()}:{str(e)}', file=sys.stderr)
             return 1
+
 
 
     task = waflib.Task.task_factory(name,
@@ -143,7 +146,7 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
 
     old_sig_explicit_deps = task.sig_explicit_deps
     def sig_explicit_deps(self):
-        if not module in proto_module_sigs:
+        if module not in proto_module_sigs:
             mod_m = hashlib.md5()
             # NOTE
             # This has some performance impact
@@ -183,11 +186,7 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
                     scan_msg(task, value)
             elif is_resource(field):
 
-                if field.label == FieldDescriptor.LABEL_REPEATED:
-                    lst = value
-                else:
-                    lst = [value]
-
+                lst = value if field.label == FieldDescriptor.LABEL_REPEATED else [value]
                 for x in lst:
                     # NOTE: find_resource doesn't handle unicode string. Thats why str(.) is required
                     n = task.generator.path.find_resource(str(x[1:]))
@@ -207,7 +206,7 @@ def proto_compile_task(name, module, msg_type, input_ext, output_ext, transforme
                 import google.protobuf.text_format
                 mod = __import__(module)
                 # NOTE: We can't use getattr. msg_type could of form "foo.bar"
-                msg = eval('mod.' + msg_type)() # Call constructor on message type
+                msg = eval(f'mod.{msg_type}')()
                 with open(n.srcpath(), 'rb') as in_f:
                     google.protobuf.text_format.Merge(in_f.read(), msg)
 

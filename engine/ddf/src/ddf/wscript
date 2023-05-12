@@ -7,8 +7,12 @@ def build(bld):
     proto_include_path = bld.env['DYNAMO_HOME'] + '/ext/include'
     proto_python_path = bld.env['DYNAMO_HOME'] + '/ext/lib/python'
 
-    proto_plugin_src = "%s/%s" % (proto_include_path, 'google/protobuf/compiler/plugin.proto')
-    proto_plugin_pb2_src = "%s/%s" % (proto_python_path, 'google/protobuf/compiler/plugin_pb2.py')
+    proto_plugin_src = (
+        f"{proto_include_path}/google/protobuf/compiler/plugin.proto"
+    )
+    proto_plugin_pb2_src = (
+        f"{proto_python_path}/google/protobuf/compiler/plugin_pb2.py"
+    )
     copy_file_task(bld, proto_plugin_src, 'copy_plugin.proto')
     copy_file_task(bld, proto_plugin_pb2_src)
 
@@ -36,7 +40,7 @@ def build(bld):
                       ddf_ext.path.find_or_declare('plugin_pb2.py'))
 
     bld.add_group()
-  
+
     bld.stlib(features = 'cxx ddf',
         includes = '../.. ..',
         source = 'ddf_extensions.proto ddf_math.proto ddf.cpp ddf_load.cpp ddf_save.cpp ddf_inputbuffer.cpp ddf_util.cpp ddf_message.cpp ddf_loadcontext.cpp ddf_outputstream.cpp',

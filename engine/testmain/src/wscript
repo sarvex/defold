@@ -17,7 +17,7 @@ def build(bld):
     for platform in [build_util.get_target_os(), 'common']:
         d = os.path.join(platform)
         if os.path.exists(os.path.join('src',d)):
-            source_dirs.extend(['%s/*.cpp' % d])
+            source_dirs.extend([f'{d}/*.cpp'])
 
     b = bld.stlib(features     = 'c cxx cstaticlib',
                   includes     = '. ..',

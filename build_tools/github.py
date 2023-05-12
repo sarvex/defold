@@ -42,7 +42,7 @@ def _create_headers(headers, token):
     if not headers:
         headers = {}
     headers["Accept"] = "application/vnd.github+json"
-    headers["Authorization"] = "token %s" % (token)
+    headers["Authorization"] = f"token {token}"
     headers["X-GitHub-Api-Version"] = "2022-11-28"
     return headers
 
@@ -51,7 +51,7 @@ def query(query, token, headers = None):
     import requests
     try:
         url = URL_GRAPHQL_API
-        json = { 'query': "query " + query }
+        json = {'query': f"query {query}"}
         headers = _create_headers(headers, token)
         response = requests.post(url, json = json, headers = headers)
         response.raise_for_status()
@@ -110,10 +110,7 @@ def delete(url, token, headers = None):
         headers = _create_headers(headers, token)
         response = requests.delete(_fix_url(url), headers = headers)
         response.raise_for_status()
-        if response.content and response.content != "":
-            return response.json()
-        else:
-            return None
+        return response.json() if response.content and response.content != "" else None
     except Exception as err:
         print(err)
         return None

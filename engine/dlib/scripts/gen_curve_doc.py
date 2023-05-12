@@ -48,7 +48,7 @@ def plot(name, values):
     ylim(min(values) - 0.05, max(values))
 
     text(0.85, -0.1, 'Time', color='black', size=8, family='Arial')
-    savefig('doc/easing/%s.png' % name.lower())
+    savefig(f'doc/easing/{name.lower()}.png')
 
 def gen_doc(filename):
     doc = json.load(open(filename, 'rb'))

@@ -31,7 +31,7 @@ def gen():
   }}
   scale: 1.0
 }}'''
-	data = "" + header
+	data = f"{header}"
 	for i in range(1000):
 		x = (i%100) * 200
 		y = (i/100) * 200

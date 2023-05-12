@@ -10,14 +10,15 @@ def configure(conf):
     pass
 
 def build(bld):
-    source = 'facebook_null.cpp'
-
     platforms = ['arm.*?ios', 'arm.*?android', '.*?web']
-    for p in platforms:
-        if re.match(p, bld.env.PLATFORM):
-            source = 'facebook_stub.cpp'
-            break
-
+    source = next(
+        (
+            'facebook_stub.cpp'
+            for p in platforms
+            if re.match(p, bld.env.PLATFORM)
+        ),
+        'facebook_null.cpp',
+    )
     bld.stlib(features = 'cxx',
               includes = '.',
               source = source,

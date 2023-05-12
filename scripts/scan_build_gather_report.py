@@ -133,9 +133,7 @@ def get_report_info(report):
         text = f.read()
 
     filepath = filename_re.findall(text)
-    if not filepath:
-        return '<unknown>'
-    return filepath[0]
+    return '<unknown>' if not filepath else filepath[0]
 
 
 def get_index_info(index):
@@ -146,15 +144,16 @@ def get_index_info(index):
     bugs = buginfo_re.findall(text)
     out = []
     for bug in bugs:
-        d = dict()
-        d['BUG_CLASS'] = bug[0]
-        d['BUG_GROUP'] = bug[1]
-        d['BUG_TYPE'] = bug[2]
-        d['FILE_NAME'] = bug[3]
-        d['FUNCTION_NAME'] = bug[4]
-        d['LINE_NUMBER'] = bug[5]
-        d['LENGTH'] = bug[6]
-        d['REPORT_FILE'] = bug[7]
+        d = {
+            'BUG_CLASS': bug[0],
+            'BUG_GROUP': bug[1],
+            'BUG_TYPE': bug[2],
+            'FILE_NAME': bug[3],
+            'FUNCTION_NAME': bug[4],
+            'LINE_NUMBER': bug[5],
+            'LENGTH': bug[6],
+            'REPORT_FILE': bug[7],
+        }
         out.append(d)
     return out
 
@@ -184,14 +183,17 @@ def generate_output(targetdir, bugs):
         class_counts[bug['BUG_CLASS']] += 1
         class_to_type[bug['BUG_CLASS']] = bug['BUG_TYPE']
 
-    # store the bug count with
-    BUG_SUMMARIES = ""
-    for cls, count in class_counts.iteritems():
-        BUG_SUMMARIES += BUG_SUMMARY_FMT % {'BUG_CLASS':cls, 'BUG_TYPE_COUNT':'%d'%count, 'BUG_TYPE':class_to_type[cls]} + '\n'
-
-    BUG_REPORTS = ""
-    for _, _, bug in bugs:
-        BUG_REPORTS += BUG_REPORT_FMT % bug + '\n'
+    BUG_SUMMARIES = "".join(
+        BUG_SUMMARY_FMT
+        % {
+            'BUG_CLASS': cls,
+            'BUG_TYPE_COUNT': '%d' % count,
+            'BUG_TYPE': class_to_type[cls],
+        }
+        + '\n'
+        for cls, count in class_counts.iteritems()
+    )
+    BUG_REPORTS = "".join(BUG_REPORT_FMT % bug + '\n' for _, _, bug in bugs)
     text = INDEX_HTML % {'BUGS_TOTAL': '%d' % len(bugs), 'BUG_SUMMARIES': BUG_SUMMARIES, 'BUG_REPORTS' : BUG_REPORTS }
     with open(os.path.join(targetdir, 'index.html'), 'wb') as f:
         f.write(text)

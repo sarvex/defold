@@ -42,9 +42,8 @@ class TestDlib(unittest.TestCase):
         # Test to decompress lz4 encoded file
         #
         foo_file_size = path.getsize("data/foo.lz4")
-        foo_f = open("data/foo.lz4", "rb")
-        foo_compressed = foo_f.read(foo_file_size)
-        foo_f.close()
+        with open("data/foo.lz4", "rb") as foo_f:
+            foo_compressed = foo_f.read(foo_file_size)
         foo_decompressed = dlib.dmLZ4DecompressBuffer(foo_compressed, 3)
         self.assertEqual(foo_decompressed, "foo")
 

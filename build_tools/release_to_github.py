@@ -36,15 +36,13 @@ def get_current_repo():
 
     domain = "github.com"
     index = url.index(domain)
-    if index < 0:
-        return None
-    return url[index+len(domain)+1:]
+    return None if index < 0 else url[index+len(domain)+1:]
 
 def get_git_sha1(ref = 'HEAD'):
     process = subprocess.Popen(['git', 'rev-parse', ref], stdout = subprocess.PIPE)
     out, err = process.communicate()
     if process.returncode != 0:
-        sys.exit("Unable to find git sha from ref: %s" % (ref))
+        sys.exit(f"Unable to find git sha from ref: {ref}")
     return out.strip()
 
 def get_git_branch():
@@ -57,12 +55,10 @@ def get_defold_version_from_file():
 
     process = subprocess.Popen(['git', 'rev-list', '-n', '1', version], stdout = subprocess.PIPE)
     out, err = process.communicate()
-    if process.returncode != 0:
-        return None
-    return out.strip()
+    return None if process.returncode != 0 else out.strip()
 
 def release(config, tag_name, release_sha, s3_release, release_name=None, body=None, prerelease=True, editor_only=False):
-    log("Releasing Defold %s to GitHub" % tag_name)
+    log(f"Releasing Defold {tag_name} to GitHub")
     if config.github_token is None:
         log("No GitHub authorization token")
         return
@@ -72,35 +68,37 @@ def release(config, tag_name, release_sha, s3_release, release_name=None, body=N
         log("No release channel specified")
         return
 
-    log("tag name: %s" % tag_name)
-    log("release sha1: %s" % release_sha)
-    log("channel: %s" % channel)
+    log(f"tag name: {tag_name}")
+    log(f"release sha1: {release_sha}")
+    log(f"channel: {channel}")
 
     source_repo = os.environ.get('GITHUB_REPOSITORY', "defold/defold")
-    source_repo = "/repos/%s" % source_repo
+    source_repo = f"/repos/{source_repo}"
 
-    log("source repo: %s" % source_repo)
+    log(f"source repo: {source_repo}")
 
     target_repo = config.github_target_repo
     if target_repo is None:
         target_repo = os.environ.get('GITHUB_REPOSITORY', None)
     if target_repo is None:
         target_repo = "defold/defold"
-    target_repo = "/repos/%s" % target_repo
+    target_repo = f"/repos/{target_repo}"
 
-    log("target repo: %s" % target_repo)
+    log(f"target repo: {target_repo}")
 
     if not release_name:
-        release_name = 'v%s - %s' % (config.version, channel)
+        release_name = f'v{config.version} - {channel}'
 
     draft = False # If true, it won't create a tag
 
     if not s3_release.get("files"):
-        log("No files found on S3 with sha %s" % release_sha)
+        log(f"No files found on S3 with sha {release_sha}")
         exit(1)
 
     release = None
-    response = github.get("%s/releases/tags/%s" % (target_repo, tag_name), config.github_token)
+    response = github.get(
+        f"{target_repo}/releases/tags/{tag_name}", config.github_token
+    )
     if response:
         release = response
 
@@ -116,23 +114,31 @@ def release(config, tag_name, release_sha, s3_release, release_name=None, body=N
     }
 
     if not release:
-        log("No release found with tag %s, creating a new one" % tag_name)
-        release = github.post("%s/releases" % target_repo, config.github_token, json = data)
+        log(f"No release found with tag {tag_name}, creating a new one")
+        release = github.post(
+            f"{target_repo}/releases", config.github_token, json=data
+        )
     else:
         release_id = release['id']
-        log("Updating existing release: %s - %s - %s" % (tag_name, release_id, release.get('url')) )
-        release = github.patch("%s/releases/%s" % (target_repo, release_id), config.github_token, json = data)
+        log(
+            f"Updating existing release: {tag_name} - {release_id} - {release.get('url')}"
+        )
+        release = github.patch(
+            f"{target_repo}/releases/{release_id}",
+            config.github_token,
+            json=data,
+        )
 
     # check that what we created/updated a release
     if not release:
-        log("Unable to update GitHub release for %s" % (config.version))
+        log(f"Unable to update GitHub release for {config.version}")
         exit(1)
 
     # remove existing uploaded assets (It's not currently possible to update a release asset
     prev_assets = {}
     for asset in release.get("assets", []):
         prev_assets[asset.get("name")] = asset
-        log("Found old asset: %s %s" % (asset.get("name"), asset.get("id")))
+        log(f'Found old asset: {asset.get("name")} {asset.get("id")}')
 
     # upload_url is a Hypermedia link (https://developer.github.com/v3/#hypermedia)
     # Example: https://uploads.github.com/repos/defold/defold/releases/25677114/assets{?name,label}
@@ -140,7 +146,7 @@ def release(config, tag_name, release_sha, s3_release, release_name=None, body=N
     # for now we ignore this and fix it ourselves (note this may break if GitHub
     # changes the way uploads are done)
     log("Uploading artifacts to GitHub from S3")
-    base_url = "https://" + urlparse(config.archive_path).hostname
+    base_url = f"https://{urlparse(config.archive_path).hostname}"
 
     def is_editor_file(path):
         return os.path.basename(path) in ('Defold-x86_64-macos.dmg',
@@ -158,14 +164,13 @@ def release(config, tag_name, release_sha, s3_release, release_name=None, body=N
         if 'linux' in path: return 'linux'
         if 'darwin' in path: return 'macos'
         if 'macos' in path: return 'macos'
-        if 'win32' in path: return 'win'
-        return ''
+        return 'win' if 'win32' in path else ''
 
     def convert_to_platform_name(path):
         platform = get_platform(path)
         basename = os.path.basename(path)
         name, ext = os.path.splitext(basename)
-        return '%s-%s%s' % (name, platform, ext if ext else '')
+        return f"{name}-{platform}{ext if ext else ''}"
 
     urls = set() # not sure why some files are reported twice, but we don't want to download/upload them twice
     for file in s3_release.get("files", None):
@@ -189,7 +194,9 @@ def release(config, tag_name, release_sha, s3_release, release_name=None, body=N
 
     for download_url in urls:
         filepath = config._download(download_url)
-        filename = re.sub(r'https://%s/archive/(.*?)/' % config.archive_path, '', download_url)
+        filename = re.sub(
+            f'https://{config.archive_path}/archive/(.*?)/', '', download_url
+        )
         basename = os.path.basename(filename)
         # file stream upload to GitHub
         with open(filepath, 'rb') as f:
@@ -205,14 +212,14 @@ def release(config, tag_name, release_sha, s3_release, release_name=None, body=N
             old_asset = prev_assets.get(name, None)
             if old_asset is not None:
                 asset_url = old_asset.get("url")
-                log("Deleting %s -  %s" % (old_asset.get("id"), old_asset.get("name")))
+                log(f'Deleting {old_asset.get("id")} -  {old_asset.get("name")}')
                 github.delete(asset_url, config.github_token)
 
             url = upload_url % (name)
-            log("Uploading to GitHub " + url)
+            log(f"Uploading to GitHub {url}")
             github.post(url, config.github_token, data = f, headers = headers)
 
-    log("Released Defold %s to GitHub" % tag_name)
+    log(f"Released Defold {tag_name} to GitHub")
 
 
 if __name__ == '__main__':

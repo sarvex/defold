@@ -34,7 +34,7 @@ def pprint(d):
 
 
 def get_project(name):
-    response = github.get("repos/%s/%s/projects" % (owner, repo), token)
+    response = github.get(f"repos/{owner}/{repo}/projects", token)
     for project in response:
         if project["name"] == name:
             return project
@@ -48,10 +48,7 @@ def get_cards_in_column(project, column_name):
 
 
 def get_issue_labels(issue):
-    labels = []
-    for label in issue["labels"]:
-        labels.append(label["name"])
-    return labels
+    return [label["name"] for label in issue["labels"]]
 
 
 def get_issue_timeline(issue, reverse = True):
@@ -69,10 +66,10 @@ def get_closing_pull_request(issue):
     timeline = get_issue_timeline(issue)
     for t in timeline:
         if t["event"] in [ "connected", "cross-referenced"]:
-            if not "source" in t:
+            if "source" not in t:
                 continue
             issue = t["source"]["issue"]
-            if not "pull_request" in issue:
+            if "pull_request" not in issue:
                 continue
             if "merged_at" in issue["pull_request"]:
                 return issue
@@ -87,9 +84,11 @@ def get_linked_issue(pr):
     body = pr["body"] if pr["body"] != None else ""
     for kw in KEYWORDS:
         pattern = kw + " #(\d\d\d\d)"
-        match = re.search(pattern, body, re.IGNORECASE)
-        if match:
-            return github.get("https://api.github.com/repos/defold/defold/issues/" + match.group(1), token)
+        if match := re.search(pattern, body, re.IGNORECASE):
+            return github.get(
+                f"https://api.github.com/repos/defold/defold/issues/{match[1]}",
+                token,
+            )
     return pr
 
 
@@ -122,10 +121,10 @@ def issue_to_markdown(issue, hide_details = True, title_only = False):
 
 
 def generate(version, hide_details = False):
-    print("Generating release notes for %s" % version)
+    print(f"Generating release notes for {version}")
     project = get_project(version)
     if not project:
-        print("Unable to find GitHub project for version %s" % version)
+        print(f"Unable to find GitHub project for version {version}")
         return None
 
     output = []
@@ -143,7 +142,7 @@ def generate(version, hide_details = False):
 
         # get the issue or pr associated with the card
         issue_or_pr = github.get(content_url, token)
-        print("Processing %s" % issue_or_pr["html_url"])
+        print(f'Processing {issue_or_pr["html_url"]}')
 
         # only include issues that are closed
         # since we're getting issues from the "Done" column there really should be only closed issues..
@@ -231,7 +230,7 @@ def generate(version, hide_details = False):
             if issue["type"] == issue_type:
                 content += issue_to_markdown(issue, hide_details = hide_details)
 
-    with io.open("releasenotes-forum-%s.md" % version, "wb") as f:
+    with io.open(f"releasenotes-forum-{version}.md", "wb") as f:
         f.write(content.encode('utf-8'))
 
 

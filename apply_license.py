@@ -107,10 +107,7 @@ dryrun = False
 
 
 def match_patterns(s, patterns):
-    for pattern in patterns:
-        if pattern in s:
-            return True
-    return False
+    return any(pattern in s for pattern in patterns)
 
 def skip_path(path):
     return match_patterns(path, excluded_paths)
@@ -119,16 +116,16 @@ def skip_filename(filepath):
     return match_patterns(filepath, excluded_files)
 
 def has_defold_license(s):
-    return re.search(RE_LICENSE, s[0:2000], flags=re.DOTALL) is not None
+    return re.search(RE_LICENSE, s[:2000], flags=re.DOTALL) is not None
 
 def has_other_license(s):
-    return ("Copyright" in s or "License" in s) and not ("The Defold Foundation" in s)
+    return (
+        "Copyright" in s or "License" in s
+    ) and "The Defold Foundation" not in s
 
 def get_license_for_file(filepath):
     ext = os.path.splitext(filepath)[1]
-    if not ext in ext_to_license:
-        return None
-    return ext_to_license[ext]
+    return None if ext not in ext_to_license else ext_to_license[ext]
 
 def apply_license(license, contents):
     # Preserve shebang
@@ -163,10 +160,10 @@ def process_file(filepath):
         # Remove it and reapply if file has been modified after license year
         if has_defold_license(contents):
             contents = re.sub(RE_LICENSE, r"\1" + license + r"\2", contents, flags=re.DOTALL)
-            print("Updated: " + filepath)
+            print(f"Updated: {filepath}")
         else:
             contents = apply_license(license, contents)
-            print("Applied: " + filepath)
+            print(f"Applied: {filepath}")
 
         if not dryrun:
             f.seek(0)

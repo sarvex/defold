@@ -45,7 +45,6 @@ class BuildUtility:
 
     def __init__(self, platform_id, build_platform_id, dynamo_home = None):
         self._initialise_paths(platform_id, build_platform_id, dynamo_home)
-        pass
     # __init__
 
     def get_dynamo_home(self, *subdir):
@@ -86,27 +85,21 @@ class BuildUtility:
             sys.exit(process.returncode)
 
         line = out.decode().split('\n')[0].strip()
-        sha1 = line.split()[0]
-        return sha1
+        return line.split()[0]
     # get_sha1
 
     def _build_path(self, root, *subdir):
         ret = None
-        if subdir:
-            ret = os.path.join(root, *subdir)
-        else:
-            ret = root
-        return ret
+        return os.path.join(root, *subdir) if subdir else root
     # _build_path
 
     def _identify_platform(self, platform_id):
-        platform = None
-        for p in self._supported_platforms:
-            if p['platform'] == platform_id:
-                platform = p
-                break
-        if platform == None:
-            raise BuildUtilityException(("Could not identify platform '%s'" % platform_id))
+        platform = next(
+            (p for p in self._supported_platforms if p['platform'] == platform_id),
+            None,
+        )
+        if platform is None:
+            raise BuildUtilityException(f"Could not identify platform '{platform_id}'")
         return platform
     # _identify_platform
 

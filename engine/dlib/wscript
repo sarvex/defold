@@ -62,8 +62,8 @@ def shutdown(sht):
     if os.environ.get('MSYSTEM', '') in ('MINGW32','MINGW64'):
         bash_prefix = 'sh '
 
-    os.system(bash_prefix + './scripts/start_http_server.sh')
-    atexit.register(os.system, bash_prefix + './scripts/stop_http_server.sh')
+    os.system(f'{bash_prefix}./scripts/start_http_server.sh')
+    atexit.register(os.system, f'{bash_prefix}./scripts/stop_http_server.sh')
 
     server_config_path = "test_http_server.cfg"
     if os.path.exists(server_config_path):
@@ -83,7 +83,7 @@ def shutdown(sht):
             server_socket = server_sockets.getint("server", "socket")
 
             url = 'http://localhost:%d' % server_socket
-            print('Starting http server at %s' % url)
+            print(f'Starting http server at {url}')
             urllib.request.urlopen(url)
             break
         except IOError:
@@ -98,7 +98,7 @@ def shutdown(sht):
     config = configparser.RawConfigParser()
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
-    print ("SERVER IP: %s" % local_ip)
+    print(f"SERVER IP: {local_ip}")
 
     config.add_section("server")
     config.set("server", "ip", local_ip)
@@ -109,7 +109,7 @@ def shutdown(sht):
     configfilepath = os.path.basename(tempfile.mktemp(".cfg", "unittest_"))
     with open(configfilepath, 'w') as f:
         config.write(f)
-        print("Wrote test config file: %s" % configfilepath)
+        print(f"Wrote test config file: {configfilepath}")
 
     try:
         waf_dynamo.run_tests(test_context, valgrind = True, configfile = configfilepath)

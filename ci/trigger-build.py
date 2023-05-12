@@ -54,7 +54,7 @@ def main(argv):
 
     headers = {
         "Accept": "application/vnd.github.everest-preview+json",
-        "Authorization": "token %s" % args.token
+        "Authorization": f"token {args.token}",
     }
 
     r = requests.post('https://api.github.com/repos/defold/defold/dispatches', json=post_data, headers=headers)

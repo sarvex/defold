@@ -134,139 +134,131 @@ def compile(input_files, options):
 
     if not options.output_file:
         oifn = set_output_path(options.rel_path, options.output_file_index)
-        out_index = open(oifn, 'wb+')
-        odfn = set_output_path(options.rel_path, options.output_file_data)
-        out_data = open(odfn, 'wb+')
+        with open(oifn, 'wb+') as out_index:
+            odfn = set_output_path(options.rel_path, options.output_file_data)
+            with open(odfn, 'wb+') as out_data:
+                # TODO magic number
+                out_index.seek(0)
+                out_index.write(struct.pack('!I', VERSION)) # Version
+                out_index.write(struct.pack('!I', 0)) # Pad
+                out_index.write(struct.pack('!Q', 0)) # Userdata
+                out_index.write(struct.pack('!I', 0)) # EntryCount (placeholder, actual value written later)
+                out_index.write(struct.pack('!I', 0)) # EntryOffset (placeholder, actual value written later)
+                out_index.write(struct.pack('!I', 0)) # HashOffset (placeholder, actual value written later)
+                out_index.write(struct.pack('!I', HASH_LENGTH))
 
-        # TODO magic number
-        out_index.seek(0)
-        out_index.write(struct.pack('!I', VERSION)) # Version
-        out_index.write(struct.pack('!I', 0)) # Pad
-        out_index.write(struct.pack('!Q', 0)) # Userdata
-        out_index.write(struct.pack('!I', 0)) # EntryCount (placeholder, actual value written later)
-        out_index.write(struct.pack('!I', 0)) # EntryOffset (placeholder, actual value written later)
-        out_index.write(struct.pack('!I', 0)) # HashOffset (placeholder, actual value written later)
-        out_index.write(struct.pack('!I', HASH_LENGTH))
+                entry_count = 0
+                entry_datas = []
 
-        entry_count = 0
-        entry_datas = []
+                # write resource data to datafile
+                num_input_files = len(input_files)
+                out_data.seek(0)
+                for i,f in enumerate(input_files):
+                    align_file(out_data, 4)
+                    e = EntryData(options.root, f, options.compress, num_input_files - i)
+                    e.resource_offset = out_data.tell()
+                    out_data.write(e.resource)
+                    entry_datas.append(e)
+                    entry_count += 1
+            # sort entrydatas on hash for binary search in runtime
+            entry_datas.sort(entry_data_hash_cmp)
 
-        # write resource data to datafile
-        num_input_files = len(input_files)
-        out_data.seek(0)
-        for i,f in enumerate(input_files):
-            align_file(out_data, 4)
-            e = EntryData(options.root, f, options.compress, num_input_files - i)
-            e.resource_offset = out_data.tell()
-            out_data.write(e.resource)
-            entry_datas.append(e)
-            entry_count += 1
-        out_data.close()
+            # write hash data to linear array
+            i = 0
+            align_file(out_index, 4)
+            hash_offset = out_index.tell()
+            while i < entry_count:
+                e = entry_datas[i]
+                out_index.write(e.hash)
+                i += 1
 
-        # sort entrydatas on hash for binary search in runtime
-        entry_datas.sort(entry_data_hash_cmp)
+            # For writing offset to entrydatas in index file at the end
+            entry_offset = out_index.tell()
 
-        # write hash data to linear array
-        i = 0
-        align_file(out_index, 4)
-        hash_offset = out_index.tell()
-        while i < entry_count:
-            e = entry_datas[i]
-            out_index.write(e.hash)
-            i += 1
+            # write hashes to index file
+            # assumes 64 byte per hash
 
-        # For writing offset to entrydatas in index file at the end
-        entry_offset = out_index.tell()
+            # write to index file
+            i = 0
+            align_file(out_index, 4)
+            while i < entry_count:
+                e = entry_datas[i]
+                out_index.write(struct.pack('!I', e.resource_offset))
+                out_index.write(struct.pack('!I', e.size))
+                out_index.write(struct.pack('!I', e.compressed_size))
+                out_index.write(struct.pack('!I', e.flags))
+                i += 1
 
-        # write hashes to index file
-        # assumes 64 byte per hash
-
-        # write to index file
-        i = 0
-        align_file(out_index, 4)
-        while i < entry_count:
-            e = entry_datas[i]
-            out_index.write(struct.pack('!I', e.resource_offset))
-            out_index.write(struct.pack('!I', e.size))
-            out_index.write(struct.pack('!I', e.compressed_size))
-            out_index.write(struct.pack('!I', e.flags))
-            i += 1
-
-        out_index.seek(0)
-        out_index.write(struct.pack('!I', VERSION)) # Version
-        out_index.write(struct.pack('!I', 0)) # Pad
-        out_index.write(struct.pack('!Q', 0)) # Userdata
-        out_index.write(struct.pack('!I', entry_count)) # EntryCount
-        out_index.write(struct.pack('!I', entry_offset)) # EntryOffset
-        out_index.write(struct.pack('!I', hash_offset)) # EntryOffset
-        out_index.write(struct.pack('!I', HASH_LENGTH))
-        out_index.close()
-
+            out_index.seek(0)
+            out_index.write(struct.pack('!I', VERSION)) # Version
+            out_index.write(struct.pack('!I', 0)) # Pad
+            out_index.write(struct.pack('!Q', 0)) # Userdata
+            out_index.write(struct.pack('!I', entry_count)) # EntryCount
+            out_index.write(struct.pack('!I', entry_offset)) # EntryOffset
+            out_index.write(struct.pack('!I', hash_offset)) # EntryOffset
+            out_index.write(struct.pack('!I', HASH_LENGTH))
     else:
-        # this is relative here (to destination path in build/ dir), in my code about it is absolut
-        out_file = open(options.output_file, 'wb')
-        # Version
-        out_file.write(struct.pack('!I', VERSION))
-        # Pad
-        out_file.write(struct.pack('!I', 0))
-        # Userdata
-        out_file.write(struct.pack('!Q', 0))
-        # StringPoolOffset (dummy)
-        out_file.write(struct.pack('!I', 0))
-        # StringPoolSize (dummy)
-        out_file.write(struct.pack('!I', 0))
-        # EntryCount (dummy)
-        out_file.write(struct.pack('!I', 0))
-        # EntryOffset (dummy)
-        out_file.write(struct.pack('!I', 0))
+        with open(options.output_file, 'wb') as out_file:
+            # Version
+            out_file.write(struct.pack('!I', VERSION))
+            # Pad
+            out_file.write(struct.pack('!I', 0))
+            # Userdata
+            out_file.write(struct.pack('!Q', 0))
+            # StringPoolOffset (dummy)
+            out_file.write(struct.pack('!I', 0))
+            # StringPoolSize (dummy)
+            out_file.write(struct.pack('!I', 0))
+            # EntryCount (dummy)
+            out_file.write(struct.pack('!I', 0))
+            # EntryOffset (dummy)
+            out_file.write(struct.pack('!I', 0))
 
-        entries = []
-        string_pool_offset = out_file.tell()
-        strings_offset = []
-        for i,f in enumerate(input_files):
-            e = Entry(options.root, f, options.compress)
-            # Store offset to string
-            strings_offset.append(out_file.tell() - string_pool_offset)
-            # Write filename string
-            out_file.write(e.filename)
-            out_file.write(chr(0))
-            entries.append(e)
+            entries = []
+            string_pool_offset = out_file.tell()
+            strings_offset = []
+            for f in input_files:
+                e = Entry(options.root, f, options.compress)
+                # Store offset to string
+                strings_offset.append(out_file.tell() - string_pool_offset)
+                # Write filename string
+                out_file.write(e.filename)
+                out_file.write(chr(0))
+                entries.append(e)
 
-        string_pool_size = out_file.tell() - string_pool_offset
+            string_pool_size = out_file.tell() - string_pool_offset
 
-        resources_offset = []
-        for i,e in enumerate(entries):
+            resources_offset = []
+            for e in entries:
+                align_file(out_file, 4)
+                resources_offset.append(out_file.tell())
+                out_file.write(e.resource)
+
             align_file(out_file, 4)
-            resources_offset.append(out_file.tell())
-            out_file.write(e.resource)
+            entry_offset = out_file.tell()
+            for i,e in enumerate(entries):
+                out_file.write(struct.pack('!I', strings_offset[i]))
+                out_file.write(struct.pack('!I', resources_offset[i]))
+                out_file.write(struct.pack('!I', e.size))
+                out_file.write(struct.pack('!I', e.compressed_size))
+                out_file.write(struct.pack('!I', e.flags))
 
-        align_file(out_file, 4)
-        entry_offset = out_file.tell()
-        for i,e in enumerate(entries):
-            out_file.write(struct.pack('!I', strings_offset[i]))
-            out_file.write(struct.pack('!I', resources_offset[i]))
-            out_file.write(struct.pack('!I', e.size))
-            out_file.write(struct.pack('!I', e.compressed_size))
-            out_file.write(struct.pack('!I', e.flags))
-
-        # Reset file and write actual offsets
-        out_file.seek(0)
-        # Version
-        out_file.write(struct.pack('!I', VERSION))
-        # Pad
-        out_file.write(struct.pack('!I', 0))
-        # Userdata
-        out_file.write(struct.pack('!Q', 0))
-        # StringPoolOffset
-        out_file.write(struct.pack('!I', string_pool_offset))
-        # StringPoolSize
-        out_file.write(struct.pack('!I', string_pool_size))
-        # EntryCount
-        out_file.write(struct.pack('!I', len(entries)))
-        # EntryOffset
-        out_file.write(struct.pack('!I', entry_offset))
-
-        out_file.close()
+            # Reset file and write actual offsets
+            out_file.seek(0)
+            # Version
+            out_file.write(struct.pack('!I', VERSION))
+            # Pad
+            out_file.write(struct.pack('!I', 0))
+            # Userdata
+            out_file.write(struct.pack('!Q', 0))
+            # StringPoolOffset
+            out_file.write(struct.pack('!I', string_pool_offset))
+            # StringPoolSize
+            out_file.write(struct.pack('!I', string_pool_size))
+            # EntryCount
+            out_file.write(struct.pack('!I', len(entries)))
+            # EntryOffset
+            out_file.write(struct.pack('!I', entry_offset))
 
 if __name__ == '__main__':
     usage = 'usage: %prog [options] files'

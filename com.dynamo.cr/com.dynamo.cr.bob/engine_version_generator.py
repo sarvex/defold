@@ -26,8 +26,7 @@ def git_sha1():
         sys.exit(process.returncode)
 
     line = str(out.decode()).split('\n')[0].strip()
-    sha1 = line.split()[0]
-    return sha1
+    return line.split()[0]
 
 if __name__ == '__main__':
     engine_version_java = """

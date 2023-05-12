@@ -31,10 +31,7 @@ task = waflib.Task.task_factory('merge_yaml',
 @taskgen_method
 @feature('merge_yaml')
 def feature_merge_yaml(self):
-    inputs = []
-    for name in self.yaml_source:
-        inputs.append(self.path.make_node(name))
-
+    inputs = [self.path.make_node(name) for name in self.yaml_source]
     out = self.path.find_or_declare(self.yaml_target)
     task = self.create_task('merge_yaml')
     task.set_inputs(inputs)
@@ -55,7 +52,7 @@ def build(bld):
 
     source = ['build_input.yml']
     for platform in private_platforms:
-        private_source = 'build_%s.yml' % platform
+        private_source = f'build_{platform}.yml'
         if os.path.exists(private_source):
             source += [private_source]
 
@@ -66,18 +63,20 @@ def build(bld):
 
     variants = ('debug', 'release', 'headless')
     for variant in variants:
-        source = ['variants/%s_input.appmanifest' % variant]
-        source_target = 'variants/%s.appmanifest' % variant
+        source = [f'variants/{variant}_input.appmanifest']
+        source_target = f'variants/{variant}.appmanifest'
 
         for platform in private_platforms:
-            private_source = 'variants/%s_%s.appmanifest' % (variant, platform)
+            private_source = f'variants/{variant}_{platform}.appmanifest'
             if os.path.exists(private_source):
                 source += [private_source]
 
-        bld(features = 'merge_yaml',
-            yaml_source = source,
-            yaml_target = source_target,
-            name='Build Yaml %s' % variant)
+        bld(
+            features='merge_yaml',
+            yaml_source=source,
+            yaml_target=source_target,
+            name=f'Build Yaml {variant}',
+        )
 
     bld.add_group()
     bld.install_files('${PREFIX}/extender/', 'build.yml')

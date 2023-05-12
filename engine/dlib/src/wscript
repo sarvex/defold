@@ -46,12 +46,6 @@ def build(bld):
         extra_defines.append('Z_HAVE_UNISTD_H')
         extra_defines.append('HAVE_HIDDEN')
         extra_defines.append('CONFIG_USE_DEV_URANDOM')
-    else:
-        pass
-        # NOTE: CONFIG_WIN32_USE_CRYPTO_LIB is disabled
-        # on windows due to compile error in RNG_custom_init()
-        # when CONFIG_WIN32_USE_CRYPTO_LIB is set (missing entropy_pool, see top of file)
-
     platform = build_util.get_target_os()
     if platform == 'win':
         platform = "win32"
@@ -101,7 +95,7 @@ def build(bld):
                           includes    = dlib.includes,
                           defines     = dlib.defines,
                           target      = 'dlib_noasan')
-    dlib_noasan.source = [x for x in dlib.source]
+    dlib_noasan.source = list(dlib.source)
 
 
     mbedtls_dirs = 'mbedtls/crypto/library/**/*.c mbedtls/library/**/*.c'.split()
@@ -113,7 +107,7 @@ def build(bld):
     FLAG_ST = '/O%s' if ('cl.exe' in bld.env.CXX) else '-O%s'
     remove_flags = {}
     new_opt_level = False
-    if opt_level in ['3','2']:
+    if opt_level in {'3', '2'}:
         remove_flags['CFLAGS'] = []
         remove_flags['CFLAGS'].append( (FLAG_ST % opt_level, 0) )
         remove_flags['CXXFLAGS'] = []
@@ -139,7 +133,7 @@ def build(bld):
                          remove_flags = remove_flags,
                          defines      = mbedtls.defines,
                          target       = 'mbedtls_noasan')
-    mbedtls_noasan.source = [x for x in mbedtls.source]
+    mbedtls_noasan.source = list(mbedtls.source)
     mbedtls_noasan.env.append_unique('CFLAGS', FLAG_ST % 's')
 
     libzip_dirs = ['zip/**/*.cpp']
@@ -153,7 +147,7 @@ def build(bld):
                         includes  = libzip.includes,
                         defines   = libzip.defines,
                         target    = 'zip_noasan')
-    libzip_noasan.source = [x for x in libzip.source]
+    libzip_noasan.source = list(libzip.source)
     libzip_noasan.env.append_unique('CFLAGS', FLAG_ST % 's')
 
     # ******************************************************************
@@ -236,7 +230,7 @@ def build(bld):
                                 defines= ['VALGRIND'] + extra_defines,
                                 use = ['PLATFORM_SOCKET', 'PROFILE_NULL_NOASAN', 'mbedtls_noasan', 'zip_noasan'])
 
-        dlib_shared.source = [x for x in dlib.source]
+        dlib_shared.source = list(dlib.source)
 
         if 'win32' not in bld.env['PLATFORM']:
             dlib_memprofile = bld(features = 'c cxx cshlib',
@@ -283,7 +277,7 @@ def build(bld):
 
     # Java
 
-    classpath = ['%s/ext/share/java/junit-4.6.jar' % bld.env.DYNAMO_HOME]
+    classpath = [f'{bld.env.DYNAMO_HOME}/ext/share/java/junit-4.6.jar']
     classpath = os.pathsep.join(classpath)
 
     bld(features='javac seq',
@@ -383,11 +377,27 @@ def build(bld):
 
     # For the private platforms, check if the file exist and, if so, install them
     def check_install(bld, tgtpath, srcpath):
-        if os.path.exists('src/' + srcpath):
+        if os.path.exists(f'src/{srcpath}'):
             bld.install_files(tgtpath, srcpath)
 
-    platform_include_dir = 'dlib/%s' % platform
-    check_install(bld, '${PREFIX}/include/dlib/%s' % platform, platform_include_dir + '/endian.h')
-    check_install(bld, '${PREFIX}/include/dlib/%s' % platform, platform_include_dir + '/mutex.h')
-    check_install(bld, '${PREFIX}/include/dlib/%s' % platform, platform_include_dir + '/spinlocktypes.h')
-    check_install(bld, '${PREFIX}/include/dlib/%s' % platform, platform_include_dir + '/memory.h')
+    platform_include_dir = f'dlib/{platform}'
+    check_install(
+        bld,
+        '${PREFIX}/include/dlib/%s' % platform,
+        f'{platform_include_dir}/endian.h',
+    )
+    check_install(
+        bld,
+        '${PREFIX}/include/dlib/%s' % platform,
+        f'{platform_include_dir}/mutex.h',
+    )
+    check_install(
+        bld,
+        '${PREFIX}/include/dlib/%s' % platform,
+        f'{platform_include_dir}/spinlocktypes.h',
+    )
+    check_install(
+        bld,
+        '${PREFIX}/include/dlib/%s' % platform,
+        f'{platform_include_dir}/memory.h',
+    )

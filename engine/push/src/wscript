@@ -6,14 +6,11 @@ def configure(conf):
     pass
 
 def build(bld):
-    source = 'push_null.cpp'
-
     platforms = ['arm.*?ios', 'arm.*?android', 'x86_64-ios']
-    for p in platforms:
-        if re.match(p, bld.env.PLATFORM):
-            source = 'push_stub.cpp'
-            break
-
+    source = next(
+        ('push_stub.cpp' for p in platforms if re.match(p, bld.env.PLATFORM)),
+        'push_null.cpp',
+    )
     bld.stlib(features = 'cxx',
               includes = '.',
               source = source,

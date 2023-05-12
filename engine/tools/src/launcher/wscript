@@ -6,16 +6,20 @@ from BuildUtility import create_build_utility
 def configure(conf):
     build_util = create_build_utility(conf.env)
     target = build_util.get_target_os()
-    if not target in ('win32', 'macos', 'linux'):
-      return
-    if 'macos' == target:
+    if target not in ('win32', 'macos', 'linux'):
+        return
+    if target == 'macos':
         conf.env.append_value('LINKFLAGS', ['-framework', 'Cocoa'])
     if 'win32' in target:
         conf.find_program('signtool', var='SIGNTOOL', mandatory = True, path_list = search_path)
 
 def build(bld):
     # if not desktop
-    if not bld.env.PLATFORM in ('x86_64-win32', 'x86_64-macos', 'x86_64-linux'):
+    if bld.env.PLATFORM not in (
+        'x86_64-win32',
+        'x86_64-macos',
+        'x86_64-linux',
+    ):
         return
 
     build_util = create_build_utility(bld.env)
@@ -27,7 +31,7 @@ def build(bld):
                        source   = ['launcher.cpp', 'launcher_util.cpp'],
                        target   = 'launcher')
 
-    if 'macos' == target:
+    if target == 'macos':
         exe.source.append('macos_events.mm')
 
     lib = bld.stlib(features = 'cxx',

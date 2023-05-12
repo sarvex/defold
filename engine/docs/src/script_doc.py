@@ -54,15 +54,14 @@ class RefExtension(Extension):
 
 class RefPattern(Pattern):
     def getCompiledRegExp(self):
-        return re.compile("^(.*?)%s(.*)$" % self.pattern, re.DOTALL | re.UNICODE | re.IGNORECASE)
+        return re.compile(
+            f"^(.*?){self.pattern}(.*)$", re.DOTALL | re.UNICODE | re.IGNORECASE
+        )
 
     def handleMatch(self, m):
         ref = m.group(3)
         s = ref.split('.')
-        if len(s) == 2:
-            refurl = ('/ref/%s#%s') % (s[0], ref)
-        else:
-            refurl = ('#%s') % (s[0])
+        refurl = f'/ref/{s[0]}#{ref}' if len(s) == 2 else f'#{s[0]}'
         el = etree.Element('a')
         el.text = AtomicString(ref)
         el.set('href', refurl)
@@ -85,11 +84,13 @@ class IconExtension(Extension):
 
 class IconPattern(Pattern):
     def getCompiledRegExp(self):
-        return re.compile("^(.*?)%s(.*)$" % self.pattern, re.DOTALL | re.UNICODE | re.IGNORECASE)
+        return re.compile(
+            f"^(.*?){self.pattern}(.*)$", re.DOTALL | re.UNICODE | re.IGNORECASE
+        )
 
     def handleMatch(self, m):
         el = etree.Element('span')
-        el.set('class', 'icon-' + m.group(3).lower())
+        el.set('class', f'icon-{m.group(3).lower()}')
         return el
 
 #
@@ -109,7 +110,9 @@ class TypeExtension(Extension):
 
 class TypePattern(Pattern):
     def getCompiledRegExp(self):
-        return re.compile("^(.*?)%s(.*)$" % self.pattern, re.DOTALL | re.UNICODE | re.IGNORECASE)
+        return re.compile(
+            f"^(.*?){self.pattern}(.*)$", re.DOTALL | re.UNICODE | re.IGNORECASE
+        )
 
     def handleMatch(self, m):
         el = etree.Element('span')
@@ -139,7 +142,9 @@ class ClassExtension(Extension):
 
 class ClassPattern(Pattern):
     def getCompiledRegExp(self):
-        return re.compile("^(.*?)%s(.*)$" % self.pattern, re.DOTALL | re.UNICODE | re.IGNORECASE)
+        return re.compile(
+            f"^(.*?){self.pattern}(.*)$", re.DOTALL | re.UNICODE | re.IGNORECASE
+        )
 
     def handleMatch(self, m):
         el = etree.Element('span')
@@ -190,39 +195,39 @@ def _parse_comment(text):
     for (tag, value) in lst:
         tag = tag.strip()
         value = value.strip()
-        if tag == 'name':
-            name_found = True
-        elif tag == 'variable':
-            element_type = script_doc_ddf_pb2.VARIABLE
+        if tag == 'class':
+            element_type = script_doc_ddf_pb2.CLASS
+        elif tag == 'document':
+            document_comment = True
+
+        elif tag == 'enum':
+            element_type = script_doc_ddf_pb2.ENUM
+        elif tag == 'macro':
+            element_type = script_doc_ddf_pb2.MACRO
         elif tag == 'message':
             element_type = script_doc_ddf_pb2.MESSAGE
+        elif tag == 'name':
+            name_found = True
         elif tag == 'property':
             element_type = script_doc_ddf_pb2.PROPERTY
         elif tag == 'struct':
             element_type = script_doc_ddf_pb2.STRUCT
-        elif tag == 'class':
-            element_type = script_doc_ddf_pb2.CLASS
-        elif tag == 'macro':
-            element_type = script_doc_ddf_pb2.MACRO
-        elif tag == 'enum':
-            element_type = script_doc_ddf_pb2.ENUM
         elif tag == 'typedef':
             element_type = script_doc_ddf_pb2.TYPEDEF
-        elif tag == 'document':
-            document_comment = True
-
+        elif tag == 'variable':
+            element_type = script_doc_ddf_pb2.VARIABLE
     if not name_found:
-        logging.warn('Missing tag @name in "%s"' % text)
+        logging.warn(f'Missing tag @name in "{text}"')
         return None
 
     desc_start = min(len(text), text.find('\n'))
-    brief = text[0:desc_start]
+    brief = text[:desc_start]
     desc_end = min(len(text), text.find('\n@'))
     description = text[desc_start:desc_end].strip()
     if not brief and description:
         brief = description.split('.\n')[0]
         if len(brief) > 50: # trial and error of what fits into a single line
-            brief = brief[:50] + '...'
+            brief = f'{brief[:50]}...'
     elif not description and brief:
         description = brief
 
@@ -311,7 +316,7 @@ def _parse_comment(text):
             namespace_found = True
 
     if document_comment and not namespace_found:
-        logging.warn('Missing tag @namespace in "%s"' % str)
+        logging.warn(f'Missing tag @namespace in "{str}"')
         return None
 
     return element
@@ -319,22 +324,16 @@ def _parse_comment(text):
 def extract_type_from_docstr(s):
     # try to extract the type information
     m = re.search(r'^\s*(?:\s*\[type:\s*([^\]]*)\])+\s*([\w\W]*)', s)
-    if m and m.group(1):
-        type_list = m.group(1).split("|")
+    if m and m[1]:
+        type_list = m[1].split("|")
         if len(type_list) == 1:
             type_list = type_list[0]
-        if m.group(2):
-            return type_list, m.group(2)
-        return type_list, ""
-
+        return (type_list, m[2]) if m[2] else (type_list, "")
     return "", s
 
 def is_optional(str):
     m = re.search('^\[(.*)\]', str)
-    if m and m.group(1):
-        return True, m.group(1)
-
-    return False, str
+    return (True, m[1]) if m and m[1] else (False, str)
 
 def _parse_comment_yaml(str):
     str = _strip_comment_stars(str)
@@ -350,46 +349,46 @@ def _parse_comment_yaml(str):
     for (tag, value) in lst:
         tag = tag.strip()
         value = value.strip()
-        if tag == 'name':
-            name_found = True
-        elif tag == 'variable':
-            element_type = "variable"
+        if tag == 'class':
+            element_type = "class"
+        elif tag == 'document':
+            element_type = "document"
+
+        elif tag == 'enum':
+            element_type = "enum"
+        elif tag == 'macro':
+            element_type = "macro"
         elif tag == 'message':
             element_type = "message"
+        elif tag == 'name':
+            name_found = True
         elif tag == 'property':
             element_type = "property"
         elif tag == 'struct':
             element_type = "struct"
-        elif tag == 'class':
-            element_type = "class"
-        elif tag == 'macro':
-            element_type = "macro"
-        elif tag == 'enum':
-            element_type = "enum"
         elif tag == 'typedef':
             element_type = "typedef"
-        elif tag == 'document':
-            element_type = "document"
-
+        elif tag == 'variable':
+            element_type = "variable"
     if not name_found:
-        logging.warn('Missing tag @name in "%s"' % str)
+        logging.warn(f'Missing tag @name in "{str}"')
         return None
 
     desc_start = min(len(str), str.find('\n'))
-    brief = str[0:desc_start]
+    brief = str[:desc_start]
     desc_end = min(len(str), str.find('\n@'))
     description = str[desc_start:desc_end].strip()
 
-    element = {}
-    element["type"] = element_type
-    element["brief"] = brief
-    element["description"] = description
-    element["returns"] = []
-    element["members"] = []
-    element["tparams"] = []
-    element["params"] = []
-    element["notes"] = []
-
+    element = {
+        "type": element_type,
+        "brief": brief,
+        "description": description,
+        "returns": [],
+        "members": [],
+        "tparams": [],
+        "params": [],
+        "notes": [],
+    }
     namespace_found = False
     for (tag, value) in lst:
         value = value.strip()
@@ -403,8 +402,7 @@ def _parse_comment_yaml(str):
             tmp = value.split(' ', 1)
             if len(tmp) < 2:
                 tmp = [tmp[0], '']
-            ret = {}
-            ret["name"] = tmp[0]
+            ret = {"name": tmp[0]}
             ret["type"], ret["doc"] = extract_type_from_docstr(tmp[1])
             element["returns"].append(ret)
 
@@ -422,8 +420,7 @@ def _parse_comment_yaml(str):
             tmp = value.split(' ', 1)
             if len(tmp) < 2:
                 tmp = [tmp[0], '']
-            mem = {}
-            mem["name"] = tmp[0]
+            mem = {"name": tmp[0]}
             mem["type"], mem["doc"] = extract_type_from_docstr(tmp[1])
             element["members"].append(mem)
 
@@ -431,8 +428,7 @@ def _parse_comment_yaml(str):
             tmp = value.split(' ', 1)
             if len(tmp) < 2:
                 tmp = [tmp[0], '']
-            mem = {}
-            mem["name"] = tmp[0]
+            mem = {"name": tmp[0]}
             mem["type"], mem["doc"] = extract_type_from_docstr(tmp[1])
             element["tparams"].append(mem)
 
@@ -448,7 +444,7 @@ def _parse_comment_yaml(str):
             namespace_found = True
 
     if element_type == 'document' and not namespace_found:
-        logging.warn('Missing tag @namespace in "%s"' % str)
+        logging.warn(f'Missing tag @namespace in "{str}"')
         return None
 
     return element
@@ -459,7 +455,7 @@ def parse_document_yaml(doc_str):
     element_list = []
     for comment_str in lst:
         element = _parse_comment_yaml(comment_str)
-        if element == None:
+        if element is None:
             continue
 
         if element["type"] == 'document':
@@ -485,7 +481,7 @@ def parse_document(doc_str):
     if doc_info:
         doc.info.CopyFrom(doc_info)
 
-    for i, e in enumerate(element_list):
+    for e in element_list:
         doc.elements.add().MergeFrom(e)
 
     return doc
@@ -493,39 +489,39 @@ def parse_document(doc_str):
 # add a ref doc group to each document
 # this can be used to build a menu with the ref docs grouped in a certain way
 def add_group_to_doc_dict(doc_dict):
-    info = doc_dict.get("info")
-    if info:
-        namespace = info.get("namespace")
-        refdocgroups = [
-            {
-                "group": "SYSTEM",
-                "namespaces": ["crash", "gui", "go", "profiler", "render", "resource", "sys", "window", "engine", "physics"]
-            },
-            {
-                "group": "COMPONENTS",
-                "namespaces": ["camera", "collectionproxy", "collectionfactory", "collisionobject", "factory", "label", "model", "particlefx", "sound", "spine", "sprite", "tilemap"]
-            },
-            {
-                "group": "SCRIPT",
-                "namespaces": ["buffer", "builtins", "html5", "http", "image", "json", "msg", "timer", "vmath", "zlib"]
-            },
-            {
-                "group": "LUA STANDARD LIBS",
-                "namespaces": ["base", "bit", "coroutine", "debug", "io", "socket", "math", "os", "package", "string", "table"]
-            },
-        ]
+    if not (info := doc_dict.get("info")):
+        return
+    namespace = info.get("namespace")
+    refdocgroups = [
+        {
+            "group": "SYSTEM",
+            "namespaces": ["crash", "gui", "go", "profiler", "render", "resource", "sys", "window", "engine", "physics"]
+        },
+        {
+            "group": "COMPONENTS",
+            "namespaces": ["camera", "collectionproxy", "collectionfactory", "collisionobject", "factory", "label", "model", "particlefx", "sound", "spine", "sprite", "tilemap"]
+        },
+        {
+            "group": "SCRIPT",
+            "namespaces": ["buffer", "builtins", "html5", "http", "image", "json", "msg", "timer", "vmath", "zlib"]
+        },
+        {
+            "group": "LUA STANDARD LIBS",
+            "namespaces": ["base", "bit", "coroutine", "debug", "io", "socket", "math", "os", "package", "string", "table"]
+        },
+    ]
 
-        # Should we get this from the actual @document segment instead, instead of trying to do it dynamically?
+    # Should we get this from the actual @document segment instead, instead of trying to do it dynamically?
 
-        path = info.get('path', '')
-        if 'engine' in path:
-            info["group"] = "DEFOLD SDK"
+    path = info.get('path', '')
+    if 'engine' in path:
+        info["group"] = "DEFOLD SDK"
+        return
+
+    for refdocgroup in refdocgroups:
+        if namespace in refdocgroup.get("namespaces"):
+            info["group"] = refdocgroup.get("group")
             return
-
-        for refdocgroup in refdocgroups:
-            if namespace in refdocgroup.get("namespaces"):
-                info["group"] = refdocgroup.get("group")
-                return
 
 def message_to_dict(message):
     ret = {}
@@ -603,14 +599,10 @@ def doc_to_ydict(info, elements):
 
             entry["parameters"] = elem_params
 
-            # function returns
-            elem_returns = []
-            for ret in element["returns"]:
-                elem_returns.append({
-                        'desc': ret["doc"],
-                        'type': ret["type"]
-                    })
-            if len(elem_returns) > 0:
+            if elem_returns := [
+                {'desc': ret["doc"], 'type': ret["type"]}
+                for ret in element["returns"]
+            ]:
                 entry["returns"] = elem_returns
 
         if part_of_ns:
@@ -634,27 +626,23 @@ if __name__ == '__main__':
 
     doc_str = ''
     for name in args[:-1]:
-        f = open(name, 'r')
-        doc_str += f.read()
-        f.close()
-
-    doc = parse_document(doc_str)
-    if doc:
+        with open(name, 'r') as f:
+            doc_str += f.read()
+    if doc := parse_document(doc_str):
         output_file = args[-1]
-        f = open(output_file, "w")
-        if options.type == 'protobuf':
-            f.write(str(doc))
-        elif options.type == 'json':
-            doc_dict = message_to_dict(doc)
-            add_group_to_doc_dict(doc_dict)
-            json.dump(doc_dict, f, indent = 2)
-        elif options.type == 'script_api':
-            info, elements = parse_document_yaml(doc_str)
-            doc_dict = doc_to_ydict(info, elements)
-            yaml.dump(doc_dict, f, default_flow_style = False)
-        else:
-            print ('Unknown type: %s' % options.type)
-            sys.exit(5)
-        f.close()
+        with open(output_file, "w") as f:
+            if options.type == 'protobuf':
+                f.write(str(doc))
+            elif options.type == 'json':
+                doc_dict = message_to_dict(doc)
+                add_group_to_doc_dict(doc_dict)
+                json.dump(doc_dict, f, indent = 2)
+            elif options.type == 'script_api':
+                info, elements = parse_document_yaml(doc_str)
+                doc_dict = doc_to_ydict(info, elements)
+                yaml.dump(doc_dict, f, default_flow_style = False)
+            else:
+                print(f'Unknown type: {options.type}')
+                sys.exit(5)
 
 

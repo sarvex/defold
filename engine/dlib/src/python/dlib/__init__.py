@@ -22,7 +22,7 @@ if platform.architecture()[0] == '32bit':
 machine = platform.machine() # x86_64 or arm64
 if sys.platform == "darwin":
     libname = "libdlib_shared.dylib"
-    libdir = "lib/%s-macos" % machine
+    libdir = f"lib/{machine}-macos"
 elif sys.platform in ("linux", "linux2"): # support both python3 and python2
     libname = "libdlib_shared.so"
     libdir = "lib/x86_64-linux"

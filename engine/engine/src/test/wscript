@@ -84,15 +84,14 @@ def build(bld):
     if platform == 'win32':
         platform = 'x86-win32'
 
-    bob_flags = []
-    bob_flags.append("--platform=%s" % platform)
+    bob_flags = [f"--platform={platform}"]
     if Options.options.use_vanilla_lua:
         bob_flags.append("--use-vanilla-lua")
     bob_flags = ' '.join(bob_flags)
 
     # Build engine test content using bob
     # We always run distclean. Hook into waf clean/distclean in some way?
-    bob_command = 'java -jar ./build/content/bob-engine.jar -root ./src/test -k clean build %s' % bob_flags
+    bob_command = f'java -jar ./build/content/bob-engine.jar -root ./src/test -k clean build {bob_flags}'
 
     bld(rule = run_bob,
         run_args = bob_command,

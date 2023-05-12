@@ -39,19 +39,21 @@ class TestDlib(unittest.TestCase):
         try:
             for k, s in profile.summary.items():
                 tmp = str(s.back_trace)
-                if 'func1a' in tmp and 'func2' in tmp:
+                if (
+                    'func1a' in tmp
+                    and 'func2' in tmp
+                    or 'func1a' not in tmp
+                    and 'func1b' in tmp
+                    and 'func2' in tmp
+                ):
                     self.assertEqual(16 * 8, s.nmalloc)
                     self.assertTrue(16 * 16 * 8 <= s.malloc_total)
                     self.assertTrue(16 * 24 * 8 >= s.malloc_total)
-                elif 'func1a' in tmp and not 'func2' in tmp:
+                elif 'func1a' in tmp:
                     self.assertEqual(16, s.nmalloc)
                     self.assertTrue(16 * 512 <= s.malloc_total)
                     self.assertTrue(16 * 532 >= s.malloc_total)
-                elif 'func1b' in tmp and 'func2' in tmp:
-                    self.assertEqual(16 * 8, s.nmalloc)
-                    self.assertTrue(16 * 16 * 8 <= s.malloc_total)
-                    self.assertTrue(16 * 24 * 8 >= s.malloc_total)
-                elif 'func1b' in tmp and not 'func2' in tmp:
+                elif 'func1b' in tmp:
                     self.assertEqual(16, s.nmalloc)
                     self.assertTrue(16 * 256 <= s.malloc_total)
                     self.assertTrue(16 * 280 >= s.malloc_total)

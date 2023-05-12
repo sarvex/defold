@@ -17,30 +17,36 @@ def build(bld):
         suffix = ''
         features = []
         if impl == 'null':
-            local_lib += '_' + impl
-            suffix += '_' + impl
+            local_lib += f'_{impl}'
+            suffix += f'_{impl}'
             features = ['skip_test']
 
-        bld.program(features = 'cxx test'.split() + features,
-                    includes = '../../../src',
-                    use      = uselib + [local_lib],
-                    web_libs = ['library_sys.js'],
-                    target   = 'test_liveupdate' + suffix,
-                    source   = 'test_liveupdate.cpp')
+        bld.program(
+            features='cxx test'.split() + features,
+            includes='../../../src',
+            use=uselib + [local_lib],
+            web_libs=['library_sys.js'],
+            target=f'test_liveupdate{suffix}',
+            source='test_liveupdate.cpp',
+        )
 
-        bld.program(features = 'cxx test'.split() + features,
-                    includes = '../../../src',
-                    use      = uselib + [local_lib],
-                    web_libs = ['library_sys.js'],
-                    target   = 'test_liveupdate_async' + suffix,
-                    source   = '../liveupdate_async.cpp test_liveupdate_async.cpp')
+        bld.program(
+            features='cxx test'.split() + features,
+            includes='../../../src',
+            use=uselib + [local_lib],
+            web_libs=['library_sys.js'],
+            target=f'test_liveupdate_async{suffix}',
+            source='../liveupdate_async.cpp test_liveupdate_async.cpp',
+        )
 
-        bld.program(features = 'cxx cprogram test'.split() + features,
-                    includes = '../../../src',
-                    use      = uselib + [local_lib],
-                    web_libs = ['library_sys.js'],
-                    target   = 'test_liveupdate_zip_archive' + suffix,
-                    source   = '../liveupdate.cpp ../liveupdate_private.cpp ../liveupdate_async.cpp ../liveupdate_archive.cpp ../liveupdate_zip_archive.cpp test_liveupdate_zip_archive.cpp')
+        bld.program(
+            features='cxx cprogram test'.split() + features,
+            includes='../../../src',
+            use=uselib + [local_lib],
+            web_libs=['library_sys.js'],
+            target=f'test_liveupdate_zip_archive{suffix}',
+            source='../liveupdate.cpp ../liveupdate_private.cpp ../liveupdate_async.cpp ../liveupdate_archive.cpp ../liveupdate_zip_archive.cpp test_liveupdate_zip_archive.cpp',
+        )
 
 def shutdown(ctx):
     pass

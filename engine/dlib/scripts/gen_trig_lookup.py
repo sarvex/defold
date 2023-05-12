@@ -39,8 +39,8 @@ def generate(path, bits):
 
     files = {"trig_lookup_template.h" : "trig_lookup.h", "trig_lookup_template.cpp" : "trig_lookup.cpp"}
     for k,v in files.iteritems():
-        template = path + "/" + k
-        target = path + "/../src/dlib/" + v
+        template = f"{path}/{k}"
+        target = f"{path}/../src/dlib/{v}"
         with open(template, 'r') as f:
             data = f.read()
             data = data.format(size = size, table = table, table_mask = table_mask, frac_mask = frac_mask, weight = weight, bits = bits)

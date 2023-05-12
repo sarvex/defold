@@ -45,10 +45,7 @@ def apply_ddf_jar(self):
 
     options = []
     for d in self.ddf_javaclass_dirs:
-        options.append('-C')
-        options.append(d)
-        options.append('.')
-
+        options.extend(('-C', d, '.'))
     tsk = self.create_task('ddf_jar')
     tsk.set_inputs(self.ddf_javaclass_inputs)
     out = self.path.find_or_declare(self.ddf_jar)
@@ -63,15 +60,13 @@ def scan_file_import(self, path):
     ret = set()
 
     for line in f:
-        m = re.match('\s*import\s*"([^"]*?)"\s*;', line)
-        if m:
+        if m := re.match('\s*import\s*"([^"]*?)"\s*;', line):
             ret.add(m.groups()[0])
     return ret
 
 def scan_file(self, file, include_nodes, scanned):
     for incn in include_nodes:
-        n = incn.find_resource(file)
-        if n:
+        if n := incn.find_resource(file):
             if n.abspath() in scanned:
                 return []
             scanned.add(n.abspath())
@@ -129,7 +124,7 @@ def bproto_file(self, node):
     # An explicit node is create below
 
     if hasattr(self, "ddf_namespace"):
-        protoc.env['ddf_options'] = '--ns %s' % self.ddf_namespace
+        protoc.env['ddf_options'] = f'--ns {self.ddf_namespace}'
 
 proto_b = waflib.Task.task_factory('proto_b', 'protoc -o${TGT} -I ../${SRC[0].parent.srcpath()} -I ${SRC[0].parent.parent.abspath()} ${PROTOC_FLAGS} ${SRC}',
                                  color='PINK',
@@ -185,12 +180,8 @@ def get_protoc_cc_flags(self):
 
     protoc_flags = ""
     for pi in protoc_includes:
-        if os.path.isabs(pi):
-            p = pi
-        else:
-            p = self.path.find_dir(pi).abspath()
-
-        protoc_flags += " -I %s " % p
+        p = pi if os.path.isabs(pi) else self.path.find_dir(pi).abspath()
+        protoc_flags += f" -I {p} "
 
     return protoc_flags
 
@@ -202,12 +193,8 @@ def get_protoc_flags(self):
 
     protoc_flags = ""
     for pi in protoc_includes:
-        if os.path.isabs(pi):
-            p = pi
-        else:
-            p = self.path.find_dir(pi).srcpath()
-
-        protoc_flags += " -I %s " % p
+        p = pi if os.path.isabs(pi) else self.path.find_dir(pi).srcpath()
+        protoc_flags += f" -I {p} "
 
     return protoc_flags
 
@@ -217,145 +204,140 @@ def find_proto_relpath(self, node, includes):
             p = self.path.find_dir(pi).srcpath()
             rel_path = os.path.relpath(node.abspath(), self.path.find_dir(pi).abspath())
             if rel_path.find('..') != -1:
-                raise waflib.Utils.WafError('Relative path: %s for file %s and include dir %s containts "..". Change or reorder include path to remove parent path references.' %
-                                     (rel_path, node.abspath(), self.path.find_dir(pi).abspath()))
+                raise waflib.Utils.WafError(
+                    f'Relative path: {rel_path} for file {node.abspath()} and include dir {self.path.find_dir(pi).abspath()} containts "..". Change or reorder include path to remove parent path references.'
+                )
             return os.path.dirname(rel_path)
 
     raise waflib.Utils.WafError('No relative include-path path for % found' % node.abspath())
 
 def proto_out_dir(self, node, n_parent):
     out_dir_node = node
-    for i in range(max(0, n_parent)):
+    for _ in range(max(0, n_parent)):
         out_dir_node = out_dir_node.parent
     return out_dir_node.parent.abspath()
 
 
 @extension('.proto')
 def proto_file(self, node):
-        waflib.Utils.def_attrs(self, java_package=None, classpath='.', protoc_includes=['.'])
-        bproto_file(self, node)
+    waflib.Utils.def_attrs(self, java_package=None, classpath='.', protoc_includes=['.'])
+    bproto_file(self, node)
 
-        task = self.create_task('proto_b')
-        task.set_inputs(node)
-        out = node.change_ext('.bproto')
+    task = self.create_task('proto_b')
+    task.set_inputs(node)
+    out = node.change_ext('.bproto')
 
-        protoc_includes = [self.env['DYNAMO_HOME'] + '/ext/include', self.env['DYNAMO_HOME'] + '/share/proto']
-        protoc_includes = waflib.Utils.to_list(self.protoc_includes) + protoc_includes
+    protoc_includes = [self.env['DYNAMO_HOME'] + '/ext/include', self.env['DYNAMO_HOME'] + '/share/proto']
+    protoc_includes = waflib.Utils.to_list(self.protoc_includes) + protoc_includes
 
-        rel_path = find_proto_relpath(self, node, waflib.Utils.to_list(self.protoc_includes))
-        n_parent = 0
-        tmp = rel_path
-        while os.path.basename(tmp):
-            n_parent += 1
-            tmp = os.path.dirname(tmp)
+    rel_path = find_proto_relpath(self, node, waflib.Utils.to_list(self.protoc_includes))
+    n_parent = 0
+    tmp = rel_path
+    while os.path.basename(tmp):
+        n_parent += 1
+        tmp = os.path.dirname(tmp)
 
-        protoc_flags = ""
-        for pi in protoc_includes:
-            if os.path.isabs(pi):
-                p = pi
-            else:
-                p = self.path.find_dir(pi).srcpath()
+    protoc_flags = ""
+    for pi in protoc_includes:
+        p = pi if os.path.isabs(pi) else self.path.find_dir(pi).srcpath()
+        protoc_flags += f" -I {p} "
 
-            protoc_flags += " -I %s " % p
+    task.env['PROTOC_FLAGS'] = protoc_flags
 
-        task.env['PROTOC_FLAGS'] = protoc_flags
-
-        do_install = self.bld.is_install
-        if 'test' in self.features:
-            do_install = False
-
-        if do_install:
-            self.bld.install_files('${PREFIX}/share/proto/%s' % rel_path, out)
+    do_install = False if 'test' in self.features else self.bld.is_install
+    if do_install:
+        self.bld.install_files('${PREFIX}/share/proto/%s' % rel_path, out)
 
             # For backward compatibility
             # proto-files imported without package name should
             # still install the header in APPNAME
-            if not rel_path:
-                tmp = waflib.Context.g_module.APPNAME
-            else:
-                tmp = rel_path
-            self.bld.install_files('${PREFIX}/include/%s' % tmp, out.change_ext(".h"))
+        tmp = waflib.Context.g_module.APPNAME if not rel_path else rel_path
+        self.bld.install_files('${PREFIX}/include/%s' % tmp, out.change_ext(".h"))
 
-        task.set_outputs(out)
+    task.set_outputs(out)
 
-        # WHY?!
-        if not hasattr(self, "compiled_tasks"):
-            self.compiled_tasks = []
+    # WHY?!
+    if not hasattr(self, "compiled_tasks"):
+        self.compiled_tasks = []
 
-        if hasattr(self, "proto_gen_cc") and self.proto_gen_cc:
-            task = self.create_task('proto_gen_cc')
-            task.env['PROTO_RELPATH'] = rel_path
-            task.env['PROTOC_FLAGS'] = protoc_flags
-            task.env['PROTOC_CC_FLAGS'] = get_protoc_cc_flags(self)
-            task.set_inputs(node)
-            cc_out = node.change_ext('.pb.cc')
-            h_out = node.change_ext('.pb.h')
-            task.env['PROTO_OUT_DIR'] = proto_out_dir(self, cc_out, n_parent)
+    if hasattr(self, "proto_gen_cc") and self.proto_gen_cc:
+        task = self.create_task('proto_gen_cc')
+        task.env['PROTO_RELPATH'] = rel_path
+        task.env['PROTOC_FLAGS'] = protoc_flags
+        task.env['PROTOC_CC_FLAGS'] = get_protoc_cc_flags(self)
+        task.set_inputs(node)
+        cc_out = node.change_ext('.pb.cc')
+        h_out = node.change_ext('.pb.h')
+        task.env['PROTO_OUT_DIR'] = proto_out_dir(self, cc_out, n_parent)
 
-            task.set_outputs([cc_out, h_out])
-            if hasattr(self, "proto_compile_cc") and self.proto_compile_cc:
-                self.source += [cc_out]
+        task.set_outputs([cc_out, h_out])
+        if hasattr(self, "proto_compile_cc") and self.proto_compile_cc:
+            self.source += [cc_out]
 
-        if hasattr(self, "proto_gen_py") and self.proto_gen_py:
-            task = self.create_task('proto_gen_py')
-            task.env['PROTOC_FLAGS'] = protoc_flags
-            task.set_inputs(node)
-            py_out = node.change_ext('_pb2.py')
+    if hasattr(self, "proto_gen_py") and self.proto_gen_py:
+        task = self.create_task('proto_gen_py')
+        task.env['PROTOC_FLAGS'] = protoc_flags
+        task.set_inputs(node)
+        py_out = node.change_ext('_pb2.py')
 
-            task.env['PROTOC_CC_FLAGS'] = get_protoc_cc_flags(self)
-            task.env['PROTO_OUT_DIR'] = proto_out_dir(self, py_out, n_parent)
+        task.env['PROTOC_CC_FLAGS'] = get_protoc_cc_flags(self)
+        task.env['PROTO_OUT_DIR'] = proto_out_dir(self, py_out, n_parent)
 
-            gen_py_proto_packages = getattr(self, 'gen_py_proto_packages', set())
-            if rel_path and not py_out.parent.abspath() in gen_py_proto_packages:
-                # Create a __init__.py package file
-                pkg_task = self.create_task('proto_gen_py_package')
-                pkg_out = node.parent.find_or_declare('__init__.py')
-                pkg_task.set_inputs(node)
-                pkg_task.set_outputs(pkg_out)
-                gen_py_proto_packages.add(py_out.parent.abspath())
-                if do_install:
-                    self.bld.install_files('${PREFIX}/lib/python/%s' % rel_path, pkg_out)
-
-                # Only create __init__.py once
-                gen_py_proto_packages.add(py_out.parent.abspath())
-                self.gen_py_proto_packages = gen_py_proto_packages
-
+        gen_py_proto_packages = getattr(self, 'gen_py_proto_packages', set())
+        if rel_path and py_out.parent.abspath() not in gen_py_proto_packages:
+            # Create a __init__.py package file
+            pkg_task = self.create_task('proto_gen_py_package')
+            pkg_out = node.parent.find_or_declare('__init__.py')
+            pkg_task.set_inputs(node)
+            pkg_task.set_outputs(pkg_out)
+            gen_py_proto_packages.add(py_out.parent.abspath())
             if do_install:
-                self.bld.install_files('${PREFIX}/lib/python/%s' % rel_path, py_out)
-            task.set_outputs(py_out)
+                self.bld.install_files('${PREFIX}/lib/python/%s' % rel_path, pkg_out)
 
-        if hasattr(self, "proto_gen_java") and self.proto_gen_java:
-            task = self.create_task('proto_gen_java')
-            task.env['PROTOC_FLAGS'] = protoc_flags
-            task.set_inputs(node)
+            # Only create __init__.py once
+            gen_py_proto_packages.add(py_out.parent.abspath())
+            self.gen_py_proto_packages = gen_py_proto_packages
 
-            proto_text = open(node.abspath(), 'rb').read()
-            package_name = re.findall('\W*option\W+java_package\W*=\W*"(.*)"', proto_text)
-            java_outer_classname = re.findall('\W*option\W+java_outer_classname\W*=\W*"(.*)"', proto_text)
+        if do_install:
+            self.bld.install_files('${PREFIX}/lib/python/%s' % rel_path, py_out)
+        task.set_outputs(py_out)
 
-            if not package_name:
-                raise waflib.Utils.WafError("No 'package_name' found in: %s" % node.abspath())
+    if hasattr(self, "proto_gen_java") and self.proto_gen_java:
+        task = self.create_task('proto_gen_java')
+        task.env['PROTOC_FLAGS'] = protoc_flags
+        task.set_inputs(node)
 
-            if not java_outer_classname:
-                raise waflib.Utils.WafError("No 'java_outer_classname' found in: %s" % node.abspath())
+        proto_text = open(node.abspath(), 'rb').read()
+        package_name = re.findall('\W*option\W+java_package\W*=\W*"(.*)"', proto_text)
+        java_outer_classname = re.findall('\W*option\W+java_outer_classname\W*=\W*"(.*)"', proto_text)
 
-            package_name = package_name[0]
-            java_outer_classname = java_outer_classname[0]
+        if not package_name:
+            raise waflib.Utils.WafError(f"No 'package_name' found in: {node.abspath()}")
 
-            package_dir = package_name.replace('.', '/')
-            out.proto_java_classname = java_outer_classname
+        if not java_outer_classname:
+            raise waflib.Utils.WafError(
+                f"No 'java_outer_classname' found in: {node.abspath()}"
+            )
 
-            outdir = os.path.dirname(out.abspath())
-            java_out_dir = '%s/generated' % outdir
-            task.env['JAVA_OUT'] = '%s/generated' % outdir
-            if not os.path.exists(java_out_dir):
-                os.makedirs(java_out_dir)
+        package_name = package_name[0]
+        java_outer_classname = java_outer_classname[0]
 
-            java_out = node.parent.exclusive_build_node('generated/%s/%s.java' % (package_dir, out.proto_java_classname))
-            task.set_outputs(java_out)
+        package_dir = package_name.replace('.', '/')
+        out.proto_java_classname = java_outer_classname
 
-            self.ddf_javaclass_dirs.add(node.parent.find_dir('generated').abspath())
-            self.ddf_javaclass_inputs.append(java_out.change_ext('.class'))
+        outdir = os.path.dirname(out.abspath())
+        java_out_dir = f'{outdir}/generated'
+        task.env['JAVA_OUT'] = f'{outdir}/generated'
+        if not os.path.exists(java_out_dir):
+            os.makedirs(java_out_dir)
 
-            compile_java_file(self, java_out, java_out_dir)
+        java_out = node.parent.exclusive_build_node(
+            f'generated/{package_dir}/{out.proto_java_classname}.java'
+        )
+        task.set_outputs(java_out)
+
+        self.ddf_javaclass_dirs.add(node.parent.find_dir('generated').abspath())
+        self.ddf_javaclass_inputs.append(java_out.change_ext('.class'))
+
+        compile_java_file(self, java_out, java_out_dir)
 

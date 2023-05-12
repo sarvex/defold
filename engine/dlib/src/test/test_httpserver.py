@@ -40,7 +40,7 @@ class TestHttpServer(unittest.TestCase):
 
     def testMulNumbers(self):
         c = http.client.HTTPConnection('localhost:8500')
-        for i in range(40):
+        for _ in range(40):
             a = random.randint(1, 1024)
             b = random.randint(1, 1024)
             c.request('GET', '/mul/%d/%d' % (a,b))
@@ -51,7 +51,7 @@ class TestHttpServer(unittest.TestCase):
 
     def testContentType(self):
         c = http.client.HTTPConnection('localhost:8500')
-        for i in range(40):
+        for _ in range(40):
             c.request('GET', '/test_html')
             r = c.getresponse()
             self.assertEqual(200, r.status)
@@ -60,7 +60,7 @@ class TestHttpServer(unittest.TestCase):
 
     def test404(self):
         c = http.client.HTTPConnection('localhost:8500')
-        for i in range(10):
+        for _ in range(10):
             c.request('GET', '/does_not_exists')
             r = c.getresponse()
             self.assertEqual(404, r.status)

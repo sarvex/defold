@@ -15,7 +15,7 @@ def build(bld):
                            source   = bld.path.ant_glob('*.cpp'),
                            target   = 'liveupdate')
 
-    liveupdate.source = [x for x in liveupdate.source if not 'null' in x.name]
+    liveupdate.source = [x for x in liveupdate.source if 'null' not in x.name]
 
     liveupdate_null = bld.stlib(features     = 'cxx',
                                 includes     = '.',

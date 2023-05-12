@@ -169,10 +169,7 @@ def get_issues_and_prs(project):
     return response
 
 def get_labels(issue_or_pr):
-    labels = []
-    for l in issue_or_pr["labels"]["nodes"]:
-        labels.append(l["name"])
-    return labels
+    return [l["name"] for l in issue_or_pr["labels"]["nodes"]]
 
 def get_issue_type(issue):
     labels = get_labels(issue)
@@ -180,17 +177,19 @@ def get_issue_type(issue):
         return TYPE_BREAKING_CHANGE
     elif "bug" in labels:
         return TYPE_FIX
-    elif "task" in labels:
-        return TYPE_NEW
-    elif "feature request" in labels:
+    elif "task" in labels or "feature request" in labels:
         return TYPE_NEW
     return TYPE_FIX
 
 def get_closing_pr(issue):
-    for t in issue["timelineItems"]["nodes"]:
-        if "source" in t and t["source"]:
-            return t["source"]
-    return issue
+    return next(
+        (
+            t["source"]
+            for t in issue["timelineItems"]["nodes"]
+            if "source" in t and t["source"]
+        ),
+        issue,
+    )
 
 def issue_to_markdown(issue, hide_details = True, title_only = False):
     if title_only:
@@ -206,10 +205,10 @@ def issue_to_markdown(issue, hide_details = True, title_only = False):
     return md
 
 def generate(version, hide_details = False):
-    print("Generating release notes for %s" % version)
+    print(f"Generating release notes for {version}")
     project = get_project(version)
     if not project:
-        print("Unable to find GitHub project for version %s" % version)
+        print(f"Unable to find GitHub project for version {version}")
         return None
 
     output = []
@@ -261,11 +260,7 @@ def generate(version, hide_details = False):
         entry["body"] = re.sub("User-facing changes:", "", entry["body"], flags=re.IGNORECASE).strip()
         entry["body"] = re.sub("### User-facing changes", "", entry["body"], flags=re.IGNORECASE).strip()
 
-        duplicate = False
-        for o in output:
-            if o.get("number") == entry.get("number"):
-                duplicate = True
-                break
+        duplicate = any(o.get("number") == entry.get("number") for o in output)
         if not duplicate:
             output.append(entry)
 
@@ -276,7 +271,7 @@ def generate(version, hide_details = False):
             editor.append(o)
         else:
             engine.append(o)
- 
+
     types = [ TYPE_BREAKING_CHANGE, TYPE_NEW, TYPE_FIX ]
     summary = ("\n## Summary\n")
     details_engine = ("\n## Engine\n")
@@ -292,7 +287,7 @@ def generate(version, hide_details = False):
                 details_editor += issue_to_markdown(issue, hide_details = hide_details)
 
     content = ("# Defold %s\n" % version) + summary + details_engine + details_editor
-    with io.open("releasenotes-forum-%s.md" % version, "wb") as f:
+    with io.open(f"releasenotes-forum-{version}.md", "wb") as f:
         f.write(content.encode('utf-8'))
 
 

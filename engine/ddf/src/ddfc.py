@@ -148,7 +148,7 @@ class PrettyPrinter(object):
     def end_paren(self, str = "", *format):
         str = str % format
         self.indent -= 4
-        print (" " * self.indent + ")%s;" % str, file=self.stream)
+        print(" " * self.indent + f"){str};", file=self.stream)
         print ("", file=self.stream)
 
 def to_camel_case(name, initial_capital = True):
@@ -193,7 +193,7 @@ def to_cxx_struct(context, pp, message_type):
             pass
         elif f.type  == FieldDescriptor.TYPE_BYTES:
             pass
-        elif f.type == FieldDescriptor.TYPE_ENUM or f.type == FieldDescriptor.TYPE_MESSAGE:
+        elif f.type in [FieldDescriptor.TYPE_ENUM, FieldDescriptor.TYPE_MESSAGE]:
             l += len(align_str + context.get_field_type_name(f))
         else:
             l += len(align_str + type_to_ctype[f.type])
@@ -225,7 +225,7 @@ def to_cxx_struct(context, pp, message_type):
 
             oneof_decl = message_type.oneof_decl[f.oneof_index]
 
-            if oneof_scope == None or oneof_scope != oneof_decl.name:
+            if oneof_scope is None or oneof_scope != oneof_decl.name:
                 if oneof_scope != None:
                     pp.end(" m_%s", to_camel_case(oneof_scope))
 
@@ -247,11 +247,11 @@ def to_cxx_struct(context, pp, message_type):
             if f.type ==  FieldDescriptor.TYPE_MESSAGE:
                 type_name = dot_to_cxx_namespace(f.type_name)
             elif f.type ==  FieldDescriptor.TYPE_BYTES:
-                type_name = align_str + "uint8_t"
+                type_name = f"{align_str}uint8_t"
             else:
                 type_name = align_str + type_to_ctype[f.type]
 
-            pp.p(type_name+"* m_Data;")
+            pp.p(f"{type_name}* m_Data;")
 
             if f.type == FieldDescriptor.TYPE_STRING:
                 pp.p("%s operator[](uint32_t i) const { assert(i < m_Count); return m_Data[i]; }", type_name)
@@ -261,7 +261,7 @@ def to_cxx_struct(context, pp, message_type):
 
             pp.p("uint32_t " + "m_Count;")
             pp.end(" m_%s", field_name)
-        elif f.type ==  FieldDescriptor.TYPE_ENUM or f.type == FieldDescriptor.TYPE_MESSAGE:
+        elif f.type in [FieldDescriptor.TYPE_ENUM, FieldDescriptor.TYPE_MESSAGE]:
             p(align_str + context.get_field_type_name(f), field_name)
         else:
             p(align_str + type_to_ctype[f.type], field_name)
@@ -275,10 +275,7 @@ def to_cxx_struct(context, pp, message_type):
     pp.end()
 
 def to_cxx_enum(context, pp, message_type):
-    lst = []
-    for f in message_type.value:
-        lst.append((f.name, f.number))
-
+    lst = [(f.name, f.number) for f in message_type.value]
     max_len = functools.reduce(lambda y,x: max(len(x[0]), y), lst, 0)
     pp.begin("enum %s",  message_type.name)
 
@@ -288,35 +285,33 @@ def to_cxx_enum(context, pp, message_type):
     pp.end()
 
 def to_cxx_default_value_string(context, f):
-    # Skip all empty values. Type string is an exception as we always set these to ""
     if len(f.default_value) == 0 and f.type != FieldDescriptor.TYPE_STRING:
         return ''
-    else:
-        if f.type == FieldDescriptor.TYPE_STRING:
-            return '"%s\\x00"' % ''.join(map(lambda x: '\\x%02x' % ord(x), f.default_value))
-        elif f.type == FieldDescriptor.TYPE_ENUM:
-            default_value = None
-            for e in context.message_types[f.type_name].value:
-                if e.name == f.default_value:
-                    default_value = e.number
-                    break
-            if default_value == None:
-                raise Exception("Default '%s' not found" % f.default_value)
+    if f.type == FieldDescriptor.TYPE_STRING:
+        return '"%s\\x00"' % ''.join(map(lambda x: '\\x%02x' % ord(x), f.default_value))
+    elif f.type == FieldDescriptor.TYPE_ENUM:
+        default_value = next(
+            (
+                e.number
+                for e in context.message_types[f.type_name].value
+                if e.name == f.default_value
+            ),
+            None,
+        )
+        if default_value is None:
+            raise Exception(f"Default '{f.default_value}' not found")
 
-            form, func = type_to_struct_format[f.type]
+        form, func = type_to_struct_format[f.type]
             # Store in little endian
-            tmp = struct.pack('<' + form, func(default_value))
-            return '"%s"' % ''.join(map(lambda x: '\\x%02x' % ord(chr(x)), tmp))
-        elif f.type == FieldDescriptor.TYPE_BOOL:
-            if f.default_value == "true":
-                return '"\\x01"'
-            else:
-                return '"\\x00"'
-        else:
-            form, func = type_to_struct_format[f.type]
+        tmp = struct.pack(f'<{form}', func(default_value))
+        return '"%s"' % ''.join(map(lambda x: '\\x%02x' % ord(chr(x)), tmp))
+    elif f.type == FieldDescriptor.TYPE_BOOL:
+        return '"\\x01"' if f.default_value == "true" else '"\\x00"'
+    else:
+        form, func = type_to_struct_format[f.type]
             # Store in little endian
-            tmp = struct.pack('<' + form, func(f.default_value))
-            return '"%s"' % ''.join(map(lambda x: '\\x%02x' % ord(chr(x)), tmp))
+        tmp = struct.pack(f'<{form}', func(f.default_value))
+        return '"%s"' % ''.join(map(lambda x: '\\x%02x' % ord(chr(x)), tmp))
 
 def to_cxx_descriptor(context, pp_cpp, pp_h, message_type, namespace_lst):
     namespace = "_".join(namespace_lst)
@@ -336,46 +331,46 @@ def to_cxx_descriptor(context, pp_cpp, pp_h, message_type, namespace_lst):
         one_of_index = 0
 
         if f.HasField("oneof_index"):
-            oneof_decl = message_type.oneof_decl[f.oneof_index]
-
             # indices start at zero, but we need to distinguish between which fields belong
             # to a oneof block somehow
             one_of_index = f.oneof_index + 1
 
-            if oneof_scope == None or oneof_scope != oneof_decl.name:
+            oneof_decl = message_type.oneof_decl[f.oneof_index]
+            if oneof_scope is None or oneof_scope != oneof_decl.name:
                 oneof_scope = oneof_decl.name
-        else:
-            if oneof_scope != None:
-                oneof_scope = None
+        elif oneof_scope != None:
+            oneof_scope = None
 
         tpl = (f.name, f.number, f.type, f.label, one_of_index)
         if f.type ==  FieldDescriptor.TYPE_MESSAGE:
             tmp = f.type_name.replace(".", "_")
             if tmp.startswith("_"):
                 tmp = tmp[1:]
-            tpl += ("&" + tmp + "_DESCRIPTOR", )
+            tpl += (f"&{tmp}_DESCRIPTOR", )
         else:
             tpl += ("0x0", )
 
         oneof_scope_name = ""
         if oneof_scope != None:
-            oneof_scope_name = "m_%s." % to_camel_case(oneof_scope)
+            oneof_scope_name = f"m_{to_camel_case(oneof_scope)}."
 
-        tpl += ("(uint32_t)DDF_OFFSET_OF(%s::%s, %sm_%s)" % (namespace.replace("_", "::"), message_type.name, oneof_scope_name, to_camel_case(f.name)), )
+        tpl += (
+            f'(uint32_t)DDF_OFFSET_OF({namespace.replace("_", "::")}::{message_type.name}, {oneof_scope_name}m_{to_camel_case(f.name)})',
+        )
 
         default = to_cxx_default_value_string(context, f)
         if '"' in default:
-            tpl += ('%s_%s_%s_DEFAULT_VALUE' % (namespace, message_type.name, f.name), )
+            tpl += (f'{namespace}_{message_type.name}_{f.name}_DEFAULT_VALUE', )
         else:
             tpl += ('0x0',)
 
         lst.append(tpl)
 
-    # For clarity, set the 'm_OneOfSet' bit in the field descriptor to zero
-    one_of_index_set = 0
-
-    if len(lst) > 0:
+    if lst:
         pp_cpp.begin("dmDDF::FieldDescriptor %s_%s_FIELDS_DESCRIPTOR[] = ", namespace, message_type.name)
+        # For clarity, set the 'm_OneOfSet' bit in the field descriptor to zero
+        one_of_index_set = 0
+
         for name, number, type, label, one_of_index, msg_desc, offset, default_value in lst:
             pp_cpp.p('{ "%s", %d, %d, %d, %s, %s, %s, %d, %d},'  % (name, number, type, label, msg_desc, offset, default_value, one_of_index, one_of_index_set))
         pp_cpp.end()
@@ -388,20 +383,24 @@ def to_cxx_descriptor(context, pp_cpp, pp_h, message_type, namespace_lst):
     pp_cpp.p('0x%016XULL,', dlib.dmHashBuffer64(to_lower_case(message_type.name)))
     pp_cpp.p('sizeof(%s::%s),', namespace.replace("_", "::"), message_type.name)
     pp_cpp.p('%s_%s_FIELDS_DESCRIPTOR,', namespace, message_type.name)
-    if len(lst) > 0:
+    if lst:
         pp_cpp.p('sizeof(%s_%s_FIELDS_DESCRIPTOR)/sizeof(dmDDF::FieldDescriptor),', namespace, message_type.name)
     else:
         pp_cpp.p('0,')
     pp_cpp.end()
 
-    pp_cpp.p('dmDDF::Descriptor* %s::%s::m_DDFDescriptor = &%s_%s_DESCRIPTOR;' % ('::'.join(namespace_lst), message_type.name, namespace, message_type.name))
+    pp_cpp.p(
+        f"dmDDF::Descriptor* {'::'.join(namespace_lst)}::{message_type.name}::m_DDFDescriptor = &{namespace}_{message_type.name}_DESCRIPTOR;"
+    )
 
     # TODO: This is not optimal. Hash value is sensitive on googles format string
     # Also dependent on type invariant values?
     hash_string = str(message_type).replace(" ", "").replace("\n", "").replace("\r", "")
     pp_cpp.p('const uint64_t %s::%s::m_DDFHash = 0x%016XULL;' % ('::'.join(namespace_lst), message_type.name, dlib.dmHashBuffer64(hash_string)))
 
-    pp_cpp.p('dmDDF::InternalRegisterDescriptor g_Register_%s_%s(&%s_%s_DESCRIPTOR);' % (namespace, message_type.name, namespace, message_type.name))
+    pp_cpp.p(
+        f'dmDDF::InternalRegisterDescriptor g_Register_{namespace}_{message_type.name}(&{namespace}_{message_type.name}_DESCRIPTOR);'
+    )
 
     pp_cpp.p('')
 
@@ -434,14 +433,13 @@ def dot_to_java_package(context, str, proto_package, java_package):
         str = str[1:]
 
     ret = context.type_name_to_java_type[str]
-    ret = ret.replace(java_package + '.', "")
-    return ret
+    return ret.replace(f'{java_package}.', "")
 
 def to_java_enum(context, pp, message_type):
-    lst = []
-    for f in message_type.value:
-        lst.append(("public static final int %s" % (f.name), f.number))
-
+    lst = [
+        (f"public static final int {f.name}", f.number)
+        for f in message_type.value
+    ]
     max_len = reduce(lambda y,x: max(len(x[0]), y), lst, 0)
     #pp.begin("enum %s",  message_type.name)
 
@@ -457,7 +455,7 @@ def to_java_enum_descriptor(context, pp, enum_type, qualified_proto_package):
         tpl = (f.name, f.number)
         lst.append(tpl)
 
-    pp.begin('public static class %s' % enum_type.name)
+    pp.begin(f'public static class {enum_type.name}')
     pp.begin("public static com.dynamo.ddf.EnumValueDescriptor VALUES_DESCRIPTOR[] = new com.dynamo.ddf.EnumValueDescriptor[]")
 
     for name, number in lst:
@@ -465,7 +463,9 @@ def to_java_enum_descriptor(context, pp, enum_type, qualified_proto_package):
 
     pp.end()
     name = qualified_proto_package.replace('$', '_').replace('.', '_')
-    pp.p('public static com.dynamo.ddf.EnumDescriptor DESCRIPTOR = new com.dynamo.ddf.EnumDescriptor("%s", VALUES_DESCRIPTOR);' % (name))
+    pp.p(
+        f'public static com.dynamo.ddf.EnumDescriptor DESCRIPTOR = new com.dynamo.ddf.EnumDescriptor("{name}", VALUES_DESCRIPTOR);'
+    )
     pp.end()
 
 def to_java_descriptor(context, pp, message_type, proto_package, java_package, qualified_proto_package):
@@ -478,12 +478,12 @@ def to_java_descriptor(context, pp, message_type, proto_package, java_package, q
             tmp = dot_to_java_package(context, f_type_name, proto_package, java_package)
             if tmp.startswith("."):
                 tmp = tmp[1:]
-            tpl += (tmp + ".DESCRIPTOR", "null")
+            tpl += (f"{tmp}.DESCRIPTOR", "null")
         elif f.type ==  FieldDescriptor.TYPE_ENUM:
             tmp = dot_to_java_package(context, f_type_name, proto_package, java_package)
             if tmp.startswith("."):
                 tmp = tmp[1:]
-            tpl += ("null", tmp + ".DESCRIPTOR", )
+            tpl += ("null", f"{tmp}.DESCRIPTOR")
 
         else:
             tpl += ("null", "null")
@@ -518,7 +518,7 @@ def to_java_class(context, pp, message_type, proto_package, java_package, qualif
                 assert False
             else:
                 tn = type_to_boxedjavatype[f.type]
-            max_len = max(len('List<%s>' % tn), max_len)
+            max_len = max(len(f'List<{tn}>'), max_len)
         elif f.type  == FieldDescriptor.TYPE_BYTES:
             max_len = max(len("byte[]"), max_len)
         elif f.type == FieldDescriptor.TYPE_ENUM:
@@ -534,17 +534,26 @@ def to_java_class(context, pp, message_type, proto_package, java_package, qualif
         else:
             pp.p("public %s%s%s;", t, (max_len-len(t) + 1) * " ", n)
 
-    pp.p('@ProtoClassName(name = "%s")' % qualified_proto_package)
+    pp.p(f'@ProtoClassName(name = "{qualified_proto_package}")')
     pp.begin("public static final class %s", message_type.name)
 
     for et in message_type.enum_type:
-        to_java_enum_descriptor(context, pp, et, qualified_proto_package + '_' + et.name)
+        to_java_enum_descriptor(
+            context, pp, et, f'{qualified_proto_package}_{et.name}'
+        )
         to_java_enum(context, pp, et)
 
     to_java_descriptor(context, pp, message_type, proto_package, java_package, qualified_proto_package)
 
     for nt in message_type.nested_type:
-        to_java_class(context, pp, nt, proto_package, java_package, qualified_proto_package + "$" + nt.name)
+        to_java_class(
+            context,
+            pp,
+            nt,
+            proto_package,
+            java_package,
+            f"{qualified_proto_package}${nt.name}",
+        )
 
     for f in message_type.field:
         f_name = to_camel_case(f.name, False)
@@ -556,15 +565,15 @@ def to_java_class(context, pp, message_type, proto_package, java_package, qualif
             else:
                 type_name = type_to_boxedjavatype[f.type]
 
-            pp.p('@ComponentType(type = %s.class)' % type_name)
-            p('List<%s>' % (type_name), f_name, 'new ArrayList<%s>()' % type_name)
+            pp.p(f'@ComponentType(type = {type_name}.class)')
+            p(f'List<{type_name}>', f_name, f'new ArrayList<{type_name}>()')
         elif f.type == FieldDescriptor.TYPE_BYTES:
             p('byte[]', f_name)
         elif f.type == FieldDescriptor.TYPE_ENUM:
             p("int", f_name)
         elif f.type == FieldDescriptor.TYPE_MESSAGE:
             java_type_name = dot_to_java_package(context, f.type_name, proto_package, java_package)
-            p(java_type_name, f_name, 'new %s()' % java_type_name)
+            p(java_type_name, f_name, f'new {java_type_name}()')
         else:
             p(type_to_javatype[f.type], f_name)
     pp.end()
@@ -576,7 +585,9 @@ def compile_java(context, proto_file, ddf_java_package, file_to_generate):
 
 
     file_java = context.response.file.add()
-    file_java.name = os.path.join(path, proto_file.options.java_outer_classname + '.java')
+    file_java.name = os.path.join(
+        path, f'{proto_file.options.java_outer_classname}.java'
+    )
     f_java = StringIO()
 
     pp_java = PrettyPrinter(f_java, 0)
@@ -593,13 +604,18 @@ def compile_java(context, proto_file, ddf_java_package, file_to_generate):
     pp_java.begin("public final class %s", proto_file.options.java_outer_classname)
 
     for mt in file_desc.enum_type:
-        to_java_enum_descriptor(context, pp_java, mt, ddf_java_package + '_' + mt.name)
+        to_java_enum_descriptor(context, pp_java, mt, f'{ddf_java_package}_{mt.name}')
         to_java_enum(context, pp_java, mt)
 
     for mt in file_desc.message_type:
-        to_java_class(context, pp_java, mt, file_desc.package,
-                    ddf_java_package + "." + proto_file.options.java_outer_classname,
-                    file_desc.options.java_package + "." + file_desc.options.java_outer_classname + "$" + mt.name)
+        to_java_class(
+            context,
+            pp_java,
+            mt,
+            file_desc.package,
+            f"{ddf_java_package}.{proto_file.options.java_outer_classname}",
+            f"{file_desc.options.java_package}.{file_desc.options.java_outer_classname}${mt.name}",
+        )
 
     pp_java.end("")
 
@@ -608,10 +624,12 @@ def compile_java(context, proto_file, ddf_java_package, file_to_generate):
 def to_ensure_struct_alias_size(context, file_desc, pp_cpp):
     import hashlib
     m = hashlib.md5((file_desc.package + file_desc.name).encode('ascii'))
-    pp_cpp.begin('void EnsureStructAliasSize_%s()' % m.hexdigest())
+    pp_cpp.begin(f'void EnsureStructAliasSize_{m.hexdigest()}()')
 
     for t, at in context.type_alias_messages.items():
-        pp_cpp.p('DM_STATIC_ASSERT(sizeof(%s) == sizeof(%s), Invalid_Struct_Alias_Size);' % (dot_to_cxx_namespace(t), at))
+        pp_cpp.p(
+            f'DM_STATIC_ASSERT(sizeof({dot_to_cxx_namespace(t)}) == sizeof({at}), Invalid_Struct_Alias_Size);'
+        )
 
     pp_cpp.end()
 
@@ -619,12 +637,12 @@ def compile_cxx(context, proto_file, file_to_generate, namespace, includes):
     base_name = os.path.basename(file_to_generate)
 
     if base_name.rfind(".") != -1:
-        base_name = base_name[0:base_name.rfind(".")]
+        base_name = base_name[:base_name.rfind(".")]
 
     file_desc = proto_file
 
     file_h = context.response.file.add()
-    file_h.name = base_name + ".h"
+    file_h.name = f"{base_name}.h"
 
     f_h = StringIO()
     pp_h = PrettyPrinter(f_h, 0)
@@ -634,7 +652,7 @@ def compile_cxx(context, proto_file, file_to_generate, namespace, includes):
     pp_h.p("// GENERATED FILE! DO NOT EDIT!");
     pp_h.p("")
 
-    guard_name = base_name.upper() + "_H"
+    guard_name = f"{base_name.upper()}_H"
     pp_h.p('#ifndef %s', guard_name)
     pp_h.p('#define %s', guard_name)
     pp_h.p("")
@@ -643,7 +661,7 @@ def compile_cxx(context, proto_file, file_to_generate, namespace, includes):
     pp_h.p('#include <assert.h>')
     pp_h.p('#include <ddf/ddf.h>')
     for d in file_desc.dependency:
-        if not 'ddf_extensions' in d:
+        if 'ddf_extensions' not in d:
             pp_h.p('#include "%s"', d.replace(".proto", ".h"))
     pp_h.p('#include <dmsdk/dlib/align.h>')
 
@@ -664,15 +682,15 @@ def compile_cxx(context, proto_file, file_to_generate, namespace, includes):
     pp_h.end()
 
     file_cpp = context.response.file.add()
-    file_cpp.name = base_name + ".cpp"
+    file_cpp.name = f"{base_name}.cpp"
     f_cpp = StringIO()
 
     pp_cpp = PrettyPrinter(f_cpp, 0)
     pp_cpp.p('#include <ddf/ddf.h>')
     for d in file_desc.dependency:
-        if not 'ddf_extensions' in d:
+        if 'ddf_extensions' not in d:
             pp_cpp.p('#include "%s"', d.replace(".proto", ".h"))
-    pp_cpp.p('#include "%s.h"' % base_name)
+    pp_cpp.p(f'#include "{base_name}.h"')
 
     if namespace:
         pp_cpp.begin("namespace %s",  namespace)
@@ -713,40 +731,43 @@ class CompilerContext(object):
     def add_message_type(self, package, java_package, java_outer_classname, message_type):
         if message_type.name in self.message_types:
             return
-        n = str(package + '.' + message_type.name)
+        n = str(f'{package}.{message_type.name}')
         self.message_types[n] = message_type
 
         if self.has_type_alias(n):
             self.type_alias_messages[n] = self.type_alias_name(n)
 
-        self.type_name_to_java_type[package[1:] + '.' + message_type.name] = java_package + '.' + java_outer_classname + '.' + message_type.name
+        self.type_name_to_java_type[
+            f'{package[1:]}.{message_type.name}'
+        ] = f'{java_package}.{java_outer_classname}.{message_type.name}'
 
         if hasattr(message_type, 'nested_type'):
             for mt in message_type.nested_type:
                 # TODO: add something to java_package here?
-                self.add_message_type(package + '.' + message_type.name, java_package, java_outer_classname, mt)
+                self.add_message_type(
+                    f'{package}.{message_type.name}',
+                    java_package,
+                    java_outer_classname,
+                    mt,
+                )
 
             for et in message_type.enum_type:
-                self.add_message_type(package + '.' + message_type.name, java_package, java_outer_classname, et)
+                self.add_message_type(
+                    f'{package}.{message_type.name}',
+                    java_package,
+                    java_outer_classname,
+                    et,
+                )
 
     def should_align_field(self, f):
-        for x in f.options.ListFields():
-            if x[0].name == 'field_align':
-                return True
-        return False
+        return any(x[0].name == 'field_align' for x in f.options.ListFields())
 
     def should_align_struct(self, mt):
-        for x in mt.options.ListFields():
-            if x[0].name == 'struct_align':
-                return True
-        return False
+        return any(x[0].name == 'struct_align' for x in mt.options.ListFields())
 
     def has_type_alias(self, type_name):
         mt = self.message_types[type_name]
-        for x in mt.options.ListFields():
-            if x[0].name == 'alias':
-                return True
-        return False
+        return any(x[0].name == 'alias' for x in mt.options.ListFields())
 
     def type_alias_name(self, type_name):
         mt = self.message_types[type_name]
@@ -787,11 +808,21 @@ if __name__ == '__main__':
                 java_package = x[1]
 
         for mt in pf.message_type:
-            context.add_message_type('.' + pf.package, java_package, pf.options.java_outer_classname, mt)
+            context.add_message_type(
+                f'.{pf.package}',
+                java_package,
+                pf.options.java_outer_classname,
+                mt,
+            )
 
         for et in pf.enum_type:
             # NOTE: We add enum types as message types. Kind of hack...
-            context.add_message_type('.' + pf.package, java_package, pf.options.java_outer_classname, et)
+            context.add_message_type(
+                f'.{pf.package}',
+                java_package,
+                pf.options.java_outer_classname,
+                et,
+            )
 
     for pf in request.proto_file:
         if pf.name == request.file_to_generate[0]:
@@ -808,9 +839,8 @@ if __name__ == '__main__':
                 compile_cxx(context, pf, request.file_to_generate[0], namespace, includes)
 
             for x in pf.options.ListFields():
-                if x[0].name == 'ddf_java_package':
-                    if options.java:
-                        compile_java(context, pf, x[1], request.file_to_generate[0])
+                if x[0].name == 'ddf_java_package' and options.java:
+                    compile_java(context, pf, x[1], request.file_to_generate[0])
 
     sys.stdout.buffer.write(context.response.SerializeToString())
     # res = str(context.response.SerializeToString())

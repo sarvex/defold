@@ -44,7 +44,7 @@ namespace dmEngineVersion
 }
 """
 
-    engine_version_node = conf.path.make_node('%s/engine_version.h' % blddir)
+    engine_version_node = conf.path.make_node(f'{blddir}/engine_version.h')
     full = engine_version_node.abspath()
 
     try:
@@ -104,9 +104,6 @@ namespace dmEngineVersion
         # For Vulkan
         if waflib.Options.options.with_vulkan:
             conf.env.append_value('LINKFLAGS', ['vulkan-1.lib'])
-    elif 'web' in operating_sys:
-        pass
-
     conf.env['STLIB_EXTENSION'] = 'extension'
     conf.env['STLIB_RESOURCE'] = 'resource'
     conf.env['STLIB_RENDER'] = 'render'
@@ -182,7 +179,7 @@ def build(bld):
         builds = ['','_release', '_headless']
         for build in builds:
             for suffix in ('.js.mem', '.js.symbols', '.js.map', '.wasm', '.wasm.map', '.dSYM.zip'):
-                filePath = os.path.join(srcPath, 'dmengine' + build + suffix)
+                filePath = os.path.join(srcPath, f'dmengine{build}{suffix}')
                 if (os.path.exists(filePath)):
                     bld.install_files('${PREFIX}/bin/%s' % bld.env.PLATFORM, filePath)
     TestContext.initialize_test_context(test_context, bld)

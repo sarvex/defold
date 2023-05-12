@@ -42,11 +42,11 @@ def stag(string):
     m = re.match('@\w+{(.+?)[|]', string)
     id = None
     if m:
-        id, consumed = convertstring(m.group(1))
+        id, consumed = convertstring(m[1])
         pos = pos + consumed + 1
 
     if tag in types:
-        return '[type: %s]' % (tag), len(tag) + 1
+        return f'[type: {tag}]', len(tag) + 1
     elif tag == 'En':
         return '-', 3
     elif tag == 'Em':
@@ -114,22 +114,20 @@ def libparams(str):
         n = re.sub('[,\[\]]', '', p)
         optdepth += p.count('[')
         if n and optdepth > 0:
-            r.append("[%s]" % n)
+            r.append(f"[{n}]")
         elif n:
-            r.append("%s" % n)
+            r.append(f"{n}")
         optdepth -= p.count(']')
 
     return r
 
 
 def libfunc(str):
-    m = re.match("([a-zA-Z0-9_.:]+) [(](.*?)[)]", str)
-    if m:
-        func = m.group(1)
-        ps = libparams(m.group(2))
-        return func, ps
-    else:
+    if not (m := re.match("([a-zA-Z0-9_.:]+) [(](.*?)[)]", str)):
         return str, []
+    func = m[1]
+    ps = libparams(m[2])
+    return func, ps
 
 
 def ctag(string):
@@ -146,19 +144,15 @@ def ctag(string):
     m = re.match('@\w+{(.+?)[|]', string)
     id = None
     if m:
-        id, consumed = convertstring(m.group(1))
+        id, consumed = convertstring(m[1])
         pos = pos + consumed + 1
 
-    if tag == 'verbatim':
+    if tag in ['itemize', 'description']:
+        pre = '\n\n'
+        post = '\n\n'
+    elif tag == 'verbatim':
         pre = '\n\n```lua\n'
         post = '```\n\n'
-    elif tag == 'itemize':
-        pre = '\n\n'
-        post = '\n\n'
-    elif tag == 'description':
-        pre = '\n\n'
-        post = '\n\n'
-
     ret, consumed = convertstring(string[pos:], stop_at='separate')
     if tag and ret[0] == '\n':
         ret = ret[1:]
@@ -173,10 +167,9 @@ def ctag(string):
     if tag == 'LibEntry':
         name, params = libfunc(id)
         namespace = "base"
-        m = re.match("(\w+)[.]", name)
-        if m:
-            namespace = m.group(1)
-        if name[0:5] == "file:":
+        if m := re.match("(\w+)[.]", name):
+            namespace = m[1]
+        if name[:5] == "file:":
             namespace = "io"
 
         entry = ""
@@ -191,7 +184,7 @@ def ctag(string):
             for p in params:
                 entry += " * @param %s\n" % p
         entry += " */\n"
-        if not namespace in libentries:
+        if namespace not in libentries:
             libentries[namespace] = []
 
         libentries[namespace].append(entry)
@@ -207,7 +200,7 @@ def convertstring(string, stop_at='nothing'):
             nested, consumed = stag(string[pos:])
             if nested != None:
                 ret = ret + nested
-                pos = pos + consumed
+                pos += consumed
                 continue
 
             nested, consumed = ctag(string[pos:])
@@ -216,7 +209,7 @@ def convertstring(string, stop_at='nothing'):
                 pos = pos + consumed
                 continue
 
-            print("ERROR: unknown tag in '%s'" % (string[pos:]))
+            print(f"ERROR: unknown tag in '{string[pos:]}'")
             break
         elif stop_at == 'inline' and c == '}':
             pos = pos + 1
@@ -235,7 +228,7 @@ content = f.read()
 
 res, _ = convertstring(content)
 for ns, ss in libentries.items():
-    f = open("src/lua_%s.doc_h" % ns, "w")
+    f = open(f"src/lua_{ns}.doc_h", "w")
     f.write("/*# Lua %s standard library\n" % ns)
     f.write(" *\n")
     f.write(" * Documentation for the Lua %s standard library.\n" %ns)

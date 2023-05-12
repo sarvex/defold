@@ -40,7 +40,7 @@ try:
 except Exception as e:
     class build_private(object):
         @classmethod
-        def get_tag_suffix(self):
+        def get_tag_suffix(cls):
             return ''
 finally:
     sys.dont_write_bytecode = False
@@ -90,24 +90,24 @@ def extract_zip(file, path, is_mac):
             zf.extractall(path)
 
 def extract(file, path, is_mac):
-    print('Extracting %s to %s' % (file, path))
+    print(f'Extracting {file} to {path}')
 
     if fnmatch.fnmatch(file, "*.tar.gz-*"):
         extract_tar(file, path)
     elif fnmatch.fnmatch(file, "*.zip-*"):
         extract_zip(file, path, is_mac)
     else:
-        assert False, "Don't know how to extract " + file
+        assert False, f"Don't know how to extract {file}"
 
 modules = {}
 
 def download(url):
     if not modules.__contains__('http_cache'):
         modules['http_cache'] = imp.load_source('http_cache', os.path.join('..', 'build_tools', 'http_cache.py'))
-    log('Downloading %s' % (url))
+    log(f'Downloading {url}')
     path = modules['http_cache'].download(url, lambda count, total: log('Downloading %s %.2f%%' % (url, 100 * count / float(total))))
     if not path:
-        log('Downloading %s failed' % (url))
+        log(f'Downloading {url} failed')
     return path
 
 def ziptree(path, outfile, directory = None):
@@ -127,15 +127,15 @@ def ziptree(path, outfile, directory = None):
 
 def _get_tag_name(version, channel): # from build.py
     if channel and channel != 'stable' and not channel.startswith('editor-'):
-        channel = '-' + channel
+        channel = f'-{channel}'
     else:
         channel = ''
 
     suffix = build_private.get_tag_suffix() # E.g. '' or 'switch'
     if suffix:
-        suffix = '-' + suffix
+        suffix = f'-{suffix}'
 
-    return '%s%s%s' % (version, channel, suffix)
+    return f'{version}{channel}{suffix}'
 
 def git_sha1_from_version_file(options):
     """ Gets the version number and checks if that tag exists """
@@ -147,7 +147,7 @@ def git_sha1_from_version_file(options):
     process = subprocess.Popen(['git', 'rev-list', '-n', '1', tag_name], stdout = subprocess.PIPE)
     out, err = process.communicate()
     if process.returncode != 0:
-        print("Unable to find git sha from tag=%s" % tag_name)
+        print(f"Unable to find git sha from tag={tag_name}")
         return None
 
     if isinstance(out, (bytes, bytearray)):
@@ -158,14 +158,14 @@ def git_sha1(ref = 'HEAD'):
     try:
         return run.command(['git', 'rev-parse', ref])
     except Exception as e:
-        sys.exit("Unable to find git sha from ref: %s" % (ref))
+        sys.exit(f"Unable to find git sha from ref: {ref}")
 
 def remove_readonly_retry(function, path, excinfo):
     try:
         os.chmod(path, stat.S_IWRITE)
         function(path)
     except Exception as e:
-        print("Failed to remove %s, error %s" % (path, e))
+        print(f"Failed to remove {path}, error {e}")
 
 def rmtree(path):
     if os.path.exists(path):
@@ -183,7 +183,7 @@ def sign_files(platform, options, dir):
     if 'win32' in platform:
         certificate = options.windows_cert
         certificate_pass_path = options.windows_cert_pass
-        if certificate == None:
+        if certificate is None:
             print("No codesigning certificate specified")
             sys.exit(1)
 
@@ -211,8 +211,10 @@ def sign_files(platform, options, dir):
     elif 'macos' in platform:
         codesigning_identity = options.codesigning_identity
         certificate = mac_certificate(codesigning_identity)
-        if certificate == None:
-            print("Codesigning certificate not found for signing identity %s" % (codesigning_identity))
+        if certificate is None:
+            print(
+                f"Codesigning certificate not found for signing identity {codesigning_identity}"
+            )
             sys.exit(1)
 
         run.command([
@@ -229,20 +231,22 @@ def launcher_path(options, platform, exe_suffix):
         return options.launcher
     elif options.engine_sha1:
         launcher_version = options.engine_sha1
-        launcher_url = 'https://%s/archive/%s/engine/%s/launcher%s' % (options.archive_domain, launcher_version, platform, exe_suffix)
+        launcher_url = f'https://{options.archive_domain}/archive/{launcher_version}/engine/{platform}/launcher{exe_suffix}'
         launcher = download(launcher_url)
         if not launcher:
             print('Failed to download launcher', launcher_url)
             sys.exit(5)
         return launcher
     else:
-        return path.join(os.environ['DYNAMO_HOME'], "bin", platform, "launcher%s" % exe_suffix)
+        return path.join(
+            os.environ['DYNAMO_HOME'], "bin", platform, f"launcher{exe_suffix}"
+        )
 
 def full_jdk_url(jdk_platform):
     version = urllib.parse.quote(java_version)
     platform = urllib.parse.quote(jdk_platform)
     extension = "zip" if jdk_platform.startswith("windows") else "tar.gz"
-    return '%s/microsoft-jdk-%s-%s.%s' % (CDN_PACKAGES_URL, version, platform, extension)
+    return f'{CDN_PACKAGES_URL}/microsoft-jdk-{version}-{platform}.{extension}'
 
 def full_build_jdk_url():
     return full_jdk_url(python_platform_to_java[sys.platform])
@@ -252,7 +256,7 @@ def download_build_jdk():
     jdk_url = full_build_jdk_url()
     jdk = download(jdk_url)
     if not jdk:
-        print('Failed to download build jdk %s' % jdk_url)
+        print(f'Failed to download build jdk {jdk_url}')
         sys.exit(5)
     return jdk
 
@@ -263,9 +267,9 @@ def extract_build_jdk(build_jdk):
     is_mac = sys.platform == 'darwin'
     extract(build_jdk, 'build/jdk', is_mac)
     if is_mac:
-        return 'build/jdk/jdk-%s/Contents/Home' % java_version
+        return f'build/jdk/jdk-{java_version}/Contents/Home'
     else:
-        return 'build/jdk/jdk-%s' % java_version
+        return f'build/jdk/jdk-{java_version}'
 
 def check_reflections(java_cmd_env):
     reflection_prefix = 'Reflection warning, ' # final space important
@@ -276,11 +280,18 @@ def check_reflections(java_cmd_env):
     output = run.command(['env', java_cmd_env, 'bash', './scripts/lein', 'with-profile', '+headless', 'check-and-exit'])
     lines = output.splitlines()
     reflection_lines = (line for line in lines if re.match(reflection_prefix, line))
-    reflections = (re.match('(' + reflection_prefix + ')(.*)', line).group(2) for line in reflection_lines)
+    reflections = (
+        re.match(f'({reflection_prefix})(.*)', line)[2]
+        for line in reflection_lines
+    )
     filtered_reflections = reflections if not included_reflections else (line for line in reflections if any((re.match(include, line) for include in included_reflections)))
-    failures = list(line for line in filtered_reflections if not any((re.match(ignored, line) for ignored in ignored_reflections)))
-
-    if failures:
+    if failures := [
+        line
+        for line in filtered_reflections
+        if not any(
+            (re.match(ignored, line) for ignored in ignored_reflections)
+        )
+    ]:
         for failure in failures:
             print(failure)
         exit(1)
@@ -289,7 +300,7 @@ def check_reflections(java_cmd_env):
 def build(options):
     build_jdk = download_build_jdk()
     extracted_build_jdk = extract_build_jdk(build_jdk)
-    java_cmd_env = 'JAVA_CMD=%s/bin/java' % extracted_build_jdk
+    java_cmd_env = f'JAVA_CMD={extracted_build_jdk}/bin/java'
 
     print('Building editor')
 
@@ -322,7 +333,7 @@ def remove_platform_files_from_archive(platform, jar):
     files_to_remove = []
 
     # find files to remove from libexec/*
-    libexec_platform = "libexec/" + platform
+    libexec_platform = f"libexec/{platform}"
     for file in files:
         if file.startswith("libexec"):
             # don't remove any folders
@@ -351,7 +362,7 @@ def remove_platform_files_from_archive(platform, jar):
                 files_to_remove.append(file)
 
     # write new jar without the files that should be removed
-    newjar = jar + "_new"
+    newjar = f"{jar}_new"
     zout = zipfile.ZipFile(newjar, 'w', zipfile.ZIP_DEFLATED, allowZip64=True)
     for file in zin.infolist():
         if file.filename not in files_to_remove:
@@ -370,8 +381,10 @@ def create_bundle(options):
     extracted_build_jdk = extract_build_jdk(build_jdk)
 
     mkdirs('target/editor')
+    tmp_dir = "tmp"
+
     for platform in options.target_platform:
-        print("Creating bundle for platform %s" % platform)
+        print(f"Creating bundle for platform {platform}")
         rmtree('tmp')
 
         jdk_url = full_jdk_url(platform_to_java[platform])
@@ -380,10 +393,8 @@ def create_bundle(options):
         else:
             jdk = download(jdk_url)
             if not jdk:
-                print('Failed to download %s' % jdk_url)
+                print(f'Failed to download {jdk_url}')
                 sys.exit(5)
-
-        tmp_dir = "tmp"
 
         is_mac = 'macos' in platform
         if is_mac:
@@ -406,11 +417,11 @@ def create_bundle(options):
         mkdirs(packages_dir)
 
         if is_mac:
-            shutil.copy('bundle-resources/Info.plist', '%s/Contents' % bundle_dir)
+            shutil.copy('bundle-resources/Info.plist', f'{bundle_dir}/Contents')
             shutil.copy('bundle-resources/Assets.car', resources_dir)
             shutil.copy('bundle-resources/document_legacy.icns', resources_dir)
         if icon:
-            shutil.copy('bundle-resources/%s' % icon, resources_dir)
+            shutil.copy(f'bundle-resources/{icon}', resources_dir)
 
         # creating editor config file
         config = configparser.ConfigParser()
@@ -424,10 +435,10 @@ def create_bundle(options):
         if options.channel:
             config.set('build', 'channel', options.channel)
 
-        with open('%s/config' % resources_dir, 'w') as f:
+        with open(f'{resources_dir}/config', 'w') as f:
             config.write(f)
 
-        defold_jar = '%s/defold-%s.jar' % (packages_dir, options.editor_sha1)
+        defold_jar = f'{packages_dir}/defold-{options.editor_sha1}.jar'
         shutil.copy(jar_file, defold_jar)
 
         # strip tools and libs for the platforms we're not currently bundling
@@ -435,31 +446,35 @@ def create_bundle(options):
 
         # copy editor executable (the launcher)
         launcher = launcher_path(options, platform, get_exe_suffix(platform))
-        defold_exe = '%s/Defold%s' % (exe_dir, get_exe_suffix(platform))
+        defold_exe = f'{exe_dir}/Defold{get_exe_suffix(platform)}'
         shutil.copy(launcher, defold_exe)
-        if not 'win32' in platform:
+        if 'win32' not in platform:
             run.command(['chmod', '+x', defold_exe])
 
         extract(jdk, tmp_dir, is_mac)
 
         if is_mac:
-            platform_jdk = '%s/jdk-%s/Contents/Home' % (tmp_dir, java_version)
+            platform_jdk = f'{tmp_dir}/jdk-{java_version}/Contents/Home'
         else:
-            platform_jdk = '%s/jdk-%s' % (tmp_dir, java_version)
+            platform_jdk = f'{tmp_dir}/jdk-{java_version}'
 
         # use jlink to generate a custom Java runtime to bundle with the editor
-        packages_jdk = '%s/jdk-%s' % (packages_dir, java_version)
-        run.command(['%s/bin/jlink' % extracted_build_jdk,
-                      '@jlink-options',
-                      '--module-path=%s/jmods' % platform_jdk,
-                      '--output=%s' % packages_jdk])
+        packages_jdk = f'{packages_dir}/jdk-{java_version}'
+        run.command(
+            [
+                f'{extracted_build_jdk}/bin/jlink',
+                '@jlink-options',
+                f'--module-path={platform_jdk}/jmods',
+                f'--output={packages_jdk}',
+            ]
+        )
 
         # create final zip file
-        zipfile = 'target/editor/Defold-%s.zip' % platform
+        zipfile = f'target/editor/Defold-{platform}.zip'
         if os.path.exists(zipfile):
             os.remove(zipfile)
 
-        print("Creating '%s' bundle from '%s'" % (zipfile, bundle_dir))
+        print(f"Creating '{zipfile}' bundle from '{bundle_dir}'")
         ziptree(bundle_dir, zipfile, tmp_dir)
 
 
@@ -471,11 +486,11 @@ def sign(options):
         elif 'macos' in platform:
             bundle_file = os.path.join(options.bundle_dir, "Defold-x86_64-macos.zip")
         else:
-            print("No signing support for platform %s" % platform)
+            print(f"No signing support for platform {platform}")
             continue
 
         if not os.path.exists(bundle_file):
-            print('Editor bundle %s does not exist' % bundle_file)
+            print(f'Editor bundle {bundle_file} does not exist')
             run.command(['ls', '-la', options.bundle_dir])
             sys.exit(1)
 
@@ -491,7 +506,7 @@ def sign(options):
         if 'macos' in platform:
             # we need to sign the binaries in Resources folder manually as codesign of
             # the *.app will not process files in Resources
-            jdk_dir = "jdk-%s" % (java_version)
+            jdk_dir = f"jdk-{java_version}"
             jdk_path = os.path.join(sign_dir, "Defold.app", "Contents", "Resources", "packages", jdk_dir)
             for exe in find_files(os.path.join(jdk_path, "bin"), "*"):
                 sign_files('macos', options, exe)
@@ -519,12 +534,12 @@ def find_files(root_dir, file_pattern):
     return matches
 
 def create_dmg(options):
-    print("Creating .dmg from file in '%s'" % options.bundle_dir)
+    print(f"Creating .dmg from file in '{options.bundle_dir}'")
 
     # check that we have an editor bundle to create a dmg from
     bundle_file = os.path.join(options.bundle_dir, "Defold-x86_64-macos.zip")
     if not os.path.exists(bundle_file):
-        print('Editor bundle %s does not exist' % bundle_file)
+        print(f'Editor bundle {bundle_file} does not exist')
         run.command(['ls', '-la', options.bundle_dir])
         sys.exit(1)
 
@@ -537,9 +552,9 @@ def create_dmg(options):
     run.command(['unzip', bundle_file, '-d', dmg_dir])
 
     # create additional files for the .dmg
-    shutil.copy('bundle-resources/dmg_ds_store', '%s/.DS_Store' % dmg_dir)
-    shutil.copytree('bundle-resources/dmg_background', '%s/.background' % dmg_dir)
-    run.command(['ln', '-sf', '/Applications', '%s/Applications' % dmg_dir])
+    shutil.copy('bundle-resources/dmg_ds_store', f'{dmg_dir}/.DS_Store')
+    shutil.copytree('bundle-resources/dmg_background', f'{dmg_dir}/.background')
+    run.command(['ln', '-sf', '/Applications', f'{dmg_dir}/Applications'])
 
     # create dmg
     dmg_file = os.path.join(options.bundle_dir, "Defold-x86_64-macos.dmg")
@@ -550,8 +565,10 @@ def create_dmg(options):
     # sign the dmg
     if not options.skip_codesign:
         certificate = mac_certificate(options.codesigning_identity)
-        if certificate == None:
-            error("Codesigning certificate not found for signing identity %s" % (options.codesigning_identity))
+        if certificate is None:
+            error(
+                f"Codesigning certificate not found for signing identity {options.codesigning_identity}"
+            )
             sys.exit(1)
 
         run.command(['codesign', '-s', certificate, dmg_file])
@@ -561,10 +578,10 @@ def create_installer(options):
     print("Creating installers")
     for platform in options.target_platform:
         if platform == "x86_64-macos":
-            print("Creating installer for platform %s" % platform)
+            print(f"Creating installer for platform {platform}")
             create_dmg(options)
         else:
-            print("Ignoring platform %s" % platform)
+            print(f"Ignoring platform {platform}")
 
 
 if __name__ == '__main__':
@@ -593,9 +610,12 @@ Commands:
                       help = 'Channel to set in editor config when creating the bundle')
 
     default_archive_domain = DEFAULT_ARCHIVE_DOMAIN
-    parser.add_option('--archive-domain', dest='archive_domain',
-                      default = DEFAULT_ARCHIVE_DOMAIN,
-                      help = 'Domain to set in the editor config where builds are archived. Default is %s' % default_archive_domain)
+    parser.add_option(
+        '--archive-domain',
+        dest='archive_domain',
+        default=DEFAULT_ARCHIVE_DOMAIN,
+        help=f'Domain to set in the editor config where builds are archived. Default is {default_archive_domain}',
+    )
 
     parser.add_option('--engine-artifacts', dest='engine_artifacts',
                       default = 'auto',
@@ -659,14 +679,16 @@ Commands:
     else:
         options.engine_sha1 = options.engine_artifacts
 
-    print('Resolved engine_artifacts=%s to sha1=%s' % (options.engine_artifacts, options.engine_sha1))
+    print(
+        f'Resolved engine_artifacts={options.engine_artifacts} to sha1={options.engine_sha1}'
+    )
 
     for command in commands:
         if command == "build":
             build(options)
-        elif command == "sign":
-            sign(options)
         elif command == "bundle":
             create_bundle(options)
         elif command == "installer":
             create_installer(options)
+        elif command == "sign":
+            sign(options)

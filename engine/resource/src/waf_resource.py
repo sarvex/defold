@@ -20,8 +20,12 @@ import waflib.Utils
 
 CONST_ARCHIVEBUILDER      = '${JAVA} -classpath ${CLASSPATH} com.dynamo.bob.archive.ArchiveBuilder'
 CONST_ARCHIVEBUILDER_ARGS = '${ARCHIVEBUILDER_ROOT} ${ARCHIVEBUILDER_OUTPUT} ${ARCHIVEBUILDER_FLAGS} ${SRC}'
-waflib.Task.task_factory('resource_archive', '%s %s' % (CONST_ARCHIVEBUILDER, CONST_ARCHIVEBUILDER_ARGS),
-    color='PINK', shell=False)
+waflib.Task.task_factory(
+    'resource_archive',
+    f'{CONST_ARCHIVEBUILDER} {CONST_ARCHIVEBUILDER_ARGS}',
+    color='PINK',
+    shell=False,
+)
 
 @feature('barchive')
 @before('apply_core')
@@ -65,7 +69,7 @@ def apply_barchive_after(self):
 
     builder.outputs = []
     for extension in ['dmanifest', 'arci', 'arcd', 'public', 'manifest_hash']:
-        current_filepath = '%s.%s' % (self.resource_name, extension)
+        current_filepath = f'{self.resource_name}.{extension}'
         current_output = self.path.find_or_declare(current_filepath)
         builder.outputs.append(current_output)
 

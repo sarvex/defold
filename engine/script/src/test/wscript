@@ -10,22 +10,22 @@ new_copy_task('save_file', '.sav', '.savc')
 def build(bld):
     flist = 'cxx test'
     if 'web' in bld.env['PLATFORM']:
-        lib_dirs = {}
-        lib_dirs['library_script.js'] = '../lib/js'
+        lib_dirs = {'library_script.js': '../lib/js'}
         bld.env['JS_LIB_PATHS'] = lib_dirs
 
     web_libs = ['library_sys.js', 'library_script.js']
     libs = 'TESTMAIN PLATFORM_SOCKET THREAD EXTENSION RESOURCE DDF DLIB PROFILE_NULL LUA script'
 
-    if not 'web' in bld.env['PLATFORM']:
-        if platform_supports_feature(bld.env.PLATFORM, 'test_script_http', {}):
-            bld.program(features = flist,
-                                       includes = '..',
-                                       use = libs,
-                                       web_libs = web_libs,
-                                       proto_gen_py = True,
-                                       target = 'test_script_http',
-                                       source = 'test_script_http.cpp test_http.lua test_http_timeout.lua')
+    if 'web' not in bld.env['PLATFORM'] and platform_supports_feature(
+        bld.env.PLATFORM, 'test_script_http', {}
+    ):
+        bld.program(features = flist,
+                                   includes = '..',
+                                   use = libs,
+                                   web_libs = web_libs,
+                                   proto_gen_py = True,
+                                   target = 'test_script_http',
+                                   source = 'test_script_http.cpp test_http.lua test_http_timeout.lua')
 
     test_script_ddf = bld.program(features = flist,
                                   includes = '..',
@@ -59,7 +59,7 @@ def build(bld):
                                      target = 'test_script_vmath',
                                      source = 'test_script_vmath.cpp test_number.lua test_vector.lua test_vector3.lua test_vector4.lua test_quat.lua test_matrix4.lua')
 
-    script_table_features = flist + ' embed';
+    script_table_features = f'{flist} embed';
     test_script_table = bld.program(features = script_table_features,
                                      includes = '.. .',
                                      use = libs,
@@ -119,15 +119,16 @@ def build(bld):
                                        target = 'test_script_json',
                                        source = 'test_script_json.cpp test_json.lua')
 
-    if not 'web' in bld.env['PLATFORM']:
-        if platform_supports_feature(bld.env.PLATFORM, 'test_script_http', {}):
-            bld.program(features = flist,
-                                       includes = '..',
-                                       use = libs,
-                                       web_libs = web_libs,
-                                       proto_gen_py = True,
-                                       target = 'test_script_http',
-                                       source = 'test_script_http.cpp test_http.lua test_http_timeout.lua')
+    if 'web' not in bld.env['PLATFORM'] and platform_supports_feature(
+        bld.env.PLATFORM, 'test_script_http', {}
+    ):
+        bld.program(features = flist,
+                                   includes = '..',
+                                   use = libs,
+                                   web_libs = web_libs,
+                                   proto_gen_py = True,
+                                   target = 'test_script_http',
+                                   source = 'test_script_http.cpp test_http.lua test_http_timeout.lua')
 
     test_script_zlib = bld.program(features = flist,
                                        includes = '..',

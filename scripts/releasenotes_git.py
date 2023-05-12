@@ -42,7 +42,7 @@ def run(cmd, shell=False):
     p.wait()
     out, err = p.communicate()
     if p.returncode != 0:
-        raise Exception("Failed to run: " + cmd)
+        raise Exception(f"Failed to run: {cmd}")
 
     return out
 
@@ -59,11 +59,11 @@ def get_sha1_from_tag(tag):
 
 
 def git_log(sha1):
-    return run("git log %s -1" % sha1)
+    return run(f"git log {sha1} -1")
 
 
 def git_merge_desc(sha1):
-    s = run("git show %s" % sha1)
+    s = run(f"git show {sha1}")
     desc = ''
     skip_lines = 1
     for l in s.split('\n'):
@@ -80,46 +80,44 @@ def git_merge_desc(sha1):
     return ""
 
 def match_issue(line):
-    # 974d82a24 Issue-4684 - Load vulkan functions dynamically on android (#4692)
-    issue_match = re.search("^(?i)([a-fA-F0-9]+) (?:issue[\-\s]?)?#?(\d+)[:.]? (.*)", line)
-    if issue_match:
-        sha1 = issue_match.group(1)
-        issue = issue_match.group(2)
-        desc = issue_match.group(3)
-        # get rid of PR number at the end of the commit
-        m = re.search("^(.*) \(\#\d+\)$", desc)
-        if m:
-            desc = m.group(1)
+    if issue_match := re.search(
+        "^(?i)([a-fA-F0-9]+) (?:issue[\-\s]?)?#?(\d+)[:.]? (.*)", line
+    ):
+        sha1 = issue_match[1]
+        issue = issue_match[2]
+        desc = issue_match[3]
+        if m := re.search("^(.*) \(\#\d+\)$", desc):
+            desc = m[1]
         return (sha1, issue, desc)
     return (None, None, None)
 
 def match_merge(line):
-    # 3bd2324df Merge pull request #5061 from defold/issue-5060-engine-info-platform
-    # 3bd2324df Revert "Merge pull request #5030 from defold/issue-5029-emscripten-1-39-20"
-    merge_match = re.search("(\w+)\s(?:Revert\s\")?Merge pull request\s#(\d+)\s.+?(?:Issue|issue[\-]?)?(\d+).+", line)
-    if merge_match:
-        sha1  = merge_match.group(1)
-        pr    = merge_match.group(2)
-        issue = merge_match.group(3)
-        desc  = git_merge_desc(sha1)
+    if not (
+        merge_match := re.search(
+            "(\w+)\s(?:Revert\s\")?Merge pull request\s#(\d+)\s.+?(?:Issue|issue[\-]?)?(\d+).+",
+            line,
+        )
+    ):
+        return (None, None, None)
+    sha1 = merge_match[1]
+    pr = merge_match[2]
+    issue = merge_match[3]
+    desc  = git_merge_desc(sha1)
 
-        # get rid of PR number at the end of the commit
-        m = re.search("^(?:Issue|issue)(?:[\-\s]?)?#?(\d+)[:.\-\s]+(.+)", desc)
-        if m:
-            desc = m.group(2)
-            if not issue:
-                issue = m.group(1)
-        return (sha1, issue, desc)
-    return (None, None, None)
+    if m := re.search(
+        "^(?:Issue|issue)(?:[\-\s]?)?#?(\d+)[:.\-\s]+(.+)", desc
+    ):
+        desc = m[2]
+        if not issue:
+            issue = m[1]
+    return (sha1, issue, desc)
 
 
 def match_pullrequest(line):
-    # bca92cc0f Check that there's a world before creating a collision object (#4747)
-    pull_match = re.search("([a-fA-F0-9]+) (.*) \(\#(\d+)\)$", line)
-    if pull_match:
-        sha1 = pull_match.group(1)
-        desc = pull_match.group(2)
-        pr = pull_match.group(3)
+    if pull_match := re.search("([a-fA-F0-9]+) (.*) \(\#(\d+)\)$", line):
+        sha1 = pull_match[1]
+        desc = pull_match[2]
+        pr = pull_match[3]
         return (sha1, pr, desc)
     return (None, None, None)
 
@@ -128,20 +126,26 @@ def get_engine_issues(lines):
     for line in lines:
         (sha1, issue, desc) = match_issue(line)
         if issue:
-            issues.append("[`Issue-%s`](https://github.com/defold/defold/issues/%s) - **Fixed**: %s" % (issue, issue, desc))
+            issues.append(
+                f"[`Issue-{issue}`](https://github.com/defold/defold/issues/{issue}) - **Fixed**: {desc}"
+            )
             print(git_log(sha1))
             continue
 
         (sha1, issue, desc) = match_merge(line)
         if issue:
-            issues.append("[`Issue-%s`](https://github.com/defold/defold/issues/%s) - **Fixed**: %s" % (issue, issue, desc))
+            issues.append(
+                f"[`Issue-{issue}`](https://github.com/defold/defold/issues/{issue}) - **Fixed**: {desc}"
+            )
 
             print(git_log(sha1))
             continue
 
         (sha1, issue, desc) = match_pullrequest(line)
         if issue:
-            issues.append("[`Issue-%s`](https://github.com/defold/defold/issues/%s) - **Fixed**: %s" % (issue, issue, desc))
+            issues.append(
+                f"[`Issue-{issue}`](https://github.com/defold/defold/issues/{issue}) - **Fixed**: {desc}"
+            )
             print(git_log(sha1))
             continue
 
@@ -150,12 +154,10 @@ def get_engine_issues(lines):
 def get_editor_issues(lines):
     issues = []
     for line in lines:
-        # bca92cc0f Foobar (DEFEDIT-4747)
-        m = re.search("^([a-fA-F0-9]+) (.*) \(DEFEDIT-(\d+)\)", line)
-        if m:
-            sha1 = m.group(1)
-            desc = m.group(2)
-            issue = m.group(3)
+        if m := re.search("^([a-fA-F0-9]+) (.*) \(DEFEDIT-(\d+)\)", line):
+            sha1 = m[1]
+            desc = m[2]
+            issue = m[3]
             issues.append("[`DEFEDIT-%s`](https://github.com/defold/defold/search?q=hash%%3A%s&type=Commits) - **Fixed**: %s" % (issue, sha1, desc))
             print(git_log(sha1))
     return issues
@@ -194,7 +196,7 @@ def get_contributors(tag):
     print("This is the number of contributions since the last release.")
     print("")
 
-    r = run("scripts/list_contributors.sh %s" % tag)
+    r = run(f"scripts/list_contributors.sh {tag}")
     print(r)
 
 

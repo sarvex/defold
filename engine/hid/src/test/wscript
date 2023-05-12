@@ -5,7 +5,7 @@ from BuildUtility import create_build_utility
 from waflib import Options
 
 def _get_native_file(target_os, name):
-    native_source = '%s/%s' % (target_os, name)
+    native_source = f'{target_os}/{name}'
     if not os.path.exists(os.path.join('..','src',native_source)):
         native_source = name
     return native_source
@@ -15,11 +15,18 @@ def build(bld):
 
     platform_folder = _get_native_file(build_util.get_target_os(), '../glfw')
 
-    obj = bld.program(features = 'cxx test',
-                      includes = ['../%s' % build_util.get_target_os(), '..', '.', platform_folder],
-                      use      = 'TESTMAIN DLIB PROFILE_NULL DMGLFW PLATFORM PLATFORM_SOCKET LUA SCRIPT hid_null',
-                      target   = 'test_hid',
-                      source   = 'test_hid.cpp')
+    obj = bld.program(
+        features='cxx test',
+        includes=[
+            f'../{build_util.get_target_os()}',
+            '..',
+            '.',
+            platform_folder,
+        ],
+        use='TESTMAIN DLIB PROFILE_NULL DMGLFW PLATFORM PLATFORM_SOCKET LUA SCRIPT hid_null',
+        target='test_hid',
+        source='test_hid.cpp',
+    )
 
     graphics_lib = ['GRAPHICS', 'DMGLFW']
     graphics_lib_symbols = 'GraphicsAdapterOpenGL'
@@ -41,10 +48,18 @@ def build(bld):
 
     web_libs = ['library_glfw.js', 'library_sys.js']
 
-    bld.program(features = 'cxx test skip_test',
-        includes = ['../%s' % build_util.get_target_os(), '..', '.', platform_folder],
-        use = 'TESTMAIN TESTAPP DLIB DINPUT PROFILE_NULL PLATFORM PLATFORM_SOCKET PLATFORM_HID LUA SCRIPT hid'.split() + graphics_lib,
-        web_libs = web_libs,
-        exported_symbols = exported_symbols,
-        target = 'test_app_hid',
-        source = 'test_app_hid.cpp')
+    bld.program(
+        features='cxx test skip_test',
+        includes=[
+            f'../{build_util.get_target_os()}',
+            '..',
+            '.',
+            platform_folder,
+        ],
+        use='TESTMAIN TESTAPP DLIB DINPUT PROFILE_NULL PLATFORM PLATFORM_SOCKET PLATFORM_HID LUA SCRIPT hid'.split()
+        + graphics_lib,
+        web_libs=web_libs,
+        exported_symbols=exported_symbols,
+        target='test_app_hid',
+        source='test_app_hid.cpp',
+    )

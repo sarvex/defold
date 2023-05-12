@@ -9,9 +9,9 @@ def options(opt):
     pass
 
 def _get_native_source(target_os, feature):
-    native_source = '%s/graphics_native.cpp' % target_os
+    native_source = f'{target_os}/graphics_native.cpp'
     if not os.path.exists(os.path.join('src',native_source)):
-        native_source = '%s/graphics_native.cpp' % feature
+        native_source = f'{feature}/graphics_native.cpp'
     return native_source
 
 def build(bld):
@@ -58,7 +58,7 @@ def build(bld):
             obj.source.append('vulkan/android/graphics_vulkan_android.cpp')
         elif bld.env.PLATFORM == 'x86_64-linux':
             obj.source.append('vulkan/linux/graphics_vulkan_linux_surface.cpp')
-        elif bld.env.PLATFORM == 'x86_64-win32' or bld.env.PLATFORM == 'win32':
+        elif bld.env.PLATFORM in ['x86_64-win32', 'win32']:
             obj.source.append('vulkan/win32/graphics_vulkan_win32_surface.cpp')
 
     if bld.env.PLATFORM == 'x86_64-ps4':

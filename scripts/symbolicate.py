@@ -37,12 +37,11 @@ def parse_stacktrace(cd, slide, load_addr):
 
 def get_address_map(stack_trace):
     addresses = reduce(lambda x,y: x + y,  [ [ y[1] for y in x ] for x in stack_trace ], [])
-    out = run_cmd('atos -arch arm64 -o "%s" %s' % (sys.argv[2], ' '.join(['0x%x' % a for a in addresses])))[1:-2]
+    out = run_cmd(
+        f"""atos -arch arm64 -o "{sys.argv[2]}" {' '.join(['0x%x' % a for a in addresses])}"""
+    )[1:-2]
     lst = [ s.strip().replace(',', '') for s in  out.split('\n') ]
-    address_map = {}
-    for i,s in enumerate(lst):
-        address_map[addresses[i]] = s
-    return address_map
+    return {addresses[i]: s for i, s in enumerate(lst)}
 
 def symbolicate(cd):
     id = re.search(r'^Identifier:[ ]*(.*?)$', cd, re.MULTILINE | re.DOTALL).groups()[0]

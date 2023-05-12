@@ -13,5 +13,5 @@ def build(bld):
                    protoc_includes = '../proto',
                    target = 'plcrash',
                    source = bld.path.ant_glob('*.cpp') + ' ' + bld.path.ant_glob('*.c') + ' PLCrashSignalHandler.mm PLCrashReporter.m PLCrashLogWriter.m PLCrashProcessInfo.m PLCrashHostInfo.m PLCrashLogWriter.m')
- 
-    tracking.source = tracking.source + ' PLCrashReportSystemInfo.m PLCrashReporterConfig.m CrashReporter.m PLCrashMachExceptionServer.m'
+
+    tracking.source = f'{tracking.source} PLCrashReportSystemInfo.m PLCrashReporterConfig.m CrashReporter.m PLCrashMachExceptionServer.m'

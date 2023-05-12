@@ -84,10 +84,10 @@ if 'build_private' not in sys.modules:
         def is_library_supported(cls, platform, library):
             return True
         @classmethod
-        def is_repo_private(self):
+        def is_repo_private(cls):
             return False
         @classmethod
-        def get_tag_suffix(self):
+        def get_tag_suffix(cls):
             return ''
 
 assert(hasattr(build_private, 'get_target_platforms'))
@@ -135,9 +135,8 @@ EMSCRIPTEN_SDK = "sdk-{0}-64bit".format(EMSCRIPTEN_VERSION_STR)
 PACKAGES_EMSCRIPTEN_SDK="emsdk-{0}".format(EMSCRIPTEN_VERSION_STR)
 SHELL = os.environ.get('SHELL', 'bash')
 # Don't use WSL from the msys/cygwin terminal
-if os.environ.get('TERM','') in ('cygwin',):
-    if 'WD' in os.environ:
-        SHELL= '%s\\bash.exe' % os.environ['WD'] # the binary directory
+if os.environ.get('TERM', '') in ('cygwin',) and 'WD' in os.environ:
+    SHELL= '%s\\bash.exe' % os.environ['WD'] # the binary directory
 
 ENGINE_LIBS = "testmain dlib texc ddf particle glfw graphics lua hid input physics resource extension script render rig gameobject gui sound liveupdate crash gamesys tools record iap push iac webview profiler facebook engine sdk".split()
 HOST_LIBS = "testmain dlib texc modelc".split()
@@ -170,10 +169,7 @@ def format_exes(name, platform):
     else:
         suffix = ['']
 
-    exes = []
-    for suff in suffix:
-        exes.append('%s%s%s' % (prefix, name, suff))
-    return exes
+    return [f'{prefix}{name}{suff}' for suff in suffix]
 
 def format_lib(name, platform):
     prefix = 'lib'
@@ -185,14 +181,14 @@ def format_lib(name, platform):
         suffix = '.dll'
     else:
         suffix = '.so'
-    return '%s%s%s' % (prefix, name, suffix)
+    return f'{prefix}{name}{suffix}'
 
 class ThreadPool(object):
     def __init__(self, worker_count):
         self.workers = []
         self.work_queue = Queue()
 
-        for i in range(worker_count):
+        for _ in range(worker_count):
             w = Thread(target = self.worker)
             w.setDaemon(True)
             w.start()
@@ -288,7 +284,7 @@ class Configuration(object):
         self.skip_bob_light = skip_bob_light
         self.disable_ccache = disable_ccache
         self.no_colors = no_colors
-        self.archive_path = "s3://%s/archive" % (archive_domain)
+        self.archive_path = f"s3://{archive_domain}/archive"
         self.archive_domain = archive_domain
         self.package_path = package_path
         self.set_version = set_version
@@ -326,9 +322,12 @@ class Configuration(object):
             os._exit(5)
 
     def get_python(self):
-        if 'macos' in self.host and 'arm64' == platform.machine():
-            if 'x86_64-macos' == self.target_platform:
-                return 'arch -x86_64 python'
+        if (
+            'macos' in self.host
+            and platform.machine() == 'arm64'
+            and self.target_platform == 'x86_64-macos'
+        ):
+            return 'arch -x86_64 python'
         return 'python'
 
     def _create_common_dirs(self):
@@ -340,20 +339,20 @@ class Configuration(object):
             os.makedirs(path)
 
     def _log(self, msg):
-        print(str(msg))
+        print(msg)
         sys.stdout.flush()
         sys.stderr.flush()
 
     def _remove_tree(self, path):
         if os.path.exists(path):
-            self._log('Removing %s' % path)
+            self._log(f'Removing {path}')
             shutil.rmtree(path)
 
     def distclean(self):
         self._remove_tree(self.dynamo_home)
 
         for lib in ENGINE_LIBS:
-            builddir = join(self.defold_root, 'engine/%s/build' % lib)
+            builddir = join(self.defold_root, f'engine/{lib}/build')
             self._remove_tree(builddir)
 
         # remove engine test dir specifically
@@ -364,11 +363,13 @@ class Configuration(object):
         self._log('distclean done.')
 
     def _extract_tgz(self, file, path):
-        self._log('Extracting %s to %s' % (file, path))
+        self._log(f'Extracting {file} to {path}')
         self._mkdirs(path)
         suffix = os.path.splitext(file)[1]
         fmts = {'.gz': 'z', '.xz': 'J', '.bzip2': 'j'}
-        run.env_command(self._form_env(), ['tar', 'xf%s' % fmts.get(suffix, 'z'), file], cwd = path)
+        run.env_command(
+            self._form_env(), ['tar', f"xf{fmts.get(suffix, 'z')}", file], cwd=path
+        )
 
     def _extract_tgz_rename_folder(self, src, target_folder, strip_components=1, format=None):
         src = src.replace('\\', '/')
@@ -377,7 +378,7 @@ class Configuration(object):
         if os.environ.get('GITHUB_SHA', None) is not None and os.environ.get('TERM', '') == 'cygwin':
             force_local = '--force-local' # to make tar not try to "connect" because it found a colon in the source file
 
-        self._log('Extracting %s to %s/' % (src, target_folder))
+        self._log(f'Extracting {src} to {target_folder}/')
         parentdir, dirname = os.path.split(target_folder)
         old_dir = os.getcwd()
         os.chdir(parentdir)
@@ -387,7 +388,7 @@ class Configuration(object):
             suffix = os.path.splitext(src)[1]
             fmts = {'.gz': 'z', '.xz': 'J', '.bzip2': 'j'}
             format = fmts.get(suffix, 'z')
-        cmd = ['tar', 'xf%s' % format, src, '-C', dirname]
+        cmd = ['tar', f'xf{format}', src, '-C', dirname]
         if strip_components:
             cmd.extend(['--strip-components', '%d' % strip_components])
         if force_local:
@@ -397,7 +398,7 @@ class Configuration(object):
         os.chdir(old_dir)
 
     def _extract_zip(self, file, path):
-        self._log('Extracting %s to %s' % (file, path))
+        self._log(f'Extracting {file} to {path}')
 
         def _extract_zip_entry( zf, info, extract_dir ):
             zf.extract( info.filename, path=extract_dir )
@@ -416,18 +417,18 @@ class Configuration(object):
             self._extract_tgz(file, path)
 
     def _copy(self, src, dst):
-        self._log('Copying %s -> %s' % (src, dst))
+        self._log(f'Copying {src} -> {dst}')
         shutil.copy(src, dst)
 
     def _copy_tree(self, src, dst):
-        self._log('Copying %s -> %s' % (src, dst))
+        self._log(f'Copying {src} -> {dst}')
         shutil.copytree(src, dst)
 
     def _download(self, url):
-        self._log('Downloading %s' % (url))
+        self._log(f'Downloading {url}')
         path = http_cache.download(url, lambda count, total: self._log('Downloading %s %.2f%%' % (url, 100 * count / float(total))))
         if not path:
-            self._log('Downloading %s failed' % (url))
+            self._log(f'Downloading {url} failed')
         return path
 
     def _check_package_path(self):
@@ -438,7 +439,7 @@ class Configuration(object):
 
     def install_ext(self):
         def make_package_path(root, platform, package):
-            return join(root, 'packages', package) + '-%s.tar.gz' % platform
+            return join(root, 'packages', package) + f'-{platform}.tar.gz'
 
         def make_package_paths(root, platform, packages):
             return [make_package_path(root, platform, package) for package in packages]
@@ -470,12 +471,14 @@ class Configuration(object):
 
         base_platforms = self.get_base_platforms()
         target_platform = self.target_platform
-        other_platforms = set(platform_packages.keys()).difference(set(base_platforms), set([target_platform, self.host]))
+        other_platforms = set(platform_packages.keys()).difference(
+            set(base_platforms), {target_platform, self.host}
+        )
 
         if target_platform in ['js-web', 'wasm-web']:
             node_modules_dir = os.path.join(self.dynamo_home, NODE_MODULE_LIB_DIR)
             for package in PACKAGES_NODE_MODULES:
-                path = join(self.defold_root, 'packages', package + '.tar.gz')
+                path = join(self.defold_root, 'packages', f'{package}.tar.gz')
                 name = package.split('-')[0]
                 self._extract_tgz(path, join(node_modules_dir, name))
 
@@ -484,7 +487,7 @@ class Configuration(object):
         for platform in other_platforms:
             packages = platform_packages.get(platform, [])
             package_paths = make_package_paths(self.defold_root, platform, packages)
-            print("Installing %s packages " % platform)
+            print(f"Installing {platform} packages ")
             for path in package_paths:
                 self._extract_tgz(path, self.ext)
             installed_packages.update(package_paths)
@@ -494,8 +497,8 @@ class Configuration(object):
             packages.extend(platform_packages.get(base_platform, []))
             package_paths = make_package_paths(self.defold_root, base_platform, packages)
             package_paths = [path for path in package_paths if path not in installed_packages]
-            if len(package_paths) != 0:
-                print("Installing %s packages" % base_platform)
+            if package_paths:
+                print(f"Installing {base_platform} packages")
                 for path in package_paths:
                     self._extract_tgz(path, self.ext)
                 installed_packages.update(package_paths)
@@ -504,7 +507,7 @@ class Configuration(object):
         if target_platform in ('x86_64-macos', 'x86_64-win32', 'x86_64-linux'):
             protobuf_packages = filter(lambda x: "protobuf" in x, PACKAGES_HOST)
             package_paths = make_package_paths(self.defold_root, 'x86_64-linux', protobuf_packages)
-            print("Installing %s packages " % 'x86_64-linux')
+            print('Installing x86_64-linux packages ')
             for path in package_paths:
                 self._extract_tgz(path, self.ext)
             installed_packages.update(package_paths)
@@ -513,8 +516,8 @@ class Configuration(object):
         target_package_paths = make_package_paths(self.defold_root, self.target_platform, target_packages)
         target_package_paths = [path for path in target_package_paths if path not in installed_packages]
 
-        if len(target_package_paths) != 0:
-            print("Installing %s packages" % self.target_platform)
+        if target_package_paths:
+            print(f"Installing {self.target_platform} packages")
             for path in target_package_paths:
                 self._extract_tgz(path, self.ext)
             installed_packages.update(target_package_paths)
@@ -522,7 +525,7 @@ class Configuration(object):
         print("Installing python wheels")
         run.env_command(self._form_env(), [self.get_python(), '-m', 'pip', '-q', '-q', 'install', '-t', join(self.ext, 'lib', 'python'), 'requests', 'pyaml'])
         for whl in glob(join(self.defold_root, 'packages', '*.whl')):
-            self._log('Installing %s' % basename(whl))
+            self._log(f'Installing {basename(whl)}')
             run.env_command(self._form_env(), [self.get_python(), '-m', 'pip', '-q', '-q', 'install', '--upgrade', '-t', join(self.ext, 'lib', 'python'), whl])
 
         print("Installing javascripts")
@@ -533,7 +536,7 @@ class Configuration(object):
             self._copy(join(self.defold_root, 'share', n), join(self.dynamo_home, 'share'))
 
         print("Installing profiles etc")
-        for n in itertools.chain(*[ glob('share/*%s' % ext) for ext in ['.mobileprovision', '.xcent', '.supp']]):
+        for n in itertools.chain(*[glob(f'share/*{ext}') for ext in ['.mobileprovision', '.xcent', '.supp']]):
             self._copy(join(self.defold_root, n), join(self.dynamo_home, 'share'))
 
         # Simple way to reduce number of warnings in the build
@@ -548,10 +551,10 @@ class Configuration(object):
             print("Could not find local file:", path)
             sys.exit(1)
         dirname, basename = os.path.split(path)
-        path = dirname + "/" + urllib.parse.quote(basename)
+        path = f"{dirname}/{urllib.parse.quote(basename)}"
         path = self._download(path) # it should be an url
         if path is None:
-            print("Error. Could not download %s" % path)
+            print(f"Error. Could not download {path}")
             sys.exit(1)
         return path
 
@@ -564,8 +567,12 @@ class Configuration(object):
         if platform in ('x86_64-macos', 'arm64-macos','x86_64-ios','arm64-ios'):
             if not self.sdk_info:
                 print("Couldn't find any sdks")
-                print("We recommend you follow the packaging steps found here: %s" % "https://github.com/defold/defold/blob/dev/scripts/package/README.md#packaging-the-sdks")
-                print("Then run './scripts/build.py --package-path=<local_folder_or_url> install_ext --platform=<platform>=%s'" % self.target_platform)
+                print(
+                    'We recommend you follow the packaging steps found here: https://github.com/defold/defold/blob/dev/scripts/package/README.md#packaging-the-sdks'
+                )
+                print(
+                    f"Then run './scripts/build.py --package-path=<local_folder_or_url> install_ext --platform=<platform>={self.target_platform}'"
+                )
                 sys.exit(1)
 
             print("Using SDKS:", self.sdk_info)
@@ -576,20 +583,45 @@ class Configuration(object):
         target_platform = self.target_platform
         if target_platform in ('x86_64-macos', 'arm64-macos', 'arm64-ios', 'x86_64-ios'):
             # macOS SDK
-            download_sdk(self,'%s/%s.tar.gz' % (self.package_path, sdk.PACKAGES_MACOS_SDK), join(sdkfolder, sdk.PACKAGES_MACOS_SDK))
-            download_sdk(self,'%s/%s.darwin.tar.gz' % (self.package_path, sdk.PACKAGES_XCODE_TOOLCHAIN), join(sdkfolder, sdk.PACKAGES_XCODE_TOOLCHAIN))
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_MACOS_SDK}.tar.gz',
+                join(sdkfolder, sdk.PACKAGES_MACOS_SDK),
+            )
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_XCODE_TOOLCHAIN}.darwin.tar.gz',
+                join(sdkfolder, sdk.PACKAGES_XCODE_TOOLCHAIN),
+            )
 
         if target_platform in ('arm64-ios', 'x86_64-ios'):
             # iOS SDK
-            download_sdk(self,'%s/%s.tar.gz' % (self.package_path, sdk.PACKAGES_IOS_SDK), join(sdkfolder, sdk.PACKAGES_IOS_SDK))
-            download_sdk(self,'%s/%s.tar.gz' % (self.package_path, sdk.PACKAGES_IOS_SIMULATOR_SDK), join(sdkfolder, sdk.PACKAGES_IOS_SIMULATOR_SDK))
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_IOS_SDK}.tar.gz',
+                join(sdkfolder, sdk.PACKAGES_IOS_SDK),
+            )
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_IOS_SIMULATOR_SDK}.tar.gz',
+                join(sdkfolder, sdk.PACKAGES_IOS_SIMULATOR_SDK),
+            )
 
         if 'win32' in target_platform or ('win32' in self.host):
             win32_sdk_folder = join(self.ext, 'SDKs', 'Win32')
-            download_sdk(self,'%s/%s.tar.gz' % (self.package_path, sdk.PACKAGES_WIN32_SDK_10), join(win32_sdk_folder, 'WindowsKits', '10') )
-            download_sdk(self,'%s/%s.tar.gz' % (self.package_path, sdk.PACKAGES_WIN32_TOOLCHAIN), join(win32_sdk_folder, 'MicrosoftVisualStudio14.0'), strip_components=0 )
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_WIN32_SDK_10}.tar.gz',
+                join(win32_sdk_folder, 'WindowsKits', '10'),
+            )
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_WIN32_TOOLCHAIN}.tar.gz',
+                join(win32_sdk_folder, 'MicrosoftVisualStudio14.0'),
+                strip_components=0,
+            )
 
-            # On OSX, the file system is already case insensitive, so no need to duplicate the files as we do on the extender server
+                # On OSX, the file system is already case insensitive, so no need to duplicate the files as we do on the extender server
 
         if target_platform in ('armv7-android', 'arm64-android'):
             host = self.host
@@ -601,21 +633,45 @@ class Configuration(object):
                 host = 'darwin' # our packages are still called darwin
 
             # Android NDK
-            download_sdk(self, '%s/%s-%s.tar.gz' % (self.package_path, PACKAGES_ANDROID_NDK, host), join(sdkfolder, PACKAGES_ANDROID_NDK))
+            download_sdk(
+                self,
+                f'{self.package_path}/{PACKAGES_ANDROID_NDK}-{host}.tar.gz',
+                join(sdkfolder, PACKAGES_ANDROID_NDK),
+            )
             # Android SDK
-            download_sdk(self, '%s/%s-%s-android-%s-%s.tar.gz' % (self.package_path, PACKAGES_ANDROID_SDK, host, ANDROID_TARGET_API_LEVEL, ANDROID_BUILD_TOOLS_VERSION), join(sdkfolder, PACKAGES_ANDROID_SDK))
+            download_sdk(
+                self,
+                f'{self.package_path}/{PACKAGES_ANDROID_SDK}-{host}-android-{ANDROID_TARGET_API_LEVEL}-{ANDROID_BUILD_TOOLS_VERSION}.tar.gz',
+                join(sdkfolder, PACKAGES_ANDROID_SDK),
+            )
 
         if 'linux' in self.host:
-            download_sdk(self, '%s/%s.tar.xz' % (self.package_path, sdk.PACKAGES_LINUX_TOOLCHAIN), join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG), format='J')
+            download_sdk(
+                self,
+                f'{self.package_path}/{sdk.PACKAGES_LINUX_TOOLCHAIN}.tar.xz',
+                join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG),
+                format='J',
+            )
 
-        if target_platform in ('x86_64-macos', 'arm64-macos', 'arm64-ios', 'x86_64-ios') and 'linux' in self.host:
-            if not os.path.exists(join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG, 'cctools')):
-                download_sdk(self, '%s/%s.tar.gz' % (self.package_path, PACKAGES_CCTOOLS_PORT), join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG), force_extract=True)
+        if (
+            target_platform
+            in ('x86_64-macos', 'arm64-macos', 'arm64-ios', 'x86_64-ios')
+            and 'linux' in self.host
+            and not os.path.exists(
+                join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG, 'cctools')
+            )
+        ):
+            download_sdk(
+                self,
+                f'{self.package_path}/{PACKAGES_CCTOOLS_PORT}.tar.gz',
+                join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG),
+                force_extract=True,
+            )
 
         build_private.install_sdk(self, target_platform)
 
     def get_ems_dir(self):
-        return join(self.ext, 'SDKs', 'emsdk-' + EMSCRIPTEN_VERSION_STR)
+        return join(self.ext, 'SDKs', f'emsdk-{EMSCRIPTEN_VERSION_STR}')
 
     def _form_ems_path(self):
         upstream = join(self.get_ems_dir(), 'upstream', 'emscripten')
@@ -639,7 +695,10 @@ class Configuration(object):
                             'x86_64-macos':'darwin',
                             'arm64-macos':'darwin',
                             'x86_64-win32':'win32'}
-            path = join(self.package_path, '%s-%s.tar.gz' % (PACKAGES_EMSCRIPTEN_SDK, platform_map.get(self.host, self.host)))
+            path = join(
+                self.package_path,
+                f'{PACKAGES_EMSCRIPTEN_SDK}-{platform_map.get(self.host, self.host)}.tar.gz',
+            )
             path = self.get_local_or_remote_file(path)
             self._extract(path, join(self.ext, 'SDKs'))
 
@@ -663,7 +722,10 @@ class Configuration(object):
         exe_file = tempfile.mktemp(suffix='.js')
         with open(c_file, 'w') as f:
             f.write('int main() { return 0; }')
-        run.env_command(self._form_env(), ['%s/emcc' % self._form_ems_path(), c_file, '-o', '%s' % exe_file])
+        run.env_command(
+            self._form_env(),
+            [f'{self._form_ems_path()}/emcc', c_file, '-o', f'{exe_file}'],
+        )
 
     def check_ems(self):
         config = join(self.get_ems_dir(), '.emscripten')
@@ -711,7 +773,7 @@ class Configuration(object):
 
     def _add_file_to_zip(self, zip, src, dst):
         if not os.path.isfile(src):
-            self._log("Path is not a file: '%s'" % src)
+            self._log(f"Path is not a file: '{src}'")
         zip.write(src, dst)
 
     def is_cross_platform(self):
@@ -781,11 +843,11 @@ class Configuration(object):
                 return paths
 
             # Dynamo libs
-            libdir = os.path.join(self.dynamo_home, 'lib/%s' % platform)
+            libdir = os.path.join(self.dynamo_home, f'lib/{platform}')
             paths = _findlibs(libdir)
             self._add_files_to_zip(zip, paths, self.dynamo_home, topfolder)
             # External libs
-            libdir = os.path.join(self.dynamo_home, 'ext/lib/%s' % platform)
+            libdir = os.path.join(self.dynamo_home, f'ext/lib/{platform}')
             paths = _findlibs(libdir)
             self._add_files_to_zip(zip, paths, self.dynamo_home, topfolder)
 
@@ -805,8 +867,8 @@ class Configuration(object):
 
             # Win32 resource files
             if platform in ['win32', 'x86_64-win32']:
-                engine_rc = os.path.join(self.dynamo_home, 'lib/%s/defold.ico' % platform)
-                defold_ico = os.path.join(self.dynamo_home, 'lib/%s/engine.rc' % platform)
+                engine_rc = os.path.join(self.dynamo_home, f'lib/{platform}/defold.ico')
+                defold_ico = os.path.join(self.dynamo_home, f'lib/{platform}/engine.rc')
                 self._add_files_to_zip(zip, [engine_rc, defold_ico], self.dynamo_home, topfolder)
 
             if platform in ['js-web']:
@@ -838,7 +900,7 @@ class Configuration(object):
             # pipeline tools
             if platform in ('x86_64-macos','arm64-macos','x86_64-linux','x86_64-win32'): # needed for the linux build server
                 # protoc
-                protoc = os.path.join(self.dynamo_home, 'ext/bin/%s/protoc' % platform)
+                protoc = os.path.join(self.dynamo_home, f'ext/bin/{platform}/protoc')
                 ddfc_py = os.path.join(self.dynamo_home, 'bin/ddfc.py')
                 ddfc_cxx = os.path.join(self.dynamo_home, 'bin/ddfc_cxx')
                 ddfc_cxx_bat = os.path.join(self.dynamo_home, 'bin/ddfc_cxx.bat')
@@ -855,8 +917,8 @@ class Configuration(object):
 
                 # workaround for extender running on x86_64-darwin still:
                 if platform == 'x86_64-macos':
-                    protoc_src = os.path.join(self.dynamo_home, 'ext/bin/%s/protoc' % platform)
-                    protoc_dst = '%s/ext/bin/%s/protoc' % (topfolder, "x86_64-darwin")
+                    protoc_src = os.path.join(self.dynamo_home, f'ext/bin/{platform}/protoc')
+                    protoc_dst = f'{topfolder}/ext/bin/x86_64-darwin/protoc'
                     self._add_file_to_zip(zip, protoc_src, protoc_dst)
 
                 # we don't want to run "pip install" on individual sdk files, so we copy the python files as-is
@@ -893,9 +955,9 @@ class Configuration(object):
         try:
             path = self._package_platform_sdk(self.target_platform)
         except Exception as e:
-            print ("Failed to package sdk for platform %s: %s" % (self.target_platform, e))
+            print(f"Failed to package sdk for platform {self.target_platform}: {e}")
         else:
-            print ("Wrote %s" % path)
+            print(f"Wrote {path}")
 
     def build_builtins(self):
         with open(join(self.dynamo_home, 'share', 'builtins.zip'), 'wb') as f:
@@ -911,15 +973,21 @@ class Configuration(object):
         strip = "strip"
         if 'android' in self.target_platform:
             ANDROID_NDK_VERSION = '25b'
-            ANDROID_NDK_ROOT = os.path.join(sdkfolder,'android-ndk-r%s' % ANDROID_NDK_VERSION)
+            ANDROID_NDK_ROOT = os.path.join(
+                sdkfolder, f'android-ndk-r{ANDROID_NDK_VERSION}'
+            )
 
             ANDROID_HOST = 'linux' if sys.platform == 'linux' else 'darwin'
-            strip = "%s/toolchains/llvm/prebuilt/%s-x86_64/bin/llvm-strip" % (ANDROID_NDK_ROOT, ANDROID_HOST)
+            strip = f"{ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/{ANDROID_HOST}-x86_64/bin/llvm-strip"
 
-        if self.target_platform in ('x86_64-macos','arm64-macos','arm64-ios','x86_64-ios') and 'linux' == sys.platform:
+        if (
+            self.target_platform
+            in ('x86_64-macos', 'arm64-macos', 'arm64-ios', 'x86_64-ios')
+            and sys.platform == 'linux'
+        ):
             strip = os.path.join(sdkfolder, 'linux', sdk.PACKAGES_LINUX_CLANG, 'bin', 'x86_64-apple-darwin19-strip')
 
-        run.shell_command("%s %s" % (strip, path))
+        run.shell_command(f"{strip} {path}")
         return True
 
     def archive_engine(self):
@@ -937,37 +1005,46 @@ class Configuration(object):
         if self.target_platform in ['x86_64-linux', 'x86_64-macos', 'arm64-macos', 'x86_64-win32']:
             launcher_name = format_exes("launcher", self.target_platform)[0]
             launcherbin = join(bin_dir, launcher_name)
-            self.upload_to_archive(launcherbin, '%s/%s' % (full_archive_path, launcher_name))
+            self.upload_to_archive(launcherbin, f'{full_archive_path}/{launcher_name}')
 
         # upload gdc tool on desktop platforms
         if self.is_desktop_target():
             gdc_name = format_exes("gdc", self.target_platform)[0]
             gdc_bin = join(bin_dir, gdc_name)
-            self.upload_to_archive(gdc_bin, '%s/%s' % (full_archive_path, gdc_name))
+            self.upload_to_archive(gdc_bin, f'{full_archive_path}/{gdc_name}')
 
         for n in ['dmengine', 'dmengine_release', 'dmengine_headless']:
             for engine_name in format_exes(n, self.target_platform):
                 engine = join(bin_dir, engine_name)
-                self.upload_to_archive(engine, '%s/%s' % (full_archive_path, engine_name))
-                engine_stripped = join(bin_dir, engine_name + "_stripped")
+                self.upload_to_archive(engine, f'{full_archive_path}/{engine_name}')
+                engine_stripped = join(bin_dir, f"{engine_name}_stripped")
                 shutil.copy2(engine, engine_stripped)
                 if self._strip_engine(engine_stripped):
-                    self.upload_to_archive(engine_stripped, '%s/stripped/%s' % (full_archive_path, engine_name))
+                    self.upload_to_archive(
+                        engine_stripped,
+                        f'{full_archive_path}/stripped/{engine_name}',
+                    )
                 if 'win32' in self.target_platform:
-                    pdb = join(bin_dir, os.path.splitext(engine_name)[0] + '.pdb')
-                    self.upload_to_archive(pdb, '%s/%s' % (full_archive_path, os.path.basename(pdb)))
+                    pdb = join(bin_dir, f'{os.path.splitext(engine_name)[0]}.pdb')
+                    self.upload_to_archive(pdb, f'{full_archive_path}/{os.path.basename(pdb)}')
 
             if 'web' in self.target_platform:
-                engine_mem = join(bin_dir, engine_name + '.mem')
+                engine_mem = join(bin_dir, f'{engine_name}.mem')
                 if os.path.exists(engine_mem):
-                    self.upload_to_archive(engine_mem, '%s/%s.mem' % (full_archive_path, engine_name))
-                engine_symbols = join(bin_dir, engine_name + '.symbols')
+                    self.upload_to_archive(engine_mem, f'{full_archive_path}/{engine_name}.mem')
+                engine_symbols = join(bin_dir, f'{engine_name}.symbols')
                 if os.path.exists(engine_symbols):
-                    self.upload_to_archive(engine_symbols, '%s/%s.symbols' % (full_archive_path, engine_name))
+                    self.upload_to_archive(
+                        engine_symbols,
+                        f'{full_archive_path}/{engine_name}.symbols',
+                    )
             elif 'macos' in self.target_platform or 'ios' in self.target_platform:
-                engine_symbols = join(bin_dir, engine_name + '.dSYM.zip')
+                engine_symbols = join(bin_dir, f'{engine_name}.dSYM.zip')
                 if os.path.exists(engine_symbols):
-                    self.upload_to_archive(engine_symbols, '%s/%s' % (full_archive_path, os.path.basename(engine_symbols)))
+                    self.upload_to_archive(
+                        engine_symbols,
+                        f'{full_archive_path}/{os.path.basename(engine_symbols)}',
+                    )
 
         zip_archs = []
         if not self.skip_docs:
@@ -975,13 +1052,25 @@ class Configuration(object):
         if not self.skip_builtins:
             zip_archs.append('builtins.zip')
         for zip_arch in zip_archs:
-            self.upload_to_archive(join(dynamo_home, 'share', zip_arch), '%s/%s' % (share_archive_path, zip_arch))
+            self.upload_to_archive(
+                join(dynamo_home, 'share', zip_arch),
+                f'{share_archive_path}/{zip_arch}',
+            )
 
         if self.target_platform == 'x86_64-linux':
             # NOTE: It's arbitrary for which platform we archive dlib.jar. Currently set to linux 64-bit
-            self.upload_to_archive(join(dynamo_home, 'share', 'java', 'dlib.jar'), '%s/dlib.jar' % (java_archive_path))
-            self.upload_to_archive(join(dynamo_home, 'share', 'java', 'modelimporter.jar'), '%s/modelimporter.jar' % (java_archive_path))
-            self.upload_to_archive(join(dynamo_home, 'share', 'java', 'texturecompiler.jar'), '%s/texturecompiler.jar' % (java_archive_path))
+            self.upload_to_archive(
+                join(dynamo_home, 'share', 'java', 'dlib.jar'),
+                f'{java_archive_path}/dlib.jar',
+            )
+            self.upload_to_archive(
+                join(dynamo_home, 'share', 'java', 'modelimporter.jar'),
+                f'{java_archive_path}/modelimporter.jar',
+            )
+            self.upload_to_archive(
+                join(dynamo_home, 'share', 'java', 'texturecompiler.jar'),
+                f'{java_archive_path}/texturecompiler.jar',
+            )
 
         if 'android' in self.target_platform:
             files = [
@@ -990,26 +1079,23 @@ class Configuration(object):
             ]
             for f in files:
                 src = join(dynamo_home, f[0], f[1])
-                self.upload_to_archive(src, '%s/%s' % (full_archive_path, f[1]))
+                self.upload_to_archive(src, f'{full_archive_path}/{f[1]}')
 
             resources = self._ziptree(join(dynamo_home, 'ext', 'share', 'java', 'res'), directory = join(dynamo_home, 'ext', 'share', 'java'))
-            self.upload_to_archive(resources, '%s/android-resources.zip' % (full_archive_path))
+            self.upload_to_archive(resources, f'{full_archive_path}/android-resources.zip')
 
         if self.is_desktop_target():
             libs = ['dlib', 'texc', 'particle', 'modelc']
             for lib in libs:
-                lib_name = format_lib('%s_shared' % (lib), self.target_platform)
+                lib_name = format_lib(f'{lib}_shared', self.target_platform)
                 lib_path = join(dynamo_home, 'lib', lib_dir, lib_name)
-                self.upload_to_archive(lib_path, '%s/%s' % (full_archive_path, lib_name))
+                self.upload_to_archive(lib_path, f'{full_archive_path}/{lib_name}')
 
         sdkpath = self._package_platform_sdk(self.target_platform)
-        self.upload_to_archive(sdkpath, '%s/defoldsdk.zip' % full_archive_path)
+        self.upload_to_archive(sdkpath, f'{full_archive_path}/defoldsdk.zip')
 
     def _get_build_flags(self):
-        supported_tests = {}
-        # E.g. on win64, we can test multiple platforms
-        supported_tests['x86_64-win32'] = ['win32', 'x86_64-win32', 'arm64-nx64']
-
+        supported_tests = {'x86_64-win32': ['win32', 'x86_64-win32', 'arm64-nx64']}
         supports_tests = self.target_platform in supported_tests.get(self.host, []) or self.host == self.target_platform
         skip_tests = '--skip-tests' if self.skip_tests or not supports_tests else ''
         skip_codesign = '--skip-codesign' if self.skip_codesign else ''
@@ -1027,23 +1113,22 @@ class Configuration(object):
 
         platforms = list(platform_dependencies.get(self.host, [self.host]))
 
-        if not self.host in platforms:
+        if self.host not in platforms:
             platforms.append(self.host)
 
         return platforms
 
     def _build_engine_cmd(self, skip_tests, skip_codesign, disable_ccache, prefix):
         prefix = prefix and prefix or self.dynamo_home
-        return '%s %s/ext/bin/waf --prefix=%s %s %s %s distclean configure build install' % (self.get_python(), self.dynamo_home, prefix, skip_tests, skip_codesign, disable_ccache)
+        return f'{self.get_python()} {self.dynamo_home}/ext/bin/waf --prefix={prefix} {skip_tests} {skip_codesign} {disable_ccache} distclean configure build install'
 
     def _build_engine_lib(self, args, lib, platform, skip_tests = False, dir = 'engine'):
-        self._log('Building %s for %s' % (lib, platform))
+        self._log(f'Building {lib} for {platform}')
         skip_build_tests = []
         if skip_tests and '--skip-build-tests' not in self.waf_options:
-            skip_build_tests.append('--skip-tests')
-            skip_build_tests.append('--skip-build-tests')
-        cwd = join(self.defold_root, '%s/%s' % (dir, lib))
-        plf_args = ['--platform=%s' % platform]
+            skip_build_tests.extend(('--skip-tests', '--skip-build-tests'))
+        cwd = join(self.defold_root, f'{dir}/{lib}')
+        plf_args = [f'--platform={platform}']
         run.env_command(self._form_env(), args + plf_args + self.waf_options + skip_build_tests, cwd = cwd)
 
     def build_bob_light(self):
@@ -1064,7 +1149,9 @@ class Configuration(object):
             ant_args += ['-v']
 
         env = self._form_env()
-        env['ANT_OPTS'] = '-Dant.logger.defaults=%s/ant-logger-colors.txt' % join(self.defold_root, 'com.dynamo.cr/com.dynamo.cr.bob.test')
+        env[
+            'ANT_OPTS'
+        ] = f"-Dant.logger.defaults={join(self.defold_root, 'com.dynamo.cr/com.dynamo.cr.bob.test')}/ant-logger-colors.txt"
 
         s = run.command(" ".join([ant, 'clean', 'compile-bob-light'] + ant_args),
                                     cwd = join(self.defold_root, 'com.dynamo.cr/com.dynamo.cr.bob'), shell = True, env = env)
@@ -1099,9 +1186,8 @@ class Configuration(object):
         for lib in engine_libs:
 
             # No need to rebuild a library if it has already been built
-            if host == self.target_platform:
-                if lib in HOST_LIBS:
-                    continue
+            if host == self.target_platform and lib in HOST_LIBS:
+                continue
 
             if not build_private.is_library_supported(target_platform, lib):
                 continue
@@ -1116,7 +1202,9 @@ class Configuration(object):
             scan_output_dir = os.path.normpath(os.path.join(os.environ['DYNAMO_HOME'], '..', '..', 'static_analyze'))
             report_dir = os.path.normpath(os.path.join(os.environ['DYNAMO_HOME'], '..', '..', 'report'))
             run.command([self.get_python(), './scripts/scan_build_gather_report.py', '-o', report_dir, '-i', scan_output_dir])
-            print("Wrote report to %s. Open with 'scan-view .' or 'python -m SimpleHTTPServer'" % report_dir)
+            print(
+                f"Wrote report to {report_dir}. Open with 'scan-view .' or 'python -m SimpleHTTPServer'"
+            )
             shutil.rmtree(scan_output_dir)
 
         if os.path.exists(os.environ['DM_BOB_ROOTFOLDER']):
@@ -1135,7 +1223,7 @@ class Configuration(object):
         sha1 = self._git_sha1()
         full_archive_path = join(sha1, 'bob').replace('\\', '/')
         for p in glob(join(self.dynamo_home, 'share', 'java', 'bob.jar')):
-            self.upload_to_archive(p, '%s/%s' % (full_archive_path, basename(p)))
+            self.upload_to_archive(p, f'{full_archive_path}/{basename(p)}')
 
     def copy_local_bob_artefacts(self):
         texc_name = format_lib('texc_shared', self.host)

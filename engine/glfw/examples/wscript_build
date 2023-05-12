@@ -20,10 +20,12 @@ elif 'web' in platform:
     samples = ''
 
 for e in samples.split():
-    bld.program(features = 'c apk',
-                     includes = '. ../include',
-                     target = e,
-                     source = '%s.c' % e,
-                     uselib_local = local_libs,
-		     uselib = 'X',
-                     install_path = None)
+    bld.program(
+        features='c apk',
+        includes='. ../include',
+        target=e,
+        source=f'{e}.c',
+        uselib_local=local_libs,
+        uselib='X',
+        install_path=None,
+    )

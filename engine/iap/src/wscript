@@ -6,14 +6,11 @@ def configure(conf):
     pass
 
 def build(bld):
-    source = 'iap_null.cpp'
-
     platforms = ['arm.*?ios', 'arm.*?android', 'x86_64-ios', 'web']
-    for p in platforms:
-        if re.match(p, bld.env.PLATFORM):
-            source = 'iap_stub.cpp'
-            break
-
+    source = next(
+        ('iap_stub.cpp' for p in platforms if re.match(p, bld.env.PLATFORM)),
+        'iap_null.cpp',
+    )
     bld.stlib(features = 'cxx',
               includes = '.',
               source = source,

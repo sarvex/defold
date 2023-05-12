@@ -28,7 +28,7 @@ class TestHttpServer(unittest.TestCase):
 
     def testMulNumbers(self):
         c = http.client.HTTPConnection('localhost:%d' % PORT)
-        for i in range(40):
+        for _ in range(40):
             a = random.randint(1, 1024)
             b = random.randint(1, 1024)
             c.request('GET', '/mul/%d/%d' % (a,b))
@@ -39,7 +39,7 @@ class TestHttpServer(unittest.TestCase):
 
     def testMulHeadersNumbers(self):
         c = http.client.HTTPConnection('localhost:%d' % PORT)
-        for i in range(40):
+        for _ in range(40):
             a = random.randint(1, 1024)
             b = random.randint(1, 1024)
             headers = { 'X-a' : str(a), 'X-b' : str(b) }

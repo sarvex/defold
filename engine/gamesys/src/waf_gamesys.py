@@ -74,7 +74,7 @@ def transform_textureset_filename(task, name):
 def transform_collection(task, msg):
     for i in msg.instances:
         i.prototype = i.prototype.replace('.go', '.goc')
-        i.id = "/" + i.id
+        i.id = f"/{i.id}"
         for comp_props in i.component_properties:
             transform_properties(comp_props.properties, comp_props.property_decls)
     for c in msg.collection_instances:
@@ -94,7 +94,11 @@ def transform_collisionobject(task, msg):
 
     # Merge convex shape resource with collision object
     # NOTE: Special case for tilegrid resources. They are left as is
-    if msg.collision_shape and not (msg.collision_shape.endswith('.tilegrid') or msg.collision_shape.endswith('.tilemap')):
+    if (
+        msg.collision_shape
+        and not msg.collision_shape.endswith('.tilegrid')
+        and not msg.collision_shape.endswith('.tilemap')
+    ):
         p = os.path.join(task.generator.content_root, msg.collision_shape[1:])
         convex_msg = physics_ddf_pb2.ConvexShape()
         with open(p, 'rb') as in_f:
@@ -171,7 +175,7 @@ def compile_model(task):
             out_f.write(msg_out.SerializeToString())
 
         msg_out = model_ddf_pb2.Model()
-        msg_out.rig_scene = "/" + os.path.relpath(task.outputs[1].bldpath(), task.generator.content_root)
+        msg_out.rig_scene = f"/{os.path.relpath(task.outputs[1].bldpath(), task.generator.content_root)}"
 
         for i,n in enumerate(msg.textures):
             msg_out.textures.append(transform_texture_name(task, msg.textures[i]))
@@ -180,8 +184,8 @@ def compile_model(task):
             out_f.write(msg_out.SerializeToString())
 
         return 0
-    except (google.protobuf.text_format.ParseError,) as e:
-        print ('%s:%s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+    except google.protobuf.text_format.ParseError as e:
+        print(f'{task.inputs[0].srcpath()}:{str(e)}', file=sys.stderr)
         return 1
 
 waflib.Task.task_factory('model',
@@ -249,8 +253,8 @@ def compile_animationset(task):
         with open(task.outputs[0].abspath(), 'wb') as out_f:
             out_f.write(msg_animset.SerializeToString())
         return 0
-    except (google.protobuf.text_format.ParseError,) as e:
-        print ('%s:%s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+    except google.protobuf.text_format.ParseError as e:
+        print(f'{task.inputs[0].srcpath()}:{str(e)}', file=sys.stderr)
         return 1
 
 waflib.Task.task_factory('animationset',
@@ -277,14 +281,12 @@ def transform_gui(task, msg):
         texture_names.add(t.name)
         t.texture = transform_tilesource_name(transform_texture_name(task, t.texture))
     for n in msg.nodes:
-        if n.texture:
-            if not n.texture in texture_names:
-                atlas_part = n.texture[:n.texture.index("/")]
-                if not atlas_part in texture_names:
-                    raise Exception('Texture "%s" not declared in gui-file' % (n.texture))
-        if n.font:
-            if not n.font in font_names:
-                raise Exception('Font "%s" not declared in gui-file' % (n.font))
+        if n.texture and n.texture not in texture_names:
+            atlas_part = n.texture[:n.texture.index("/")]
+            if atlas_part not in texture_names:
+                raise Exception(f'Texture "{n.texture}" not declared in gui-file')
+        if n.font and n.font not in font_names:
+            raise Exception(f'Font "{n.font}" not declared in gui-file')
     return msg
 
 def transform_factory(task, msg):
@@ -346,7 +348,7 @@ def write_embedded(task):
     except (google.protobuf.text_format.ParseError, google.protobuf.message.EncodeError) as e:
         stderr_lock.acquire()
         try:
-            print ('%s: %s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+            print(f'{task.inputs[0].srcpath()}: {str(e)}', file=sys.stderr)
         finally:
             stderr_lock.release()
         return 1
@@ -382,7 +384,7 @@ def compile_go(task):
             desc.rotation.z = c.rotation.z
             desc.rotation.w = c.rotation.w
 
-            desc.component = '/' + rel_path_dir + '/' + task.outputs[i+1].name
+            desc.component = f'/{rel_path_dir}/{task.outputs[i + 1].name}'
 
         msg = transform_gameobject(task, msg)
 
@@ -396,7 +398,7 @@ def compile_go(task):
     except (google.protobuf.text_format.ParseError, google.protobuf.message.EncodeError, Exception) as e:
         stderr_lock.acquire()
         try:
-            print ('%s: %s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+            print(f'{task.inputs[0].srcpath()}: {str(e)}', file=sys.stderr)
         finally:
             stderr_lock.release()
         return 1
@@ -427,7 +429,7 @@ def gofile(self, node):
 
             sub_task = self.create_task(c.type)
             sub_task.set_inputs(embed_node)
-            out = embed_node.change_ext('.' + c.type + 'c')
+            out = embed_node.change_ext(f'.{c.type}c')
             sub_task.set_outputs(out)
             sub_task.set_run_after(task)
         out = node.change_ext('.goc')
@@ -435,7 +437,7 @@ def gofile(self, node):
     except (google.protobuf.text_format.ParseError, google.protobuf.message.EncodeError, Exception) as e:
         stderr_lock.acquire()
         try:
-            print ('%s: %s' % (node.srcpath(), str(e)), file=sys.stderr)
+            print(f'{node.srcpath()}: {str(e)}', file=sys.stderr)
         finally:
             stderr_lock.release()
         return 1
@@ -513,9 +515,9 @@ def scan_lua(str):
         m1 = rp1.match(line)
         m2 = rp2.match(line)
         if m1:
-            modules.append(m1.group(1))
+            modules.append(m1[1])
         elif m2:
-            modules.append(m2.group(1))
+            modules.append(m2[1])
     return modules
 
 def compile_lua(task):
@@ -537,9 +539,9 @@ def compile_lua(task):
             lua_module.source.filename = task.inputs[0].srcpath()
 
         for m in modules:
-            module_file = "/%s.lua" % m.replace(".", "/")
+            module_file = f'/{m.replace(".", "/")}.lua'
             lua_module.modules.append(m)
-            lua_module.resources.append(module_file + 'c')
+            lua_module.resources.append(f'{module_file}c')
 
         with open(task.outputs[0].abspath(), 'wb') as out_f:
             out_f.write(lua_module.SerializeToString())
@@ -583,8 +585,8 @@ def compile_mesh(task):
             out_f.write(rig.rig_ddf_pb2.AnimationSet().SerializeToString())
 
         return 0
-    except (google.protobuf.text_format.ParseError,) as e:
-        print ('%s:%s' % (task.inputs[0].srcpath(), str(e)), file=sys.stderr)
+    except google.protobuf.text_format.ParseError as e:
+        print(f'{task.inputs[0].srcpath()}:{str(e)}', file=sys.stderr)
         return 1
 
 waflib.Task.task_factory('mesh',

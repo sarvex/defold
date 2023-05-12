@@ -27,8 +27,7 @@ s3buckets = {}
 def get_archive_prefix(archive_path, sha1):
     u = urlparse(archive_path)
     assert (u.scheme == 's3')
-    prefix = os.path.join(u.path, sha1)[1:]
-    return prefix
+    return os.path.join(u.path, sha1)[1:]
 
 def get_config_key_and_secret():
     s3configpath = os.path.expanduser("~/.s3cfg")
@@ -57,7 +56,7 @@ def get_bucket(bucket_name):
     key = ks[0]
     secret = ks[1]
 
-    log("get_bucket using key %s" % (key))
+    log(f"get_bucket using key {key}")
 
     if not (key and secret):
         log('S3 key and/or secret not found in ~/.s3cfg, ~/.aws/credentials or environment variables')
@@ -82,18 +81,21 @@ def find_files_in_bucket(archive_path, bucket, sha1, path, pattern):
     prefix = os.path.join(base_prefix, path)
     files = []
     for x in bucket.list(prefix = prefix):
-        if x.name[-1] != '/':
-            # Skip directory "keys". When creating empty directories
-            # a psudeo-key is created. Directories isn't a first-class object on s3
-            if re.match(pattern, x.name):
-                name = os.path.relpath(x.name, base_prefix)
-                files.append({'name': name, 'path': '/' + x.name})
+        if x.name[-1] != '/' and re.match(pattern, x.name):
+            name = os.path.relpath(x.name, base_prefix)
+            files.append({'name': name, 'path': f'/{x.name}'})
     return files
 
 # Get archive files for a single release/sha1
 def get_files(archive_path, bucket, sha1):
     files = []
-    files = files + find_files_in_bucket(archive_path, bucket, sha1, "engine", '.*(/dmengine.*|builtins.zip|classes.dex|android-resources.zip|android.jar|gdc.*|defoldsdk.zip|ref-doc.zip)$')
+    files += find_files_in_bucket(
+        archive_path,
+        bucket,
+        sha1,
+        "engine",
+        '.*(/dmengine.*|builtins.zip|classes.dex|android-resources.zip|android.jar|gdc.*|defoldsdk.zip|ref-doc.zip)$',
+    )
     files = files + find_files_in_bucket(archive_path, bucket, sha1, "bob", '.*(/bob.jar)$')
     files = files + find_files_in_bucket(archive_path, bucket, sha1, "editor", '.*(/Defold-.*)$')
     files = files + find_files_in_bucket(archive_path, bucket, sha1, "dev", '.*(/Defold-.*)$')
@@ -119,8 +121,8 @@ def get_tagged_releases(archive_path, pattern=None, num_releases=10):
         line = line.strip()
         if not line:
             continue
-        p = '(.*?) refs/tags/%s' % pattern
-        m = re.match('(.*?) refs/tags/%s' % pattern, line)
+        p = f'(.*?) refs/tags/{pattern}'
+        m = re.match(f'(.*?) refs/tags/{pattern}', line)
         if not m:
             continue
         sha1, tag = m.groups()
@@ -160,7 +162,7 @@ def move_release(archive_path, sha1, channel):
 
     # the search prefix we use when listing keys
     # we only want the keys associated with specifed sha1
-    prefix = "%s/%s/" % (archive_root, sha1)
+    prefix = f"{archive_root}/{sha1}/"
     keys = bucket.get_all_keys(prefix = prefix)
     for key in keys:
         # get the name of the file this key points to
@@ -168,7 +170,7 @@ def move_release(archive_path, sha1, channel):
         name = key.name.replace(prefix, "")
 
         # destination
-        new_key = "archive/%s/%s/%s" % (channel, sha1, name)
+        new_key = f"archive/{channel}/{sha1}/{name}"
 
         # the keys in archive/sha1/* are all redirects to files in archive/channel/sha1/*
         # get the actual file from the redirect
@@ -176,20 +178,20 @@ def move_release(archive_path, sha1, channel):
         if not redirect_path:
             # the key is an actual file and not a redirect
             # it shouldn't really happen but it's better to check
-            print("The file %s has no redirect. The file will not be moved" % name)
+            print(f"The file {name} has no redirect. The file will not be moved")
             continue
 
         # resolve the redirect and get a key to the file
         redirect_name = urlparse(redirect_path).path[1:]
         redirect_key = bucket.get_key(redirect_name)
         if not redirect_key:
-            print("Invalid redirect for %s. The file will not be moved" % redirect_path)
+            print(f"Invalid redirect for {redirect_path}. The file will not be moved")
             continue
 
         # copy the file to the new location
-        print("Copying %s to %s" % (redirect_key.name, new_key))
+        print(f"Copying {redirect_key.name} to {new_key}")
         bucket.copy_key(new_key, bucket_name, redirect_key.name)
 
         # update the redirect
-        new_redirect = "http://%s/%s" % (bucket_name, new_key)
+        new_redirect = f"http://{bucket_name}/{new_key}"
         key.set_redirect(new_redirect)

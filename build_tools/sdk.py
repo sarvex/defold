@@ -22,6 +22,7 @@ The order of priority is:
 * Local packages on the host machine
 """
 
+
 import os
 import sys
 import log
@@ -53,8 +54,10 @@ VERSION_MACOSX_MIN="10.13"
 SWIFT_VERSION="5.5"
 
 VERSION_LINUX_CLANG="13.0.0"
-PACKAGES_LINUX_CLANG="clang-%s" % VERSION_LINUX_CLANG
-PACKAGES_LINUX_TOOLCHAIN="clang+llvm-%s-x86_64-linux-gnu-ubuntu-16.04" % VERSION_LINUX_CLANG
+PACKAGES_LINUX_CLANG = f"clang-{VERSION_LINUX_CLANG}"
+PACKAGES_LINUX_TOOLCHAIN = (
+    f"clang+llvm-{VERSION_LINUX_CLANG}-x86_64-linux-gnu-ubuntu-16.04"
+)
 
 ## **********************************************************************************************
 # Android
@@ -73,10 +76,10 @@ PACKAGES_WIN32_SDK_10="WindowsKits-{0}".format(VERSION_WINDOWS_SDK_10)
 ## **********************************************************************************************
 ## used by build.py
 
-PACKAGES_IOS_SDK="iPhoneOS%s.sdk" % VERSION_IPHONEOS
-PACKAGES_IOS_SIMULATOR_SDK="iPhoneSimulator%s.sdk" % VERSION_IPHONESIMULATOR
-PACKAGES_MACOS_SDK="MacOSX%s.sdk" % VERSION_MACOSX
-PACKAGES_XCODE_TOOLCHAIN="XcodeDefault%s.xctoolchain" % VERSION_XCODE
+PACKAGES_IOS_SDK = f"iPhoneOS{VERSION_IPHONEOS}.sdk"
+PACKAGES_IOS_SIMULATOR_SDK = f"iPhoneSimulator{VERSION_IPHONESIMULATOR}.sdk"
+PACKAGES_MACOS_SDK = f"MacOSX{VERSION_MACOSX}.sdk"
+PACKAGES_XCODE_TOOLCHAIN = f"XcodeDefault{VERSION_XCODE}.xctoolchain"
 
 ## **********************************************************************************************
 
@@ -96,15 +99,15 @@ defold_info['arm64-macos']['version'] = VERSION_MACOSX
 defold_info['arm64-macos']['pattern'] = PACKAGES_MACOS_SDK
 
 defold_info['x86_64-win32']['version'] = VERSION_WINDOWS_SDK_10
-defold_info['x86_64-win32']['pattern'] = "Win32/%s" % PACKAGES_WIN32_TOOLCHAIN
+defold_info['x86_64-win32']['pattern'] = f"Win32/{PACKAGES_WIN32_TOOLCHAIN}"
 defold_info['win32']['version'] = defold_info['x86_64-win32']['version']
 defold_info['win32']['pattern'] = defold_info['x86_64-win32']['pattern']
 
 defold_info['win10sdk']['version'] = VERSION_WINDOWS_SDK_10
-defold_info['win10sdk']['pattern'] = "Win32/%s" % PACKAGES_WIN32_SDK_10
+defold_info['win10sdk']['pattern'] = f"Win32/{PACKAGES_WIN32_SDK_10}"
 
 defold_info['x86_64-linux']['version'] = VERSION_LINUX_CLANG
-defold_info['x86_64-linux']['pattern'] = 'linux/clang-%s' % VERSION_LINUX_CLANG
+defold_info['x86_64-linux']['pattern'] = f'linux/clang-{VERSION_LINUX_CLANG}'
 
 ## **********************************************************************************************
 ## DARWIN
@@ -115,16 +118,14 @@ def _convert_darwin_platform(platform):
         return 'macosx'
     if platform in ('arm64-ios',):
         return 'iphoneos'
-    if platform in ('x86_64-ios',):
-        return 'iphonesimulator'
-    return 'unknown'
+    return 'iphonesimulator' if platform in ('x86_64-ios',) else 'unknown'
 
 def _get_xcode_local_path():
     return run.shell_command('xcode-select -print-path')
 
 # "xcode-select -print-path" will give you "/Applications/Xcode.app/Contents/Developer"
 def get_local_darwin_toolchain_path():
-    default_path = '%s/Toolchains/XcodeDefault.xctoolchain' % _get_xcode_local_path()
+    default_path = f'{_get_xcode_local_path()}/Toolchains/XcodeDefault.xctoolchain'
     if os.path.exists(default_path):
         return default_path
     return '/Library/Developer/CommandLineTools'
@@ -136,22 +137,24 @@ def get_local_darwin_toolchain_version():
     # Build version 14C18
     xcode_version_full = run.shell_command('/usr/bin/xcodebuild -version')
     xcode_version_lines = xcode_version_full.split("\n")
-    xcode_version = xcode_version_lines[0].split()[1].strip()
-    return xcode_version
+    return xcode_version_lines[0].split()[1].strip()
 
 def get_local_darwin_clang_version():
     # Apple clang version 14.0.0 (clang-1400.0.29.202)
     # Target: x86_64-apple-darwin22.3.0
     version_full = run.shell_command('clang --version')
     version_lines = version_full.split("\n")
-    version = version_lines[0].split()[3].strip()
-    return version
+    return version_lines[0].split()[3].strip()
 
 def get_local_darwin_sdk_path(platform):
-    return run.shell_command('xcrun -f --sdk %s --show-sdk-path' % _convert_darwin_platform(platform)).strip()
+    return run.shell_command(
+        f'xcrun -f --sdk {_convert_darwin_platform(platform)} --show-sdk-path'
+    ).strip()
 
 def get_local_darwin_sdk_version(platform):
-    return run.shell_command('xcrun -f --sdk %s --show-sdk-platform-version' % _convert_darwin_platform(platform)).strip()
+    return run.shell_command(
+        f'xcrun -f --sdk {_convert_darwin_platform(platform)} --show-sdk-platform-version'
+    ).strip()
 
 
 ## **********************************************************************************************
@@ -172,7 +175,7 @@ def is_wsl():
 
     """ Checks if we're running on native Linux on in WSL """
     _is_wsl = False
-    if 'Linux' == platform.system():
+    if platform.system() == 'Linux':
         with open("/proc/version") as f:
             data = f.read()
             _is_wsl = "Microsoft" in data
@@ -183,16 +186,14 @@ def get_local_compiler_from_bash():
     if path != None:
         return "clang++"
     path = run.shell_command('which g++')
-    if path != None:
-        return "g++"
-    return None
+    return "g++" if path != None else None
 
 def get_local_compiler_path():
     tool = get_local_compiler_from_bash()
     if tool is None:
         return None
 
-    path = run.shell_command('which %s' % tool)
+    path = run.shell_command(f'which {tool}')
     substr = '/bin'
     if substr in path:
         i = path.find(substr)
@@ -204,7 +205,7 @@ def get_local_compiler_version():
     tool = get_local_compiler_from_bash()
     if tool is None:
         return None
-    return run.shell_command('%s -dumpversion' % tool).strip()
+    return run.shell_command(f'{tool} -dumpversion').strip()
 
 
 ## **********************************************************************************************
@@ -219,21 +220,21 @@ def get_windows_local_sdk_info(platform):
     if windows_info is not None:
         return windows_info
 
-    vswhere_path = '%s/../../scripts/windows/vswhere2/vswhere2.exe' % os.environ['DYNAMO_HOME']
+    vswhere_path = f"{os.environ['DYNAMO_HOME']}/../../scripts/windows/vswhere2/vswhere2.exe"
     if not os.path.exists(vswhere_path):
         vswhere_path = './scripts/windows/vswhere2/vswhere2.exe'
         vswhere_path = path.normpath(vswhere_path)
         if not os.path.exists(vswhere_path):
-            print ("Couldn't find executable '%s'" % vswhere_path)
+            print(f"Couldn't find executable '{vswhere_path}'")
             return None
 
-    sdk_root = run.shell_command('%s --sdk_root' % vswhere_path).strip()
-    sdk_version = run.shell_command('%s --sdk_version' % vswhere_path).strip()
-    includes = run.shell_command('%s --includes' % vswhere_path).strip()
-    lib_paths = run.shell_command('%s --lib_paths' % vswhere_path).strip()
-    bin_paths = run.shell_command('%s --bin_paths' % vswhere_path).strip()
-    vs_root = run.shell_command('%s --vs_root' % vswhere_path).strip()
-    vs_version = run.shell_command('%s --vs_version' % vswhere_path).strip()
+    sdk_root = run.shell_command(f'{vswhere_path} --sdk_root').strip()
+    sdk_version = run.shell_command(f'{vswhere_path} --sdk_version').strip()
+    includes = run.shell_command(f'{vswhere_path} --includes').strip()
+    lib_paths = run.shell_command(f'{vswhere_path} --lib_paths').strip()
+    bin_paths = run.shell_command(f'{vswhere_path} --bin_paths').strip()
+    vs_root = run.shell_command(f'{vswhere_path} --vs_root').strip()
+    vs_version = run.shell_command(f'{vswhere_path} --vs_version').strip()
 
     if platform == 'win32':
         arch64 = 'x64'
@@ -241,14 +242,15 @@ def get_windows_local_sdk_info(platform):
         bin_paths = bin_paths.replace(arch64, arch32)
         lib_paths = lib_paths.replace(arch64, arch32)
 
-    info = {}
-    info['sdk_root'] = sdk_root
-    info['sdk_version'] = sdk_version
-    info['includes'] = includes
-    info['lib_paths'] = lib_paths
-    info['bin_paths'] = bin_paths
-    info['vs_root'] = vs_root
-    info['vs_version'] = vs_version
+    info = {
+        'sdk_root': sdk_root,
+        'sdk_version': sdk_version,
+        'includes': includes,
+        'lib_paths': lib_paths,
+        'bin_paths': bin_paths,
+        'vs_root': vs_root,
+        'vs_version': vs_version,
+    }
     windows_info = info
     return windows_info
 
@@ -261,27 +263,32 @@ def get_windows_packaged_sdk_info(sdkdir, platform):
     msvcdir = os.path.join(sdkdir, 'Win32', 'MicrosoftVisualStudio14.0')
     windowskitsdir = os.path.join(sdkdir, 'Win32', 'WindowsKits')
 
-    arch = 'x64'
-    if platform == 'win32':
-        arch = 'x86'
-
+    arch = 'x86' if platform == 'win32' else 'x64'
     # Since the programs(Windows!) can update, we do this dynamically to find the correct version
-    ucrt_dirs = [ x for x in os.listdir(os.path.join(windowskitsdir,'10','Include'))]
+    ucrt_dirs = list(os.listdir(os.path.join(windowskitsdir,'10','Include')))
     ucrt_dirs = [ x for x in ucrt_dirs if x.startswith('10.0')]
     ucrt_dirs.sort(key=lambda x: int((x.split('.'))[2]))
     ucrt_version = ucrt_dirs[-1]
     if not ucrt_version.startswith('10.0'):
-        conf.fatal("Unable to determine ucrt version: '%s'" % ucrt_version)
+        conf.fatal(f"Unable to determine ucrt version: '{ucrt_version}'")
 
-    msvc_version = [x for x in os.listdir(os.path.join(msvcdir,'VC','Tools','MSVC'))]
+    msvc_version = list(os.listdir(os.path.join(msvcdir,'VC','Tools','MSVC')))
     msvc_version = [x for x in msvc_version if x.startswith('14.')]
     msvc_version.sort(key=lambda x: map(int, x.split('.')))
     msvc_version = msvc_version[-1]
     if not msvc_version.startswith('14.'):
-        conf.fatal("Unable to determine msvc version: '%s'" % msvc_version)
+        conf.fatal(f"Unable to determine msvc version: '{msvc_version}'")
 
-    msvc_path = (os.path.join(msvcdir,'VC', 'Tools', 'MSVC', msvc_version, 'bin', 'Host'+arch, arch),
-                os.path.join(windowskitsdir,'10','bin',ucrt_version,arch))
+    msvc_path = os.path.join(
+        msvcdir,
+        'VC',
+        'Tools',
+        'MSVC',
+        msvc_version,
+        'bin',
+        f'Host{arch}',
+        arch,
+    ), os.path.join(windowskitsdir, '10', 'bin', ucrt_version, arch)
 
     includes = [os.path.join(msvcdir,'VC','Tools','MSVC',msvc_version,'include'),
                 os.path.join(msvcdir,'VC','Tools','MSVC',msvc_version,'atlmfc','include'),
@@ -294,9 +301,8 @@ def get_windows_packaged_sdk_info(sdkdir, platform):
                 os.path.join(msvcdir,'VC','Tools','MSVC',msvc_version,'atlmfc','lib',arch),
                 os.path.join(windowskitsdir,'10','Lib',ucrt_version,'ucrt',arch),
                 os.path.join(windowskitsdir,'10','Lib',ucrt_version,'um',arch)]
-    
-    info = {}
-    info['sdk_root'] = os.path.join(windowskitsdir,'10')
+
+    info = {'sdk_root': os.path.join(windowskitsdir, '10')}
     info['sdk_version'] = ucrt_version
     info['includes'] = ','.join(includes)
     info['lib_paths'] = ','.join(libdirs)
@@ -308,11 +314,10 @@ def get_windows_packaged_sdk_info(sdkdir, platform):
 
 def _setup_info_from_windowsinfo(windowsinfo, platform):
 
-    info = {} 
-    info[platform] = {}
+    info = {platform: {}}
     info[platform]['version'] = windowsinfo['sdk_version']
     info[platform]['path'] = windowsinfo['sdk_root']
-    
+
     info['msvc'] = {}
     info['msvc']['version'] = windowsinfo['vs_version']
     info['msvc']['path'] = windowsinfo['vs_root']
@@ -342,28 +347,39 @@ def check_defold_sdk(sdkfolder, platform):
     print ("check_defold_sdk", sdkfolder, platform)
 
     if platform in ('x86_64-macos', 'arm64-macos', 'arm64-ios', 'x86_64-ios'):
-        folders.append(_get_defold_path(sdkfolder, 'xcode'))
-        folders.append(_get_defold_path(sdkfolder, platform))
-
+        folders.extend(
+            (
+                _get_defold_path(sdkfolder, 'xcode'),
+                _get_defold_path(sdkfolder, platform),
+            )
+        )
     if platform in ('x86_64-win32', 'win32'):
-        folders.append(os.path.join(sdkfolder, 'Win32','WindowsKits','10'))
-        folders.append(os.path.join(sdkfolder, 'Win32','MicrosoftVisualStudio14.0','VC'))
-
+        folders.extend(
+            (
+                os.path.join(sdkfolder, 'Win32', 'WindowsKits', '10'),
+                os.path.join(
+                    sdkfolder, 'Win32', 'MicrosoftVisualStudio14.0', 'VC'
+                ),
+            )
+        )
     if platform in ('armv7-android', 'arm64-android'):
-        folders.append(os.path.join(sdkfolder, "android-ndk-r%s" % ANDROID_NDK_VERSION))
-        folders.append(os.path.join(sdkfolder, "android-sdk"))
-
+        folders.extend(
+            (
+                os.path.join(sdkfolder, f"android-ndk-r{ANDROID_NDK_VERSION}"),
+                os.path.join(sdkfolder, "android-sdk"),
+            )
+        )
     if platform in ('x86_64-linux',):
         folders.append(os.path.join(sdkfolder, "linux"))
 
     if not folders:
-        log.log("No SDK folders specified for %s" %platform)
+        log.log(f"No SDK folders specified for {platform}")
         return False
 
     count = 0
     for f in folders:
         if not os.path.exists(f):
-            log.log("Missing SDK in %s" % f)
+            log.log(f"Missing SDK in {f}")
         else:
             count = count + 1
     return count == len(folders)
@@ -383,21 +399,22 @@ def check_local_sdk(platform):
 def _get_defold_sdk_info(sdkfolder, platform):
     info = {}
     if platform in ('x86_64-macos', 'arm64-macos','x86_64-ios','arm64-ios'):
-        info['xcode'] = {}
-        info['xcode']['version'] = VERSION_XCODE
-        info['xcode']['path'] = _get_defold_path(sdkfolder, 'xcode')
+        info['xcode'] = {
+            'version': VERSION_XCODE,
+            'path': _get_defold_path(sdkfolder, 'xcode'),
+        }
         info['xcode-clang'] = defold_info['xcode-clang']['version']
         info['asan'] = {}
         info['asan']['path'] = os.path.join(info['xcode']['path'], MACOS_ASAN_PATH%info['xcode-clang'])
         info[platform] = {}
         info[platform]['version'] = defold_info[platform]['version']
         info[platform]['path'] = _get_defold_path(sdkfolder, platform) # what we use for sysroot
-    
-    elif platform in ('x86_64-linux',):
-        info[platform] = {}
-        info[platform]['version'] = defold_info[platform]['version']
-        info[platform]['path'] = _get_defold_path(sdkfolder, platform)
 
+    elif platform in ('x86_64-linux',):
+        info[platform] = {
+            'version': defold_info[platform]['version'],
+            'path': _get_defold_path(sdkfolder, platform),
+        }
     if platform in ('win32', 'x86_64-win32'):
         windowsinfo = get_windows_packaged_sdk_info(sdkfolder, platform)
         return _setup_info_from_windowsinfo(windowsinfo, platform)
@@ -407,8 +424,7 @@ def _get_defold_sdk_info(sdkfolder, platform):
 def _get_local_sdk_info(platform):
     info = {}
     if platform in ('x86_64-macos', 'arm64-macos','x86_64-ios','arm64-ios'):
-        info['xcode'] = {}
-        info['xcode']['version'] = get_local_darwin_toolchain_version()
+        info['xcode'] = {'version': get_local_darwin_toolchain_version()}
         info['xcode']['path'] = get_local_darwin_toolchain_path()
         info['xcode-clang'] = get_local_darwin_clang_version()
         info['asan'] = {}
@@ -418,11 +434,10 @@ def _get_local_sdk_info(platform):
         info[platform]['path'] = get_local_darwin_sdk_path(platform) # what we use for sysroot
 
         if not os.path.exists(info['asan']['path']):
-            print("sdk.py: Couldn't find '%s'" % info['asan']['path'], file=sys.stderr)
+            print(f"sdk.py: Couldn't find '{info['asan']['path']}'", file=sys.stderr)
 
     elif platform in ('x86_64-linux',):
-        info[platform] = {}
-        info[platform]['version'] = get_local_compiler_version()
+        info[platform] = {'version': get_local_compiler_version()}
         info[platform]['path'] = get_local_compiler_path()
 
     if platform in ('win32', 'x86_64-win32'):
@@ -463,14 +478,14 @@ def get_host_platform():
         machine = 'x86_64'
     is64bit = machine.endswith('64')
 
-    if sys.platform == 'linux':
-        return '%s-linux' % machine
-    elif sys.platform == 'win32':
-        return '%s-win32' % machine
-    elif sys.platform == 'darwin':
+    if sys.platform == 'darwin':
         # Force x86_64 on M1 Macs for now.
         if machine == 'arm64':
             machine = 'x86_64'
-        return '%s-macos' % machine
+        return f'{machine}-macos'
 
-    raise Exception("Unknown host platform: %s, %s" % (sys.platform, machine))
+    elif sys.platform == 'linux':
+        return f'{machine}-linux'
+    elif sys.platform == 'win32':
+        return f'{machine}-win32'
+    raise Exception(f"Unknown host platform: {sys.platform}, {machine}")

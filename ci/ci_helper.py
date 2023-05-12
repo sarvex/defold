@@ -73,15 +73,12 @@ def is_platform_supported_by_repo(args):
         return True # probably a local build
 
     platforms = repo_name_to_platforms(repository)
-    if platforms is not None and platform in platforms:
-        return True
-
-    return False
+    return platforms is not None and platform in platforms
 
 def print_values(values):
     with sys.stdout as f:
         for i, value in enumerate(values):
-            f.write("%s" % value)
+            f.write(f"{value}")
             if i < len(values)-1:
                 f.write(" ")
 
